@@ -1,0 +1,840 @@
+package client
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+)
+
+type Config struct {
+	// Direct access token (legacy)
+	APIToken string
+	// Refresh token for automatic token management
+	RefreshToken string
+	// Organization slug
+	Org string
+	// API base URL
+	BaseURL string
+}
+
+type AccessToken struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	ExpiresAt    int64     `json:"expires_at"`
+	IssuedAt     int64     `json:"issued_at"`
+	Type         string    `json:"type"`
+	Scopes       []string  `json:"scopes"`
+	expiresAt    time.Time // Cached parsed time
+}
+
+type Client struct {
+	config     *Config
+	httpClient *http.Client
+	// Token management
+	tokenMutex  sync.RWMutex
+	accessToken *AccessToken
+}
+
+func NewClient(config *Config) (*Client, error) {
+	client := &Client{
+		config: config,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+
+	// If refresh token is provided, fetch initial access token
+	if config.RefreshToken != "" {
+		token, err := client.refreshAccessToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get initial access token: %w", err)
+		}
+		client.accessToken = token
+	} else if config.APIToken != "" {
+		// Use direct access token (legacy mode)
+		client.accessToken = &AccessToken{
+			AccessToken: config.APIToken,
+			expiresAt:   time.Now().Add(24 * time.Hour), // Assume valid for 24h
+		}
+	} else {
+		return nil, fmt.Errorf("either api_token or refresh_token must be provided")
+	}
+
+	return client, nil
+}
+
+func (c *Client) getAccessToken() (string, error) {
+	c.tokenMutex.RLock()
+	token := c.accessToken
+	c.tokenMutex.RUnlock()
+
+	// Check if token is expired or will expire soon (within 5 minutes)
+	if token != nil && time.Now().Before(token.expiresAt.Add(-5*time.Minute)) {
+		return token.AccessToken, nil
+	}
+
+	// Token expired or missing, refresh it
+	if c.config.RefreshToken != "" {
+		c.tokenMutex.Lock()
+		defer c.tokenMutex.Unlock()
+
+		// Double-check after acquiring lock
+		if c.accessToken != nil && time.Now().Before(c.accessToken.expiresAt.Add(-5*time.Minute)) {
+			return c.accessToken.AccessToken, nil
+		}
+
+		newToken, err := c.refreshAccessToken()
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh access token: %w", err)
+		}
+		c.accessToken = newToken
+		return newToken.AccessToken, nil
+	}
+
+	// Fallback to direct API token
+	if c.config.APIToken != "" {
+		return c.config.APIToken, nil
+	}
+
+	return "", fmt.Errorf("no valid authentication token available")
+}
+
+func (c *Client) refreshAccessToken() (*AccessToken, error) {
+	reqBody := struct {
+		RefreshToken string `json:"refresh_token"`
+	}{
+		RefreshToken: c.config.RefreshToken,
+	}
+
+	reqURL := fmt.Sprintf("%s/organizations/%s/oauth/access_token", c.config.BaseURL, c.config.Org)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
+	var token AccessToken
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Parse expires_at
+	token.expiresAt = time.Unix(token.ExpiresAt, 0)
+
+	return &token, nil
+}
+
+func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
+	// Get valid access token
+	accessToken, err := c.getAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	var reqBody io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = bytes.NewBuffer(jsonBody)
+	}
+
+	reqURL := fmt.Sprintf("%s/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+	req, err := http.NewRequest(method, reqURL, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Use X-LAST9-API-TOKEN header as per Last9 API spec
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", accessToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
+	return resp, nil
+}
+
+func (c *Client) Get(path string, result interface{}) error {
+	resp, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+func (c *Client) Post(path string, body interface{}, result interface{}) error {
+	resp, err := c.doRequest("POST", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+func (c *Client) Put(path string, body interface{}, result interface{}) error {
+	resp, err := c.doRequest("PUT", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+func (c *Client) Patch(path string, body interface{}, result interface{}) error {
+	resp, err := c.doRequest("PATCH", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+func (c *Client) Delete(path string) error {
+	resp, err := c.doRequest("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+// Dashboard methods
+func (c *Client) GetDashboard(id string) (*Dashboard, error) {
+	var dashboard Dashboard
+	err := c.Get(fmt.Sprintf("/dashboards/%s", id), &dashboard)
+	return &dashboard, err
+}
+
+func (c *Client) CreateDashboard(dashboard *DashboardCreateRequest) (*Dashboard, error) {
+	var result Dashboard
+	err := c.Post("/dashboards", dashboard, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateDashboard(id string, dashboard *DashboardUpdateRequest) (*Dashboard, error) {
+	var result Dashboard
+	err := c.Put(fmt.Sprintf("/dashboards/%s", id), dashboard, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteDashboard(id string) error {
+	return c.Delete(fmt.Sprintf("/dashboards/%s", id))
+}
+
+// Alert methods
+func (c *Client) GetAlert(entityID, alertID string) (*Alert, error) {
+	var alert Alert
+	err := c.Get(fmt.Sprintf("/entities/%s/alert-rules/%s", entityID, alertID), &alert)
+	return &alert, err
+}
+
+func (c *Client) CreateAlert(entityID string, alert *AlertCreateRequest) (*Alert, error) {
+	var result Alert
+	err := c.Post(fmt.Sprintf("/entities/%s/alert-rules", entityID), alert, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateAlert(entityID, alertID string, alert *AlertUpdateRequest) (*Alert, error) {
+	var result Alert
+	err := c.Put(fmt.Sprintf("/entities/%s/alert-rules/%s", entityID, alertID), alert, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteAlert(entityID, alertID string) error {
+	return c.Delete(fmt.Sprintf("/entities/%s/alert-rules/%s", entityID, alertID))
+}
+
+// Macro methods
+func (c *Client) GetMacro(clusterID string) (*Macro, error) {
+	var macro Macro
+	err := c.Get(fmt.Sprintf("/clusters/%s/macros", clusterID), &macro)
+	return &macro, err
+}
+
+func (c *Client) UpsertMacro(clusterID string, macro *MacroUpsertRequest) (*Macro, error) {
+	var result Macro
+	err := c.Post(fmt.Sprintf("/clusters/%s/macros", clusterID), macro, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteMacro(clusterID string) error {
+	return c.Delete(fmt.Sprintf("/clusters/%s/macros", clusterID))
+}
+
+// Policy methods
+func (c *Client) GetPolicy(id string) (*Policy, error) {
+	var policy Policy
+	err := c.Get(fmt.Sprintf("/policies/%s", id), &policy)
+	return &policy, err
+}
+
+func (c *Client) CreatePolicy(policy *PolicyCreateRequest) (*Policy, error) {
+	var result Policy
+	err := c.Post("/policies", policy, &result)
+	return &result, err
+}
+
+func (c *Client) UpdatePolicy(id string, policy *PolicyUpdateRequest) (*Policy, error) {
+	var result Policy
+	err := c.Patch(fmt.Sprintf("/policies/%s", id), policy, &result)
+	return &result, err
+}
+
+func (c *Client) DeletePolicy(id string) error {
+	return c.Delete(fmt.Sprintf("/policies/%s", id))
+}
+
+// Types
+type Dashboard struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Readonly    bool             `json:"readonly"`
+	Panels      []DashboardPanel `json:"panels"`
+	Tags        []string         `json:"tags"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at"`
+}
+
+type DashboardPanel struct {
+	ID            string                 `json:"id,omitempty"`
+	Title         string                 `json:"title"`
+	Query         string                 `json:"query"`
+	Visualization string                 `json:"visualization"`
+	Config        map[string]interface{} `json:"config,omitempty"`
+}
+
+type DashboardCreateRequest struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Readonly    bool             `json:"readonly"`
+	Panels      []DashboardPanel `json:"panels"`
+	Tags        []string         `json:"tags"`
+}
+
+type DashboardUpdateRequest struct {
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Readonly    *bool            `json:"readonly,omitempty"`
+	Panels      []DashboardPanel `json:"panels,omitempty"`
+	Tags        []string         `json:"tags,omitempty"`
+}
+
+type Alert struct {
+	ID                           string          `json:"id"`
+	Name                         string          `json:"rule_name"`
+	Description                  string          `json:"description"`
+	EntityID                     string          `json:"entity_id"`
+	Indicator                    string          `json:"primary_indicator"`
+	Expression                   string          `json:"expression,omitempty"`
+	Condition                    string          `json:"condition,omitempty"`
+	EvalWindow                   int             `json:"eval_window,omitempty"`
+	AlertCondition               string          `json:"alert_condition,omitempty"`
+	Severity                     string          `json:"severity"`
+	MuteUntil                    int             `json:"mute_until"`
+	IsDisabled                   bool            `json:"is_disabled"`
+	Properties                   AlertProperties `json:"properties"`
+	GroupTimeseriesNotifications bool            `json:"group_timeseries_notifications"`
+}
+
+type AlertProperties struct {
+	Description string                 `json:"description"`
+	Runbook     map[string]interface{} `json:"runbook,omitempty"`
+	Annotations map[string]string      `json:"annotations,omitempty"`
+}
+
+type AlertCreateRequest struct {
+	RuleName                     string                 `json:"rule_name"`
+	PrimaryIndicator             string                 `json:"primary_indicator"`
+	Expression                   string                 `json:"expression,omitempty"`
+	Condition                    string                 `json:"condition,omitempty"`
+	EvalWindow                   int                    `json:"eval_window,omitempty"`
+	AlertCondition               string                 `json:"alert_condition,omitempty"`
+	Severity                     string                 `json:"severity"`
+	IsDisabled                   bool                   `json:"is_disabled"`
+	Properties                   AlertProperties        `json:"properties"`
+	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
+	MuteUntil                    int                    `json:"mute_until"`
+	ExpressionArgs               map[string]interface{} `json:"expression_args"`
+}
+
+type AlertUpdateRequest struct {
+	RuleName                     *string                `json:"rule_name,omitempty"`
+	PrimaryIndicator             *string                `json:"primary_indicator,omitempty"`
+	Expression                   *string                `json:"expression,omitempty"`
+	Condition                    *string                `json:"condition,omitempty"`
+	EvalWindow                   *int                   `json:"eval_window,omitempty"`
+	AlertCondition               *string                `json:"alert_condition,omitempty"`
+	Severity                     *string                `json:"severity,omitempty"`
+	IsDisabled                   *bool                  `json:"is_disabled,omitempty"`
+	Properties                   *AlertProperties       `json:"properties,omitempty"`
+	GroupTimeseriesNotifications *bool                  `json:"group_timeseries_notifications,omitempty"`
+	MuteUntil                    *int                   `json:"mute_until,omitempty"`
+	ExpressionArgs               map[string]interface{} `json:"expression_args,omitempty"`
+}
+
+type Macro struct {
+	ID        string `json:"id"`
+	ClusterID string `json:"cluster_id"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type MacroUpsertRequest struct {
+	Body string `json:"body"`
+}
+
+type Policy struct {
+	ID                   string                 `json:"id"`
+	Name                 string                 `json:"name"`
+	Description          string                 `json:"description"`
+	Rules                []PolicyRule           `json:"rules"`
+	Filters              map[string]interface{} `json:"filters"`
+	EntityCount          int                    `json:"entity_count"`
+	EntityCompliantCount int                    `json:"entity_compliant_count"`
+}
+
+type PolicyRule struct {
+	Type   string                 `json:"type"`
+	Config map[string]interface{} `json:"config"`
+}
+
+type PolicyCreateRequest struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Rules       []PolicyRule           `json:"rules"`
+	Filters     map[string]interface{} `json:"filters,omitempty"`
+}
+
+type PolicyUpdateRequest struct {
+	Name        *string                `json:"name,omitempty"`
+	Description *string                `json:"description,omitempty"`
+	Rules       []PolicyRule           `json:"rules,omitempty"`
+	Filters     map[string]interface{} `json:"filters,omitempty"`
+}
+
+// Control Plane methods
+func (c *Client) GetDropRules(region string) (*DropRulesResponse, error) {
+	var result DropRulesResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/routing?region=%s", region), &result)
+	return &result, err
+}
+
+func (c *Client) UpsertDropRule(region string, rule *DropRule) (*DropRulesResponse, error) {
+	var result DropRulesResponse
+	err := c.Put(fmt.Sprintf("/logs_settings/routing?region=%s", region), rule, &result)
+	return &result, err
+}
+
+func (c *Client) CreateDropRules(region string, rules *DropRulesRequest) (*DropRulesResponse, error) {
+	var result DropRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/routing?region=%s", region), rules, &result)
+	return &result, err
+}
+
+func (c *Client) GetForwardRules(region string) (*ForwardRulesResponse, error) {
+	var result ForwardRulesResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/forward?region=%s", region), &result)
+	return &result, err
+}
+
+func (c *Client) UpsertForwardRules(region string, rules *ForwardRulesRequest) (*ForwardRulesResponse, error) {
+	var result ForwardRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/forward?region=%s", region), rules, &result)
+	return &result, err
+}
+
+func (c *Client) GetRehydration(region string) (*RehydrationResponse, error) {
+	var result RehydrationResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/rehydration?region=%s", region), &result)
+	return &result, err
+}
+
+func (c *Client) UpsertRehydration(region string, rehydration *RehydrationRequest) (*RehydrationResponse, error) {
+	var result RehydrationResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/rehydration?region=%s", region), rehydration, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateRehydrationStatus(region string, status *RehydrationStatusRequest) error {
+	return c.Put(fmt.Sprintf("/logs_settings/rehydration/status?region=%s", region), status, nil)
+}
+
+func (c *Client) GetPartitionConfigs(region string) (*PartitionConfigResponse, error) {
+	var result PartitionConfigResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/physical_indexes?region=%s", region), &result)
+	return &result, err
+}
+
+func (c *Client) UpsertPartitionConfigs(region string, configs *PartitionConfigRequest) (*PartitionConfigResponse, error) {
+	var result PartitionConfigResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/physical_indexes?region=%s", region), configs, &result)
+	return &result, err
+}
+
+// Control Plane Types
+type DropRule struct {
+	Name      string          `json:"name"`
+	Telemetry string          `json:"telemetry"`
+	Filters   []RoutingFilter `json:"filters"`
+	Action    RoutingAction   `json:"action"`
+}
+
+type RoutingFilter struct {
+	Key         string  `json:"key"`
+	Value       string  `json:"value"`
+	Operator    string  `json:"operator"`
+	Conjunction *string `json:"conjunction,omitempty"`
+}
+
+type RoutingAction struct {
+	Name        string            `json:"name"`
+	Destination string            `json:"destination"`
+	Properties  map[string]string `json:"properties"`
+}
+
+type DropRulesRequest struct {
+	Properties []DropRule `json:"properties"`
+}
+
+type DropRulesResponse struct {
+	ID         string     `json:"id"`
+	Region     string     `json:"region"`
+	Properties []DropRule `json:"properties"`
+	CreatedAt  int64      `json:"created_at"`
+	UpdatedAt  int64      `json:"updated_at"`
+}
+
+type ForwardRule struct {
+	Name        string          `json:"name"`
+	Telemetry   string          `json:"telemetry"`
+	Filters     []RoutingFilter `json:"filters"`
+	Destination string          `json:"destination"`
+}
+
+type ForwardRulesRequest struct {
+	Properties []ForwardRule `json:"properties"`
+}
+
+type ForwardRulesResponse struct {
+	ID         string        `json:"id"`
+	Region     string        `json:"region"`
+	Properties []ForwardRule `json:"properties"`
+	CreatedAt  int64         `json:"created_at"`
+	UpdatedAt  int64         `json:"updated_at"`
+}
+
+type RehydrationBlock struct {
+	ID                    string          `json:"id"`
+	BlockName             string          `json:"block_name"`
+	BucketName            *string         `json:"bucket_name,omitempty"`
+	PhysicalIndex         string          `json:"physical_index"`
+	Telemetry             string          `json:"telemetry"`
+	Filters               []RoutingFilter `json:"filters"`
+	NotificationChannelID *int64          `json:"notification_channel_id,omitempty"`
+	From                  int64           `json:"from"`
+	To                    int64           `json:"to"`
+	Status                string          `json:"status"`
+	Message               string          `json:"message"`
+	Granularity           string          `json:"granularity"`
+	Targets               []string        `json:"targets"`
+}
+
+type RehydrationRequest struct {
+	Properties []RehydrationBlock `json:"properties"`
+}
+
+type RehydrationResponse struct {
+	ID         string             `json:"id"`
+	Region     string             `json:"region"`
+	Properties []RehydrationBlock `json:"properties"`
+	CreatedAt  int64              `json:"created_at"`
+	UpdatedAt  int64              `json:"updated_at"`
+}
+
+type RehydrationStatusRequest struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Region    string `json:"region"`
+	BlockName string `json:"block_name"`
+	Message   string `json:"message"`
+}
+
+type PartitionConfig struct {
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Telemetry       string          `json:"telemetry"`
+	Filters         []RoutingFilter `json:"filters"`
+	Destination     string          `json:"destination"`
+	BucketName      *string         `json:"bucket_name,omitempty"`
+	RetentionPeriod *int            `json:"retention_period,omitempty"`
+	Retain          bool            `json:"retain"`
+	Status          string          `json:"status"`
+}
+
+type PartitionConfigRequest struct {
+	Properties []PartitionConfig `json:"properties"`
+}
+
+type PartitionConfigResponse struct {
+	ID         string            `json:"id"`
+	Region     string            `json:"region"`
+	Properties []PartitionConfig `json:"properties"`
+	CreatedAt  int64             `json:"created_at"`
+	UpdatedAt  int64             `json:"updated_at"`
+}
+
+// Notification Destination Types
+type NotificationDestination struct {
+	ID             int                    `json:"id"`
+	OrganizationID string                 `json:"organization_id"`
+	Name           string                 `json:"name"`
+	Destination    string                 `json:"destination"`
+	Namespace      string                 `json:"namespace"`
+	Service        string                 `json:"service"`
+	Type           string                 `json:"type"` // email, slack, pagerduty, webhook, etc.
+	SnoozeUntil    int64                  `json:"snooze_until"`
+	Global         bool                   `json:"global"`
+	Priority       int                    `json:"priority"`
+	Property       map[string]interface{} `json:"property"`
+	InUse          bool                   `json:"in_use"`
+	Usage          map[string]int         `json:"usage"`
+	ServiceFqid    string                 `json:"service_fqid"`
+	Severity       string                 `json:"severity"`
+	CreatedAt      string                 `json:"created_at"`
+	UpdatedAt      string                 `json:"updated_at"`
+	Services       []string               `json:"services"`
+	SendResolved   bool                   `json:"send_resolved"`
+}
+
+type NotificationDestinationsResponse struct {
+	NotificationDestinations []NotificationDestination `json:"notification_destinations"`
+}
+
+// Scheduled Search Alert Types
+type ScheduledSearchAlert struct {
+	RuleName      string                    `json:"rule_name"`
+	QueryType     string                    `json:"query_type"`
+	PhysicalIndex string                    `json:"physical_index"`
+	RuleType      string                    `json:"rule_type"`
+	Properties    ScheduledSearchProperties `json:"properties"`
+}
+
+type ScheduledSearchProperties struct {
+	Telemetry         string                    `json:"telemetry"`
+	Query             string                    `json:"query"` // JSON encoded pipeline
+	SavedSearchID     string                    `json:"saved_search_id,omitempty"`
+	PostProcessor     []PostProcessor           `json:"post_processor"`
+	ResultantQuery    string                    `json:"resultant_query,omitempty"` // Computed by server
+	SearchFrequency   int                       `json:"search_frequency"`
+	AlertDestinations []NotificationDestination `json:"alert_destinations"`
+	MetricName        string                    `json:"metric_name,omitempty"`
+	Threshold         Threshold                 `json:"threshold"`
+}
+
+type PostProcessor struct {
+	Type       string                 `json:"type"`
+	Aggregates []Aggregate            `json:"aggregates"`
+	Groupby    map[string]interface{} `json:"groupby"`
+}
+
+type Aggregate struct {
+	Function map[string]interface{} `json:"function"`
+	As       string                 `json:"as"`
+}
+
+type Threshold struct {
+	Value    float64 `json:"value"`
+	Operator string  `json:"operator"` // >, <, >=, <=, ==, !=
+}
+
+type ScheduledSearchRequest struct {
+	Properties []ScheduledSearchAlert `json:"properties"`
+}
+
+type ScheduledSearchResponse struct {
+	ID         string                 `json:"id"`
+	Region     string                 `json:"region"`
+	Properties []ScheduledSearchAlert `json:"properties"`
+	CreatedAt  int64                  `json:"created_at"`
+	UpdatedAt  int64                  `json:"updated_at"`
+}
+
+// Notification Destination methods
+func (c *Client) ListNotificationDestinations() (*NotificationDestinationsResponse, error) {
+	var result NotificationDestinationsResponse
+	err := c.Get("/notification_settings", &result)
+	return &result, err
+}
+
+func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, error) {
+	result, err := c.ListNotificationDestinations()
+	if err != nil {
+		return nil, err
+	}
+
+	// Find destination by ID
+	for _, dest := range result.NotificationDestinations {
+		if dest.ID == id {
+			return &dest, nil
+		}
+	}
+
+	return nil, fmt.Errorf("notification destination with ID %d not found", id)
+}
+
+// Scheduled Search methods
+func (c *Client) GetScheduledSearchAlerts(region string) (*ScheduledSearchResponse, error) {
+	var result ScheduledSearchResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), &result)
+	return &result, err
+}
+
+func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
+	// Get existing alerts
+	// Note: This API uses array-based CRUD which has inherent race conditions.
+	// Terraform's state locking provides some protection, but concurrent operations
+	// outside Terraform could still cause data loss. This is an API limitation.
+	existing, err := c.GetScheduledSearchAlerts(region)
+	if err != nil {
+		// Only treat 404 as empty list, return other errors
+		if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
+			return nil, fmt.Errorf("failed to get existing alerts: %w", err)
+		}
+		existing = &ScheduledSearchResponse{Properties: []ScheduledSearchAlert{}}
+	}
+
+	// Check for duplicate name
+	for _, existingAlert := range existing.Properties {
+		if existingAlert.RuleName == alert.RuleName {
+			return nil, fmt.Errorf("scheduled search alert with name '%s' already exists in region %s", alert.RuleName, region)
+		}
+	}
+
+	// Append new alert
+	req := &ScheduledSearchRequest{
+		Properties: append(existing.Properties, *alert),
+	}
+
+	var result ScheduledSearchResponse
+	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateScheduledSearchAlert(region, oldName string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
+	// Get existing alerts
+	existing, err := c.GetScheduledSearchAlerts(region)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find and replace the alert with matching rule_name
+	// Use oldName to find the existing alert (in case name is being changed)
+	found := false
+	for i, existingAlert := range existing.Properties {
+		if existingAlert.RuleName == oldName {
+			existing.Properties[i] = *alert
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("scheduled search alert '%s' not found", oldName)
+	}
+
+	// If name is changing, check for duplicate new name
+	if oldName != alert.RuleName {
+		for _, existingAlert := range existing.Properties {
+			if existingAlert.RuleName == alert.RuleName {
+				return nil, fmt.Errorf("cannot rename: scheduled search alert with name '%s' already exists", alert.RuleName)
+			}
+		}
+	}
+
+	req := &ScheduledSearchRequest{
+		Properties: existing.Properties,
+	}
+
+	var result ScheduledSearchResponse
+	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteScheduledSearchAlert(region, ruleName string) error {
+	// Get existing alerts
+	existing, err := c.GetScheduledSearchAlerts(region)
+	if err != nil {
+		return err
+	}
+
+	// Filter out the alert to delete
+	originalLen := len(existing.Properties)
+	filtered := []ScheduledSearchAlert{}
+	for _, alert := range existing.Properties {
+		if alert.RuleName != ruleName {
+			filtered = append(filtered, alert)
+		}
+	}
+
+	// Verify alert was found
+	if len(filtered) == originalLen {
+		return fmt.Errorf("scheduled search alert '%s' not found in region %s", ruleName, region)
+	}
+
+	// Update with filtered list
+	req := &ScheduledSearchRequest{
+		Properties: filtered,
+	}
+
+	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, nil)
+	return err
+}
