@@ -381,6 +381,7 @@ type Alert struct {
 	IsDisabled                   bool            `json:"is_disabled"`
 	Properties                   AlertProperties `json:"properties"`
 	GroupTimeseriesNotifications bool            `json:"group_timeseries_notifications"`
+	NotificationChannels         []string        `json:"notification_channels,omitempty"`
 }
 
 type AlertProperties struct {
@@ -402,6 +403,7 @@ type AlertCreateRequest struct {
 	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
 	MuteUntil                    int                    `json:"mute_until"`
 	ExpressionArgs               map[string]interface{} `json:"expression_args"`
+	NotificationChannels         []string               `json:"notification_channels,omitempty"`
 }
 
 type AlertUpdateRequest struct {
@@ -417,6 +419,7 @@ type AlertUpdateRequest struct {
 	GroupTimeseriesNotifications *bool                  `json:"group_timeseries_notifications,omitempty"`
 	MuteUntil                    *int                   `json:"mute_until,omitempty"`
 	ExpressionArgs               map[string]interface{} `json:"expression_args,omitempty"`
+	NotificationChannels         []string               `json:"notification_channels,omitempty"`
 }
 
 type Macro struct {
@@ -837,4 +840,132 @@ func (c *Client) DeleteScheduledSearchAlert(region, ruleName string) error {
 
 	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, nil)
 	return err
+}
+
+// Entity Types
+type Entity struct {
+	ID                     string                 `json:"id"`
+	Name                   string                 `json:"name"`
+	Type                   string                 `json:"type"`
+	ExternalRef            string                 `json:"external_ref"`
+	Description            string                 `json:"description"`
+	DataSource             string                 `json:"data_source,omitempty"`
+	DataSourceID           string                 `json:"data_source_id,omitempty"`
+	Namespace              string                 `json:"namespace,omitempty"`
+	Team                   string                 `json:"team,omitempty"`
+	Tier                   string                 `json:"tier,omitempty"`
+	Workspace              string                 `json:"workspace,omitempty"`
+	Tags                   []string               `json:"tags,omitempty"`
+	Labels                 map[string]string      `json:"labels,omitempty"`
+	EntityClass            string                 `json:"entity_class,omitempty"`
+	UIReadonly             bool                   `json:"ui_readonly"`
+	AdhocFilter            *AdhocFilter           `json:"adhoc_filter,omitempty"`
+	Indicators             []Indicator            `json:"indicators,omitempty"`
+	Links                  []EntityLink           `json:"links,omitempty"`
+	NotificationChannels   []string               `json:"notification_channels,omitempty"`
+	CreatedAt              string                 `json:"created_at,omitempty"`
+	UpdatedAt              string                 `json:"updated_at,omitempty"`
+}
+
+type AdhocFilter struct {
+	DataSource string            `json:"data_source"`
+	Labels     map[string]string `json:"labels"`
+}
+
+type Indicator struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+	Unit  string `json:"unit,omitempty"`
+}
+
+type EntityLink struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type EntityCreateRequest struct {
+	Name                 string            `json:"name"`
+	Type                 string            `json:"type"`
+	ExternalRef          string            `json:"external_ref"`
+	Description          string            `json:"description,omitempty"`
+	DataSource           string            `json:"data_source,omitempty"`
+	DataSourceID         string            `json:"data_source_id,omitempty"`
+	Namespace            string            `json:"namespace,omitempty"`
+	Team                 string            `json:"team,omitempty"`
+	Tier                 string            `json:"tier,omitempty"`
+	Workspace            string            `json:"workspace,omitempty"`
+	Tags                 []string          `json:"tags,omitempty"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	EntityClass          string            `json:"entity_class,omitempty"`
+	UIReadonly           bool              `json:"ui_readonly"`
+	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator       `json:"indicators,omitempty"`
+	Links                []EntityLink      `json:"links,omitempty"`
+	NotificationChannels []string          `json:"notification_channels,omitempty"`
+}
+
+type EntityUpdateRequest struct {
+	Name                 *string            `json:"name,omitempty"`
+	Type                 *string            `json:"type,omitempty"`
+	ExternalRef          *string            `json:"external_ref,omitempty"`
+	Description          *string            `json:"description,omitempty"`
+	DataSource           *string            `json:"data_source,omitempty"`
+	DataSourceID         *string            `json:"data_source_id,omitempty"`
+	Namespace            *string            `json:"namespace,omitempty"`
+	Team                 *string            `json:"team,omitempty"`
+	Tier                 *string            `json:"tier,omitempty"`
+	Workspace            *string            `json:"workspace,omitempty"`
+	Tags                 []string           `json:"tags,omitempty"`
+	Labels               map[string]string  `json:"labels,omitempty"`
+	EntityClass          *string            `json:"entity_class,omitempty"`
+	UIReadonly           *bool              `json:"ui_readonly,omitempty"`
+	AdhocFilter          *AdhocFilter       `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator        `json:"indicators,omitempty"`
+	Links                []EntityLink       `json:"links,omitempty"`
+	NotificationChannels []string           `json:"notification_channels,omitempty"`
+}
+
+type EntitiesListResponse struct {
+	Entities []Entity `json:"entities"`
+}
+
+// Entity methods
+func (c *Client) GetEntity(id string) (*Entity, error) {
+	var entity Entity
+	err := c.Get(fmt.Sprintf("/entities/%s", id), &entity)
+	return &entity, err
+}
+
+func (c *Client) GetEntityByExternalRef(externalRef string) (*Entity, error) {
+	var response EntitiesListResponse
+	err := c.Get(fmt.Sprintf("/entities?external_ref=%s", externalRef), &response)
+	if err != nil {
+		return nil, err
+	}
+	if len(response.Entities) == 0 {
+		return nil, fmt.Errorf("entity with external_ref '%s' not found", externalRef)
+	}
+	return &response.Entities[0], nil
+}
+
+func (c *Client) ListEntities() (*EntitiesListResponse, error) {
+	var response EntitiesListResponse
+	err := c.Get("/entities", &response)
+	return &response, err
+}
+
+func (c *Client) CreateEntity(entity *EntityCreateRequest) (*Entity, error) {
+	var result Entity
+	err := c.Post("/entities", entity, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateEntity(id string, entity *EntityUpdateRequest) (*Entity, error) {
+	var result Entity
+	err := c.Patch(fmt.Sprintf("/entities/%s", id), entity, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteEntity(id string) error {
+	return c.Delete(fmt.Sprintf("/entities/%s", id))
 }

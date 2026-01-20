@@ -44,6 +44,7 @@ func New() *schema.Provider {
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"last9_dashboard":              resourceDashboard(),
+			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
 			"last9_macro":                  resourceMacro(),
 			"last9_policy":                 resourcePolicy(),

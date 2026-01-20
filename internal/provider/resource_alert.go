@@ -111,6 +111,12 @@ func resourceAlert() *schema.Resource {
 				Default:     true,
 				Description: "Group timeseries notifications",
 			},
+			"notification_channels": {
+				Type:        schema.TypeList,
+				Optional:    true,
+				Description: "Notification channel IDs or names to send alerts to",
+				Elem:        &schema.Schema{Type: schema.TypeString},
+			},
 		},
 	}
 }
@@ -126,6 +132,16 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 		IsDisabled:                   d.Get("is_disabled").(bool),
 		GroupTimeseriesNotifications: d.Get("group_timeseries_notifications").(bool),
 		ExpressionArgs:               make(map[string]interface{}),
+	}
+
+	// Handle notification channels
+	if v, ok := d.GetOk("notification_channels"); ok {
+		channelsList := v.([]interface{})
+		channels := make([]string, len(channelsList))
+		for i, ch := range channelsList {
+			channels[i] = ch.(string)
+		}
+		req.NotificationChannels = channels
 	}
 
 	// Handle mute
@@ -208,6 +224,7 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	d.Set("mute", alert.MuteUntil == -1)
 	d.Set("is_disabled", alert.IsDisabled)
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
+	d.Set("notification_channels", alert.NotificationChannels)
 
 	// Parse condition for static alerts to extract threshold values
 	if alert.Condition != "" && alert.EvalWindow > 0 {
@@ -278,6 +295,14 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	if d.HasChange("group_timeseries_notifications") {
 		group := d.Get("group_timeseries_notifications").(bool)
 		req.GroupTimeseriesNotifications = &group
+	}
+	if d.HasChange("notification_channels") {
+		channelsList := d.Get("notification_channels").([]interface{})
+		channels := make([]string, len(channelsList))
+		for i, ch := range channelsList {
+			channels[i] = ch.(string)
+		}
+		req.NotificationChannels = channels
 	}
 
 	// Handle static threshold changes
