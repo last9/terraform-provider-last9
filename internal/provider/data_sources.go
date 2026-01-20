@@ -37,6 +37,31 @@ func dataSourceDashboard() *schema.Resource {
 				Type:        schema.TypeList,
 				Computed:    true,
 				Description: "List of dashboard panels",
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"id": {
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"title": {
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"query": {
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"visualization": {
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"config": {
+							Type:     schema.TypeMap,
+							Computed: true,
+							Elem:     &schema.Schema{Type: schema.TypeString},
+						},
+					},
+				},
 			},
 			"tags": {
 				Type:        schema.TypeList,
