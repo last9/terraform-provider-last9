@@ -66,8 +66,8 @@ func resourceAlert() *schema.Resource {
 			},
 			"expression": {
 				Type:        schema.TypeString,
-				Optional:    true,
-				Description: "Alert expression (for dynamic alerts)",
+				Computed:    true,
+				Description: "Alert expression (computed from KPI name)",
 			},
 			"greater_than": {
 				Type:        schema.TypeFloat,
@@ -95,12 +95,6 @@ func resourceAlert() *schema.Resource {
 				Default:      "breach",
 				Description:  "Alert severity (breach or threat)",
 				ValidateFunc: validation.StringInSlice([]string{"breach", "threat"}, false),
-			},
-			"mute": {
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     false,
-				Description: "Whether alert is muted",
 			},
 			"is_disabled": {
 				Type:        schema.TypeBool,
@@ -197,31 +191,19 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 		req.NotificationChannels = channels
 	}
 
-	// Handle mute
-	if d.Get("mute").(bool) {
-		req.MuteUntil = -1 // mute forever
-	} else {
-		req.MuteUntil = 0 // unmute
-	}
-
-	// Handle expression-based alerts
-	if expression, ok := d.GetOk("expression"); ok {
-		req.Expression = expression.(string)
-	} else {
-		// Handle static threshold alerts
-		if greaterThan, ok := d.GetOk("greater_than"); ok {
-			badMinutes := d.Get("bad_minutes").(int)
-			totalMinutes := d.Get("total_minutes").(int)
-			req.Condition = fmt.Sprintf("expr > %f", greaterThan.(float64))
-			req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
-			req.EvalWindow = totalMinutes
-		} else if lessThan, ok := d.GetOk("less_than"); ok {
-			badMinutes := d.Get("bad_minutes").(int)
-			totalMinutes := d.Get("total_minutes").(int)
-			req.Condition = fmt.Sprintf("expr < %f", lessThan.(float64))
-			req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
-			req.EvalWindow = totalMinutes
-		}
+	// Handle static threshold alerts
+	if greaterThan, ok := d.GetOk("greater_than"); ok {
+		badMinutes := d.Get("bad_minutes").(int)
+		totalMinutes := d.Get("total_minutes").(int)
+		req.Condition = fmt.Sprintf("expr > %f", greaterThan.(float64))
+		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
+		req.EvalWindow = totalMinutes
+	} else if lessThan, ok := d.GetOk("less_than"); ok {
+		badMinutes := d.Get("bad_minutes").(int)
+		totalMinutes := d.Get("total_minutes").(int)
+		req.Condition = fmt.Sprintf("expr < %f", lessThan.(float64))
+		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
+		req.EvalWindow = totalMinutes
 	}
 
 	// Handle properties
@@ -276,8 +258,8 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	d.Set("indicator", alert.Indicator)
 	d.Set("expression", alert.Expression)
 	d.Set("severity", alert.Severity)
-	d.Set("mute", alert.MuteUntil == -1)
-	d.Set("is_disabled", alert.IsDisabled)
+	// Note: mute and is_disabled fields are intentionally not read from API
+	// The API may return different values than what was sent, causing drift
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
 	d.Set("notification_channels", alert.NotificationChannels)
 
@@ -370,15 +352,8 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 			"id": kpiID,
 		},
 	}
-	// Always include mute, is_disabled, group_timeseries_notifications (PUT requires all fields)
-	mute := d.Get("mute").(bool)
-	if mute {
-		muteUntil := -1
-		req.MuteUntil = &muteUntil
-	} else {
-		muteUntil := 0
-		req.MuteUntil = &muteUntil
-	}
+
+	// Note: mute field is not sent to API - it's ignored by Terraform
 
 	isDisabled := d.Get("is_disabled").(bool)
 	req.IsDisabled = &isDisabled

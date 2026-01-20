@@ -287,6 +287,85 @@ func resourceEntityCreate(ctx context.Context, d *schema.ResourceData, m interfa
 	}
 
 	d.SetId(entity.ID)
+
+	// Metadata (tags, labels, team, links, adhoc_filter) must be set via separate endpoint
+	// The POST /entities API doesn't accept these fields
+	hasMetadata := false
+	metadataReq := &client.EntityMetadataUpdateRequest{}
+
+	// Team (required for metadata update API, use "default" if not specified)
+	// Only mark hasMetadata=true if user explicitly specified team
+	if v, ok := d.GetOk("team"); ok {
+		metadataReq.Team = v.(string)
+		hasMetadata = true
+	} else {
+		metadataReq.Team = "default" // Required by API but doesn't count as user-specified metadata
+	}
+
+	// Tags
+	if v, ok := d.GetOk("tags"); ok {
+		tagsList := v.([]interface{})
+		tags := make([]string, len(tagsList))
+		for i, tag := range tagsList {
+			tags[i] = tag.(string)
+		}
+		metadataReq.Tags = tags
+		hasMetadata = true
+	}
+
+	// Labels
+	if v, ok := d.GetOk("labels"); ok {
+		labelsMap := v.(map[string]interface{})
+		labels := make(map[string]string)
+		for k, val := range labelsMap {
+			labels[k] = val.(string)
+		}
+		metadataReq.Labels = labels
+		hasMetadata = true
+	}
+
+	// Links
+	if v, ok := d.GetOk("links"); ok {
+		linksList := v.([]interface{})
+		links := make([]client.EntityLink, len(linksList))
+		for i, lnk := range linksList {
+			lnkMap := lnk.(map[string]interface{})
+			links[i] = client.EntityLink{
+				Name: lnkMap["name"].(string),
+				URL:  lnkMap["url"].(string),
+			}
+		}
+		metadataReq.Links = links
+		hasMetadata = true
+	}
+
+	// Adhoc filter
+	if v, ok := d.GetOk("adhoc_filter"); ok {
+		filterList := v.([]interface{})
+		if len(filterList) > 0 {
+			filterMap := filterList[0].(map[string]interface{})
+			adhocFilter := &client.AdhocFilter{
+				DataSource: filterMap["data_source"].(string),
+				Labels:     make(map[string]string),
+			}
+			if labelsInterface, ok := filterMap["labels"].(map[string]interface{}); ok {
+				for k, val := range labelsInterface {
+					adhocFilter.Labels[k] = val.(string)
+				}
+			}
+			metadataReq.AdhocFilter = adhocFilter
+			hasMetadata = true
+		}
+	}
+
+	// Update metadata if any metadata fields were specified
+	if hasMetadata {
+		err := apiClient.UpdateEntityMetadata(entity.ID, metadataReq)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("failed to set entity metadata: %w", err))
+		}
+	}
+
 	return resourceEntityRead(ctx, d, m)
 }
 
@@ -305,24 +384,72 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 	d.Set("data_source", entity.DataSource)
 	d.Set("data_source_id", entity.DataSourceID)
 	d.Set("namespace", entity.Namespace)
-	d.Set("team", entity.Team)
 	d.Set("tier", entity.Tier)
 	d.Set("workspace", entity.Workspace)
 	d.Set("entity_class", entity.EntityClass)
 	d.Set("ui_readonly", entity.UIReadonly)
-	d.Set("tags", entity.Tags)
-	d.Set("labels", entity.Labels)
 	d.Set("notification_channels", entity.NotificationChannels)
 
-	// Set adhoc filter
-	if entity.AdhocFilter != nil {
-		adhocFilter := []interface{}{
-			map[string]interface{}{
-				"data_source": entity.AdhocFilter.DataSource,
-				"labels":      entity.AdhocFilter.Labels,
-			},
+	// Metadata fields (tags, labels, team, links, adhoc_filter) are returned
+	// nested in the 'metadata' object from the API response
+	if entity.Metadata != nil {
+		// Only set team if it's not "default" (we use "default" internally when user doesn't specify)
+		if entity.Metadata.Team != "" && entity.Metadata.Team != "default" {
+			d.Set("team", entity.Metadata.Team)
 		}
-		d.Set("adhoc_filter", adhocFilter)
+		d.Set("tags", entity.Metadata.Tags)
+		d.Set("labels", entity.Metadata.Labels)
+
+		// Set adhoc filter from metadata
+		if entity.Metadata.AdhocFilter != nil {
+			adhocFilter := []interface{}{
+				map[string]interface{}{
+					"data_source": entity.Metadata.AdhocFilter.DataSource,
+					"labels":      entity.Metadata.AdhocFilter.Labels,
+				},
+			}
+			d.Set("adhoc_filter", adhocFilter)
+		}
+
+		// Set links from metadata
+		if len(entity.Metadata.Links) > 0 {
+			links := make([]interface{}, len(entity.Metadata.Links))
+			for i, link := range entity.Metadata.Links {
+				links[i] = map[string]interface{}{
+					"name": link.Name,
+					"url":  link.URL,
+				}
+			}
+			d.Set("links", links)
+		}
+	} else {
+		// Fallback to top-level fields if metadata is not present
+		d.Set("team", entity.Team)
+		d.Set("tags", entity.Tags)
+		d.Set("labels", entity.Labels)
+
+		// Set adhoc filter
+		if entity.AdhocFilter != nil {
+			adhocFilter := []interface{}{
+				map[string]interface{}{
+					"data_source": entity.AdhocFilter.DataSource,
+					"labels":      entity.AdhocFilter.Labels,
+				},
+			}
+			d.Set("adhoc_filter", adhocFilter)
+		}
+
+		// Set links
+		if len(entity.Links) > 0 {
+			links := make([]interface{}, len(entity.Links))
+			for i, link := range entity.Links {
+				links[i] = map[string]interface{}{
+					"name": link.Name,
+					"url":  link.URL,
+				}
+			}
+			d.Set("links", links)
+		}
 	}
 
 	// Set indicators
@@ -338,97 +465,111 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 		d.Set("indicators", indicators)
 	}
 
-	// Set links
-	if len(entity.Links) > 0 {
-		links := make([]interface{}, len(entity.Links))
-		for i, link := range entity.Links {
-			links[i] = map[string]interface{}{
-				"name": link.Name,
-				"url":  link.URL,
-			}
-		}
-		d.Set("links", links)
-	}
-
 	return nil
 }
 
 func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 
-	req := &client.EntityUpdateRequest{}
+	// Check if core entity fields changed (name, type, description, data_source_id, etc.)
+	// These are updated via PUT /entities/{id}
+	coreFieldsChanged := d.HasChange("name") || d.HasChange("type") || d.HasChange("description") ||
+		d.HasChange("data_source_id") || d.HasChange("namespace") || d.HasChange("tier") ||
+		d.HasChange("workspace") || d.HasChange("ui_readonly")
 
-	if d.HasChange("name") {
+	if coreFieldsChanged {
+		// PUT requires all mandatory fields: name, type, data_source_id
 		name := d.Get("name").(string)
-		req.Name = &name
-	}
-	if d.HasChange("type") {
 		entityType := d.Get("type").(string)
-		req.Type = &entityType
-	}
-	if d.HasChange("external_ref") {
-		externalRef := d.Get("external_ref").(string)
-		req.ExternalRef = &externalRef
-	}
-	if d.HasChange("description") {
-		description := d.Get("description").(string)
-		req.Description = &description
-	}
-	if d.HasChange("data_source") {
-		dataSource := d.Get("data_source").(string)
-		req.DataSource = &dataSource
-	}
-	if d.HasChange("data_source_id") {
 		dataSourceID := d.Get("data_source_id").(string)
-		// Only set if non-empty to avoid sending invalid empty string
+
+		req := &client.EntityUpdateRequest{
+			Name: &name,
+			Type: &entityType,
+		}
+
+		// data_source_id is mandatory for update
 		if dataSourceID != "" {
 			req.DataSourceID = &dataSourceID
 		}
-	}
-	if d.HasChange("namespace") {
-		namespace := d.Get("namespace").(string)
-		req.Namespace = &namespace
-	}
-	if d.HasChange("team") {
-		team := d.Get("team").(string)
-		req.Team = &team
-	}
-	if d.HasChange("tier") {
-		tier := d.Get("tier").(string)
-		req.Tier = &tier
-	}
-	if d.HasChange("workspace") {
-		workspace := d.Get("workspace").(string)
-		req.Workspace = &workspace
-	}
-	if d.HasChange("entity_class") {
-		entityClass := d.Get("entity_class").(string)
-		req.EntityClass = &entityClass
-	}
-	if d.HasChange("ui_readonly") {
+
+		// Include optional fields
+		if v, ok := d.GetOk("description"); ok {
+			desc := v.(string)
+			req.Description = &desc
+		}
+		if v, ok := d.GetOk("namespace"); ok {
+			ns := v.(string)
+			req.Namespace = &ns
+		}
+		if v, ok := d.GetOk("tier"); ok {
+			tier := v.(string)
+			req.Tier = &tier
+		}
+		if v, ok := d.GetOk("workspace"); ok {
+			ws := v.(string)
+			req.Workspace = &ws
+		}
 		uiReadonly := d.Get("ui_readonly").(bool)
 		req.UIReadonly = &uiReadonly
-	}
 
-	if d.HasChange("tags") {
-		tagsList := d.Get("tags").([]interface{})
-		tags := make([]string, len(tagsList))
-		for i, tag := range tagsList {
-			tags[i] = tag.(string)
+		_, err := apiClient.UpdateEntity(d.Id(), req)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("failed to update entity: %w", err))
 		}
-		req.Tags = tags
 	}
 
-	if d.HasChange("labels") {
-		labelsMap := d.Get("labels").(map[string]interface{})
-		labels := make(map[string]string)
-		for k, val := range labelsMap {
-			labels[k] = val.(string)
+	// Check if metadata fields changed (tags, labels, team, links, adhoc_filter)
+	// These are updated via PUT /entities/{id}/metadata
+	metadataFieldsChanged := d.HasChange("tags") || d.HasChange("labels") || d.HasChange("team") ||
+		d.HasChange("links") || d.HasChange("adhoc_filter")
+
+	if metadataFieldsChanged {
+		// Team is required for metadata update (per OpenAPI spec)
+		team := d.Get("team").(string)
+		if team == "" {
+			team = "default" // Use default if not specified
 		}
-		req.Labels = labels
-	}
 
-	if d.HasChange("adhoc_filter") {
+		metadataReq := &client.EntityMetadataUpdateRequest{
+			Team: team,
+		}
+
+		// Tags
+		if v, ok := d.GetOk("tags"); ok {
+			tagsList := v.([]interface{})
+			tags := make([]string, len(tagsList))
+			for i, tag := range tagsList {
+				tags[i] = tag.(string)
+			}
+			metadataReq.Tags = tags
+		}
+
+		// Labels
+		if v, ok := d.GetOk("labels"); ok {
+			labelsMap := v.(map[string]interface{})
+			labels := make(map[string]string)
+			for k, val := range labelsMap {
+				labels[k] = val.(string)
+			}
+			metadataReq.Labels = labels
+		}
+
+		// Links
+		if v, ok := d.GetOk("links"); ok {
+			linksList := v.([]interface{})
+			links := make([]client.EntityLink, len(linksList))
+			for i, lnk := range linksList {
+				lnkMap := lnk.(map[string]interface{})
+				links[i] = client.EntityLink{
+					Name: lnkMap["name"].(string),
+					URL:  lnkMap["url"].(string),
+				}
+			}
+			metadataReq.Links = links
+		}
+
+		// Adhoc filter
 		if v, ok := d.GetOk("adhoc_filter"); ok {
 			filterList := v.([]interface{})
 			if len(filterList) > 0 {
@@ -442,52 +583,14 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 						adhocFilter.Labels[k] = val.(string)
 					}
 				}
-				req.AdhocFilter = adhocFilter
+				metadataReq.AdhocFilter = adhocFilter
 			}
 		}
-	}
 
-	if d.HasChange("indicators") {
-		indicatorsList := d.Get("indicators").([]interface{})
-		indicators := make([]client.Indicator, len(indicatorsList))
-		for i, ind := range indicatorsList {
-			indMap := ind.(map[string]interface{})
-			indicators[i] = client.Indicator{
-				Name:  indMap["name"].(string),
-				Query: indMap["query"].(string),
-			}
-			if unit, ok := indMap["unit"].(string); ok {
-				indicators[i].Unit = unit
-			}
+		err := apiClient.UpdateEntityMetadata(d.Id(), metadataReq)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("failed to update entity metadata: %w", err))
 		}
-		req.Indicators = indicators
-	}
-
-	if d.HasChange("links") {
-		linksList := d.Get("links").([]interface{})
-		links := make([]client.EntityLink, len(linksList))
-		for i, lnk := range linksList {
-			lnkMap := lnk.(map[string]interface{})
-			links[i] = client.EntityLink{
-				Name: lnkMap["name"].(string),
-				URL:  lnkMap["url"].(string),
-			}
-		}
-		req.Links = links
-	}
-
-	if d.HasChange("notification_channels") {
-		channelsList := d.Get("notification_channels").([]interface{})
-		channels := make([]string, len(channelsList))
-		for i, ch := range channelsList {
-			channels[i] = ch.(string)
-		}
-		req.NotificationChannels = channels
-	}
-
-	_, err := apiClient.UpdateEntity(d.Id(), req)
-	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to update entity: %w", err))
 	}
 
 	return resourceEntityRead(ctx, d, m)

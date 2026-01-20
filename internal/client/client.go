@@ -869,28 +869,42 @@ func (c *Client) DeleteScheduledSearchAlert(region, ruleName string) error {
 }
 
 // Entity Types
+
+// EntityMetadata contains metadata fields returned nested in the API response
+type EntityMetadata struct {
+	ID          string            `json:"id,omitempty"`
+	EntityID    string            `json:"entity_id,omitempty"`
+	Team        string            `json:"team,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Links       []EntityLink      `json:"links,omitempty"`
+	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+}
+
 type Entity struct {
-	ID                     string                 `json:"id"`
-	Name                   string                 `json:"name"`
-	Type                   string                 `json:"type"`
-	ExternalRef            string                 `json:"external_ref"`
-	Description            string                 `json:"description"`
-	DataSource             string                 `json:"data_source,omitempty"`
-	DataSourceID           string                 `json:"data_source_id,omitempty"`
-	Namespace              string                 `json:"namespace,omitempty"`
-	Team                   string                 `json:"team,omitempty"`
-	Tier                   string                 `json:"tier,omitempty"`
-	Workspace              string                 `json:"workspace,omitempty"`
-	Tags                   []string               `json:"tags,omitempty"`
-	Labels                 map[string]string      `json:"labels,omitempty"`
-	EntityClass            string                 `json:"entity_class,omitempty"`
-	UIReadonly             bool                   `json:"ui_readonly"`
-	AdhocFilter            *AdhocFilter           `json:"adhoc_filter,omitempty"`
-	Indicators             []Indicator            `json:"indicators,omitempty"`
-	Links                  []EntityLink           `json:"links,omitempty"`
-	NotificationChannels   []string               `json:"notification_channels,omitempty"`
-	CreatedAt              int64                  `json:"created_at,omitempty"`
-	UpdatedAt              int64                  `json:"updated_at,omitempty"`
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	Type                 string          `json:"type"`
+	ExternalRef          string          `json:"external_ref"`
+	Description          string          `json:"description"`
+	DataSource           string          `json:"data_source,omitempty"`
+	DataSourceID         string          `json:"data_source_id,omitempty"`
+	Namespace            string          `json:"namespace,omitempty"`
+	Team                 string          `json:"team,omitempty"`
+	Tier                 string          `json:"tier,omitempty"`
+	Workspace            string          `json:"workspace,omitempty"`
+	Tags                 []string        `json:"tags,omitempty"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	EntityClass          string          `json:"entity_class,omitempty"`
+	UIReadonly           bool            `json:"ui_readonly"`
+	AdhocFilter          *AdhocFilter    `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator     `json:"indicators,omitempty"`
+	Links                []EntityLink    `json:"links,omitempty"`
+	NotificationChannels []string        `json:"notification_channels,omitempty"`
+	CreatedAt            int64           `json:"created_at,omitempty"`
+	UpdatedAt            int64           `json:"updated_at,omitempty"`
+	// Metadata is returned nested in GET response - we extract fields from it
+	Metadata             *EntityMetadata `json:"metadata,omitempty"`
 }
 
 type AdhocFilter struct {
@@ -994,6 +1008,21 @@ func (c *Client) UpdateEntity(id string, entity *EntityUpdateRequest) (*Entity, 
 
 func (c *Client) DeleteEntity(id string) error {
 	return c.Delete(fmt.Sprintf("/entities/%s", id))
+}
+
+// EntityMetadataUpdateRequest for updating entity metadata (tags, labels, team, links)
+// This is a separate API endpoint from entity update
+type EntityMetadataUpdateRequest struct {
+	Team        string            `json:"team"`
+	Tags        []string          `json:"tags,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Links       []EntityLink      `json:"links,omitempty"`
+	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+}
+
+func (c *Client) UpdateEntityMetadata(entityID string, metadata *EntityMetadataUpdateRequest) error {
+	var result map[string]interface{}
+	return c.Put(fmt.Sprintf("/entities/%s/metadata", entityID), metadata, &result)
 }
 
 // KPI Types

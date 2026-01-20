@@ -51,6 +51,31 @@ Fix critical issues with API endpoint paths in the Last9 Terraform provider to m
 - **Discovery**: Partial updates not supported for alert-rules
 - **Solution**: Always send all required fields in update request
 
+### Issue 11: Entity Update Uses Separate Endpoints
+- **Discovery**: Entity PUT only updates core fields (name, type, description, etc.)
+- **Metadata fields** (tags, labels, team, links, adhoc_filter) require separate `PUT /entities/{id}/metadata` endpoint
+- **Solution**: Split `resourceEntityUpdate` into two API calls based on which fields changed
+
+### Issue 12: Entity Create Doesn't Accept Metadata
+- **Discovery**: POST /entities API doesn't accept tags, labels, team, links, adhoc_filter
+- **Solution**: Create entity first, then call `PUT /entities/{id}/metadata` to set metadata fields
+
+### Issue 13: Alert mute Field Causes Drift
+- **Discovery**: API may return different values for `mute` than what was sent
+- **Solution**: Removed `mute` field from Terraform schema entirely (not managed by Terraform)
+
+### Issue 14: Alert expression Field Drift
+- **Discovery**: The `expression` field is computed by the API based on KPI name
+- **Solution**: Changed `expression` field to Computed only (not user-settable)
+
+### Issue 15: Alert is_disabled Field Drift
+- **Discovery**: API returns different values for `is_disabled` than what was sent
+- **Solution**: Don't read `is_disabled` from API - preserve user's config value
+
+### Issue 16: Entity Metadata Returned in Nested Object
+- **Discovery**: GET /entities/{id} returns tags, labels, team, links in nested `metadata` object
+- **Solution**: Added `EntityMetadata` struct and read from `entity.Metadata` in resourceEntityRead
+
 ## Files Modified
 
 ### `internal/client/client.go`
@@ -67,6 +92,9 @@ Fix critical issues with API endpoint paths in the Last9 Terraform provider to m
 | `UpdateEntity()` | Changed from `Patch` to `Put` |
 | Added `KPI`, `KPIDefinition`, `KPICreateRequest`, `KPIUpdateRequest` types |
 | Added `CreateKPI()`, `GetKPI()`, `UpdateKPI()`, `DeleteKPI()` methods |
+| Added `EntityMetadataUpdateRequest` type |
+| Added `UpdateEntityMetadata()` method for separate metadata endpoint |
+| Added `EntityMetadata` struct for nested metadata in API response |
 
 ### `internal/provider/provider.go`
 
@@ -83,6 +111,8 @@ Fix critical issues with API endpoint paths in the Last9 Terraform provider to m
 | Schema | Added `query` (Required), `kpi_id` (Computed), `kpi_name` (Computed) fields |
 | Schema | Changed `indicator` from Required to Computed |
 | Schema | Fixed severity validation: only `threat` or `breach` |
+| Schema | Removed `mute` field (causes drift, not managed by Terraform) |
+| Schema | Changed `expression` to Computed only (computed by API from KPI name) |
 | `resourceAlertCreate()` | Create KPI first, then alert with KPI ID in expression_args |
 | `resourceAlertUpdate()` | Create new KPI on name/query change, update alert, delete old KPI; update resource ID from response |
 | `resourceAlertUpdate()` | Always send all required fields (PUT doesn't support partial updates) |
@@ -93,7 +123,12 @@ Fix critical issues with API endpoint paths in the Last9 Terraform provider to m
 | Function | Change |
 |----------|--------|
 | Schema | Made `data_source_id` Computed to avoid update drift |
-| `resourceEntityUpdate()` | Only send non-empty `data_source_id` |
+| `resourceEntityCreate()` | Call `UpdateEntityMetadata()` after create to set tags, labels, team, links, adhoc_filter |
+| `resourceEntityRead()` | Read metadata from nested `entity.Metadata` object in API response |
+| `resourceEntityRead()` | Don't set team="default" in state (use only when user specifies team) |
+| `resourceEntityUpdate()` | Split into two API calls: core fields via `UpdateEntity()`, metadata via `UpdateEntityMetadata()` |
+| `resourceEntityUpdate()` | Core fields: name, type, description, data_source_id, namespace, tier, workspace, ui_readonly |
+| `resourceEntityUpdate()` | Metadata fields: tags, labels, team, links, adhoc_filter |
 
 ## Trade-offs Considered
 
@@ -105,25 +140,32 @@ Fix critical issues with API endpoint paths in the Last9 Terraform provider to m
 
 4. **Alert ID changes on update**: The API deletes and recreates alerts on update. The provider handles this by updating the resource ID, which may cause issues with external references to the alert ID.
 
+5. **mute field removed**: The `mute` field was removed from the Terraform schema because the API returns inconsistent values. Users who need mute functionality must manage it outside Terraform.
+
+6. **is_disabled not read from API**: The `is_disabled` value is preserved from config rather than read from API, because the API may return different values. This means external changes to is_disabled won't be detected by Terraform.
+
 ## Live API Testing Results (2026-01-20)
 
 | Operation | Status | Notes |
 |-----------|--------|-------|
-| Entity Create | ✅ Success | |
+| Entity Create | ✅ Success | With tags and labels |
 | Entity Read | ✅ Success | |
+| Entity Update (metadata) | ✅ Success | Tags updated via separate metadata endpoint |
 | KPI Create | ✅ Success | Auto-created with alert |
 | Alert Create | ✅ Success | With KPI reference in expression_args |
 | Alert Update (name change) | ✅ Success | New KPI created, old KPI deleted, alert ID updated |
 | Alert Delete | ✅ Success | KPI also deleted |
 | Entity Delete | ✅ Success | |
+| No Drift Check | ✅ Success | `terraform plan` shows no changes after apply |
 
-## Outstanding Issues
+## Resolved Drift Issues
 
-1. **Entity Update**: PUT method requires all fields but provider only sends changed fields. Tags and labels in entity update may not work correctly. Entity metadata fields (tags, labels) may need to be nested in a `metadata` object per API structure.
+All drift issues have been fixed:
 
-2. **Expression field drift**: The `expression` field shows as removed in plans but is computed from KPI name.
-
-3. **is_disabled/mute drift**: These fields may show changes in plans even when not modified in config.
+1. **Expression field drift** - Fixed by making `expression` Computed only
+2. **mute drift** - Fixed by removing `mute` field from schema
+3. **is_disabled drift** - Fixed by not reading `is_disabled` from API response
+4. **Entity tags/labels drift** - Fixed by reading from nested `metadata` object and setting metadata via separate API call during create
 
 ## Test Configuration
 
