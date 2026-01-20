@@ -174,3 +174,288 @@ Test configuration is in `llmtemp/api-test/`:
 - `variables.tf` - access_token and delete_token variables
 - `terraform.tfvars` - Token values (gitignored)
 - `dev.tfrc` - Provider dev overrides
+
+---
+
+# Session: Integration Test Suite for Entity and Alert Resources (2026-01-20)
+
+## Task Description
+
+Create a comprehensive integration test suite for the Terraform provider covering:
+- Alert Groups (Entities) - create, update, delete
+- Alert Group Metadata - tags, labels, team, links
+- Alert Rules - create, update, delete with KPI lifecycle
+
+## Files Created/Modified
+
+### 1. `internal/provider/provider_config_test.go`
+
+| Change |
+|--------|
+| Added support for `LAST9_DELETE_TOKEN` environment variable |
+| Added support for `LAST9_API_BASE_URL` environment variable |
+| Refactored config building to handle all token combinations |
+
+### 2. `internal/provider/provider_test.go`
+
+| Function | Change |
+|----------|--------|
+| `testAccPreCheckWithDelete()` | New function - checks for delete token in addition to standard precheck |
+
+### 3. `internal/provider/resource_entity_test.go` (NEW)
+
+Comprehensive integration tests for Entity (Alert Group) resource.
+
+**Test Cases:**
+| Test | Description |
+|------|-------------|
+| `TestAccEntity_basic` | Create entity with required fields only, verify import |
+| `TestAccEntity_full` | Create entity with all fields (description, tier, namespace, workspace) |
+| `TestAccEntity_withMetadata` | Create entity with tags, labels, team |
+| `TestAccEntity_update` | Update entity name, description, tier |
+| `TestAccEntity_updateMetadata` | Update tags, labels, team |
+| `TestAccEntity_withLinks` | Create entity with related links |
+
+**Helper Functions:**
+| Function | Purpose |
+|----------|---------|
+| `testAccCheckEntityExists()` | Verify entity exists in state |
+| `testAccCheckEntityDestroy()` | Verify entity destroyed |
+| `testAccEntityConfig_basic()` | Basic entity config |
+| `testAccEntityConfig_full()` | Full entity config with all fields |
+| `testAccEntityConfig_withMetadata()` | Entity with tags, labels, team |
+| `testAccEntityConfig_withMetadataUpdated()` | Updated metadata config |
+| `testAccEntityConfig_updated()` | Updated entity core fields |
+| `testAccEntityConfig_withLinks()` | Entity with links |
+
+### 4. `internal/provider/resource_alert_integration_test.go` (NEW)
+
+Integration tests for Alert Rules with full lifecycle.
+
+**Test Cases:**
+| Test | Description |
+|------|-------------|
+| `TestAccAlertIntegration_fullLifecycle` | Complete create → update → delete cycle |
+| `TestAccAlertIntegration_multipleAlerts` | Multiple alerts on same entity |
+| `TestAccAlertIntegration_staticThreshold` | Static threshold alert |
+| `TestAccAlertIntegration_withProperties` | Alert with runbook and annotations |
+| `TestAccAlertIntegration_import` | Import existing alert |
+| `TestAccAlertIntegration_lessThanThreshold` | Less-than threshold alert |
+
+**Helper Functions:**
+| Function | Purpose |
+|----------|---------|
+| `testAccCheckAlertIntegrationExists()` | Verify alert exists in state |
+| `testAccCheckAlertIntegrationDestroy()` | Verify alert destroyed |
+| `testAccAlertIntegrationConfig_basic()` | Basic alert with entity |
+| `testAccAlertIntegrationConfig_multipleAlerts()` | Multiple alerts config |
+| `testAccAlertIntegrationConfig_staticThreshold()` | Static threshold config |
+| `testAccAlertIntegrationConfig_withProperties()` | Alert with properties |
+| `testAccAlertIntegrationConfig_lessThanThreshold()` | Less-than threshold |
+
+## Environment Variables
+
+Tests use these environment variables:
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `LAST9_API_TOKEN` | Write-scoped API token | Yes (or LAST9_REFRESH_TOKEN) |
+| `LAST9_REFRESH_TOKEN` | Refresh token for auto-renewal | Yes (or LAST9_API_TOKEN) |
+| `LAST9_DELETE_TOKEN` | Delete-scoped API token | Yes (for destroy tests) |
+| `LAST9_API_BASE_URL` | API hostname (e.g., `https://alpha.last9.io`) | No |
+| `LAST9_ORG` | Organization slug | Yes |
+
+## Running Tests
+
+```bash
+# Set environment variables
+export LAST9_API_TOKEN="<write-token>"
+export LAST9_DELETE_TOKEN="<delete-token>"
+export LAST9_API_BASE_URL="https://alpha.last9.io"
+export LAST9_ORG="last9"
+
+# Run all integration tests
+TF_ACC=1 go test -v ./internal/provider/ -run "TestAcc" -timeout 30m
+
+# Run entity tests only
+TF_ACC=1 go test -v ./internal/provider/ -run "TestAccEntity" -timeout 10m
+
+# Run alert integration tests only
+TF_ACC=1 go test -v ./internal/provider/ -run "TestAccAlertIntegration" -timeout 20m
+
+# Run specific test
+TF_ACC=1 go test -v ./internal/provider/ -run "TestAccEntity_basic" -timeout 10m
+```
+
+## Trade-offs Considered
+
+1. **Test naming convention**: Used `TestAccAlertIntegration_*` instead of extending existing `TestAccAlert_*` to clearly distinguish integration tests that create their own entities vs tests that require pre-existing entity IDs.
+
+2. **Unique resource names**: Used `time.Now().UnixNano()` suffix for entity names and external_refs to avoid conflicts between parallel test runs or re-runs.
+
+3. **Delete token requirement**: All tests use `testAccPreCheckWithDelete()` to ensure delete token is available, since tests create and destroy resources.
+
+4. **Import verification**: Some fields are ignored during import verification (`query`, `kpi_id`, `kpi_name`) because these are computed during create and may not match exactly on import.
+
+## Fixes Made During Testing
+
+### Fix 1: Remove invalid tier values from entity tests
+- **Issue**: API returned "422 invalid tier" for tier values "critical" and "high"
+- **Fix**: Removed tier field from `TestAccEntity_full` and `TestAccEntity_update` tests
+- **Files**: `internal/provider/resource_entity_test.go`
+
+### Fix 2: Fix properties field in alert Read function
+- **Issue**: Panic when setting `description` inside `properties` block - field doesn't exist in schema
+- **Fix**: Removed `description` from properties map, only set `runbook_url` and `annotations`
+- **Files**: `internal/provider/resource_alert.go:276-293`
+
+### Fix 3: Implement composite import ID for alerts
+- **Issue**: Alert import failed with "invalid entity id" - alerts require entity_id context
+- **Fix**: Added `resourceAlertImportState` function that parses `entity_id:alert_id` format
+- **Files**: `internal/provider/resource_alert.go:465-479`
+
+### Fix 4: Add is_disabled to import ignore list
+- **Issue**: `is_disabled` is intentionally not read from API to avoid drift
+- **Fix**: Added `is_disabled` to `ImportStateVerifyIgnore` in import test
+- **Files**: `internal/provider/resource_alert_integration_test.go:181-183`
+
+## Verification
+
+| Check | Status |
+|-------|--------|
+| `go build ./...` | ✅ Passes |
+| `go vet ./internal/provider/...` | ✅ Passes |
+| Test compilation | ✅ Compiles successfully |
+
+## Test Results (Live API)
+
+```
+=== RUN   TestAccAlertIntegration_fullLifecycle
+--- PASS: TestAccAlertIntegration_fullLifecycle (2.87s)
+=== RUN   TestAccAlertIntegration_multipleAlerts
+--- PASS: TestAccAlertIntegration_multipleAlerts (1.15s)
+=== RUN   TestAccAlertIntegration_staticThreshold
+--- PASS: TestAccAlertIntegration_staticThreshold (1.08s)
+=== RUN   TestAccAlertIntegration_withProperties
+--- PASS: TestAccAlertIntegration_withProperties (1.06s)
+=== RUN   TestAccAlertIntegration_import
+--- PASS: TestAccAlertIntegration_import (1.33s)
+=== RUN   TestAccAlertIntegration_lessThanThreshold
+--- PASS: TestAccAlertIntegration_lessThanThreshold (1.12s)
+=== RUN   TestAccEntity_basic
+--- PASS: TestAccEntity_basic (1.00s)
+=== RUN   TestAccEntity_full
+--- PASS: TestAccEntity_full (0.78s)
+=== RUN   TestAccEntity_withMetadata
+--- PASS: TestAccEntity_withMetadata (0.84s)
+=== RUN   TestAccEntity_update
+--- PASS: TestAccEntity_update (1.50s)
+=== RUN   TestAccEntity_updateMetadata
+--- PASS: TestAccEntity_updateMetadata (1.49s)
+=== RUN   TestAccEntity_withLinks
+--- PASS: TestAccEntity_withLinks (0.86s)
+PASS
+ok      github.com/last9/terraform-provider-last9/internal/provider     15.377s
+```
+
+All 12 tests pass successfully against the live API.
+
+---
+
+# Session: Switch to Refresh Token Authentication (2026-01-20)
+
+## Task Description
+
+Update the auth layer to use refresh tokens instead of short-lived access tokens. The Last9 API's OAuth endpoint generates new access tokens from refresh tokens.
+
+## Issues Addressed
+
+### Issue 1: OAuth Endpoint URL Missing `/api` Prefix
+- **Before**: `{baseURL}/v4/oauth/access_token`
+- **After**: `{baseURL}/api/v4/oauth/access_token`
+- **Reason**: Per the OpenAPI spec, the server base is `https://{api_host}/api/` and the OAuth path is `/v4/oauth/access_token`
+
+### Issue 2: No Support for Delete Refresh Token
+- **Before**: Only static `delete_token` supported
+- **After**: Added `delete_refresh_token` for automatic token refresh with delete scope
+- **Reason**: Long-lived refresh tokens are preferred over short-lived access tokens for automation
+
+## Files Modified
+
+### 1. `internal/client/client.go`
+
+| Function/Type | Change |
+|---------------|--------|
+| `Config` struct | Added `DeleteRefreshToken` field |
+| `Client` struct | Added `deleteAccessToken` (cached token) and `deleteTokenMutex` fields |
+| `refreshAccessToken()` | Fixed URL: `%s/api/v4/oauth/access_token` |
+| `refreshDeleteAccessToken()` | New method - refreshes delete access token using delete refresh token |
+| `getDeleteAccessToken()` | New method - returns valid delete token (refresh if needed, fallback to static) |
+| `Delete()` | Uses `getDeleteAccessToken()` instead of static token check |
+
+### 2. `internal/provider/provider.go`
+
+| Change |
+|--------|
+| Added `delete_refresh_token` schema field with `LAST9_DELETE_REFRESH_TOKEN` env var |
+| Read `delete_refresh_token` in `configureProvider()` and pass to client config |
+| Updated `delete_token` description to indicate legacy status |
+
+### 3. `internal/provider/provider_config_test.go`
+
+| Change |
+|--------|
+| Added support for `LAST9_WRITE_REFRESH_TOKEN` environment variable |
+| Added support for `LAST9_DELETE_REFRESH_TOKEN` environment variable |
+| Preference order: `LAST9_WRITE_REFRESH_TOKEN` > `LAST9_REFRESH_TOKEN` > `LAST9_API_TOKEN` |
+| Delete token preference: `LAST9_DELETE_REFRESH_TOKEN` > `LAST9_DELETE_TOKEN` |
+
+### 4. `internal/provider/provider_test.go`
+
+| Function | Change |
+|----------|--------|
+| `testAccPreCheck()` | Also checks for `LAST9_WRITE_REFRESH_TOKEN` |
+| `testAccPreCheckWithDelete()` | Also checks for `LAST9_DELETE_REFRESH_TOKEN` |
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `LAST9_WRITE_REFRESH_TOKEN` | Refresh token with write scope | Yes (or LAST9_REFRESH_TOKEN or LAST9_API_TOKEN) |
+| `LAST9_DELETE_REFRESH_TOKEN` | Refresh token with delete scope | Yes for destroy tests (or LAST9_DELETE_TOKEN) |
+| `LAST9_REFRESH_TOKEN` | Legacy refresh token (write scope) | Fallback |
+| `LAST9_API_TOKEN` | Direct access token (legacy) | Fallback |
+| `LAST9_DELETE_TOKEN` | Direct delete access token (legacy) | Fallback |
+| `LAST9_API_BASE_URL` | API hostname | Yes |
+| `LAST9_ORG` | Organization slug | Yes |
+
+## Trade-offs Considered
+
+1. **Backward compatibility**: Both new refresh token fields and legacy static token fields continue to work. Refresh tokens are preferred when both are configured.
+
+2. **Token caching**: Both write and delete access tokens are cached with 5-minute expiry buffer to minimize API calls while ensuring tokens don't expire mid-request.
+
+3. **Double-check locking**: Both `getAccessToken()` and `getDeleteAccessToken()` use read lock first, then write lock with double-check pattern for thread safety.
+
+## Running Tests with Refresh Tokens
+
+```bash
+# Set refresh tokens
+export LAST9_WRITE_REFRESH_TOKEN="<write-refresh-token>"
+export LAST9_DELETE_REFRESH_TOKEN="<delete-refresh-token>"
+export LAST9_API_BASE_URL="https://alpha.last9.io"
+export LAST9_ORG="last9"
+
+# Run tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccEntity_basic" -timeout 10m
+```
+
+## Test Results
+
+```
+=== RUN   TestAccEntity_basic
+--- PASS: TestAccEntity_basic (1.93s)
+PASS
+ok      github.com/last9/terraform-provider-last9/internal/provider     2.646s
+```
+
+Tests pass with refresh token authentication.

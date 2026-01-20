@@ -18,6 +18,8 @@ type Config struct {
 	RefreshToken string
 	// Delete token - required for delete operations (separate scope)
 	DeleteToken string
+	// Refresh token for delete operations (generates access tokens with delete scope)
+	DeleteRefreshToken string
 	// Organization slug
 	Org string
 	// API base URL
@@ -37,11 +39,13 @@ type AccessToken struct {
 type Client struct {
 	config     *Config
 	httpClient *http.Client
-	// Token management
+	// Token management for read/write operations
 	tokenMutex  sync.RWMutex
 	accessToken *AccessToken
-	// Delete token (separate from access token due to scope requirements)
-	deleteToken string
+	// Delete token management (separate from access token due to scope requirements)
+	deleteToken        string       // Static delete token (legacy)
+	deleteAccessToken  *AccessToken // Cached delete access token from refresh
+	deleteTokenMutex   sync.RWMutex // Mutex for delete token refresh
 }
 
 func NewClient(config *Config) (*Client, error) {
@@ -116,7 +120,7 @@ func (c *Client) refreshAccessToken() (*AccessToken, error) {
 		RefreshToken: c.config.RefreshToken,
 	}
 
-	reqURL := fmt.Sprintf("%s/v4/oauth/access_token", c.config.BaseURL)
+	reqURL := fmt.Sprintf("%s/api/v4/oauth/access_token", c.config.BaseURL)
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
@@ -149,6 +153,89 @@ func (c *Client) refreshAccessToken() (*AccessToken, error) {
 	token.expiresAt = time.Unix(token.ExpiresAt, 0)
 
 	return &token, nil
+}
+
+// refreshDeleteAccessToken obtains a new access token using the delete refresh token.
+// The delete refresh token generates access tokens with delete scope.
+func (c *Client) refreshDeleteAccessToken() (*AccessToken, error) {
+	reqBody := struct {
+		RefreshToken string `json:"refresh_token"`
+	}{
+		RefreshToken: c.config.DeleteRefreshToken,
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v4/oauth/access_token", c.config.BaseURL)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
+	var token AccessToken
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Parse expires_at
+	token.expiresAt = time.Unix(token.ExpiresAt, 0)
+
+	return &token, nil
+}
+
+// getDeleteAccessToken returns a valid delete access token, refreshing if necessary.
+// Falls back to static delete token if no delete refresh token is configured.
+func (c *Client) getDeleteAccessToken() (string, error) {
+	// If delete refresh token is configured, use dynamic token management
+	if c.config.DeleteRefreshToken != "" {
+		c.deleteTokenMutex.RLock()
+		token := c.deleteAccessToken
+		c.deleteTokenMutex.RUnlock()
+
+		// Check if token is valid and not expiring soon
+		if token != nil && time.Now().Before(token.expiresAt.Add(-5*time.Minute)) {
+			return token.AccessToken, nil
+		}
+
+		// Token expired or missing, refresh it
+		c.deleteTokenMutex.Lock()
+		defer c.deleteTokenMutex.Unlock()
+
+		// Double-check after acquiring lock
+		if c.deleteAccessToken != nil && time.Now().Before(c.deleteAccessToken.expiresAt.Add(-5*time.Minute)) {
+			return c.deleteAccessToken.AccessToken, nil
+		}
+
+		newToken, err := c.refreshDeleteAccessToken()
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh delete access token: %w", err)
+		}
+		c.deleteAccessToken = newToken
+		return newToken.AccessToken, nil
+	}
+
+	// Fall back to static delete token (legacy mode)
+	if c.deleteToken != "" {
+		return c.deleteToken, nil
+	}
+
+	return "", fmt.Errorf("delete_token or delete_refresh_token is required for delete operations")
 }
 
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
@@ -241,9 +328,10 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 }
 
 func (c *Client) Delete(path string) error {
-	// Delete operations require a separate token with delete scope
-	if c.deleteToken == "" {
-		return fmt.Errorf("delete_token is required for delete operations (delete scope)")
+	// Get valid delete access token (handles refresh token or static token)
+	deleteToken, err := c.getDeleteAccessToken()
+	if err != nil {
+		return err
 	}
 
 	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
@@ -253,7 +341,7 @@ func (c *Client) Delete(path string) error {
 	}
 
 	// Use delete token for delete operations
-	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", c.deleteToken))
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)

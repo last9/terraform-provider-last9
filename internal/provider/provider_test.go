@@ -19,14 +19,31 @@ func TestProvider_impl(t *testing.T) {
 
 func testAccPreCheck(t *testing.T) {
 	// Check for required environment variables
-	if v := os.Getenv("LAST9_REFRESH_TOKEN"); v == "" {
-		if v := os.Getenv("LAST9_API_TOKEN"); v == "" {
-			t.Skip("Skipping acceptance test - LAST9_REFRESH_TOKEN or LAST9_API_TOKEN must be set")
-		}
+	// Accept either write refresh token or legacy refresh/api token
+	writeRefreshToken := os.Getenv("LAST9_WRITE_REFRESH_TOKEN")
+	refreshToken := os.Getenv("LAST9_REFRESH_TOKEN")
+	apiToken := os.Getenv("LAST9_API_TOKEN")
+
+	if writeRefreshToken == "" && refreshToken == "" && apiToken == "" {
+		t.Skip("Skipping acceptance test - LAST9_WRITE_REFRESH_TOKEN, LAST9_REFRESH_TOKEN, or LAST9_API_TOKEN must be set")
 	}
 
 	if v := os.Getenv("LAST9_ORG"); v == "" {
 		t.Skip("Skipping acceptance test - LAST9_ORG must be set")
+	}
+}
+
+// testAccPreCheckWithDelete checks for environment variables including delete token
+// Use this for tests that require delete operations
+func testAccPreCheckWithDelete(t *testing.T) {
+	testAccPreCheck(t)
+
+	// Accept either delete refresh token or legacy delete token
+	deleteRefreshToken := os.Getenv("LAST9_DELETE_REFRESH_TOKEN")
+	deleteToken := os.Getenv("LAST9_DELETE_TOKEN")
+
+	if deleteRefreshToken == "" && deleteToken == "" {
+		t.Skip("Skipping acceptance test - LAST9_DELETE_REFRESH_TOKEN or LAST9_DELETE_TOKEN must be set for destroy tests")
 	}
 }
 

@@ -32,7 +32,14 @@ func New() *schema.Provider {
 				Type:        schema.TypeString,
 				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("LAST9_DELETE_TOKEN", nil),
-				Description: "Last9 API token with delete scope (required for destroy operations)",
+				Description: "Last9 API token with delete scope (legacy - use delete_refresh_token instead)",
+				Sensitive:   true,
+			},
+			"delete_refresh_token": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("LAST9_DELETE_REFRESH_TOKEN", nil),
+				Description: "Last9 refresh token for delete operations (generates access tokens with delete scope)",
 				Sensitive:   true,
 			},
 			"org": {
@@ -72,6 +79,7 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	apiToken := d.Get("api_token").(string)
 	refreshToken := d.Get("refresh_token").(string)
 	deleteToken := d.Get("delete_token").(string)
+	deleteRefreshToken := d.Get("delete_refresh_token").(string)
 	org := d.Get("org").(string)
 	apiBaseURL := d.Get("api_base_url").(string)
 
@@ -84,6 +92,9 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	}
 	if deleteToken == "" {
 		deleteToken = os.Getenv("LAST9_DELETE_TOKEN")
+	}
+	if deleteRefreshToken == "" {
+		deleteRefreshToken = os.Getenv("LAST9_DELETE_REFRESH_TOKEN")
 	}
 	if org == "" {
 		org = os.Getenv("LAST9_ORG")
@@ -99,11 +110,12 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	}
 
 	config := &client.Config{
-		APIToken:     apiToken,
-		RefreshToken: refreshToken,
-		DeleteToken:  deleteToken,
-		Org:          org,
-		BaseURL:      apiBaseURL,
+		APIToken:           apiToken,
+		RefreshToken:       refreshToken,
+		DeleteToken:        deleteToken,
+		DeleteRefreshToken: deleteRefreshToken,
+		Org:                org,
+		BaseURL:            apiBaseURL,
 	}
 
 	apiClient, err := client.NewClient(config)

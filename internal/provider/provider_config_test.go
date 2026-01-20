@@ -20,34 +20,51 @@ func TestAccProvider_basic(t *testing.T) {
 }
 
 func testAccProviderConfig() string {
-	apiToken := os.Getenv("LAST9_API_TOKEN")
+	// Check for refresh tokens first (preferred), then fall back to access tokens (legacy)
+	writeRefreshToken := os.Getenv("LAST9_WRITE_REFRESH_TOKEN")
+	deleteRefreshToken := os.Getenv("LAST9_DELETE_REFRESH_TOKEN")
+	// Legacy: direct access tokens
 	refreshToken := os.Getenv("LAST9_REFRESH_TOKEN")
+	apiToken := os.Getenv("LAST9_API_TOKEN")
+	deleteToken := os.Getenv("LAST9_DELETE_TOKEN")
 	org := os.Getenv("LAST9_ORG")
+	apiBaseURL := os.Getenv("LAST9_API_BASE_URL")
 
 	if org == "" {
 		org = "test-org"
 	}
 
-	if refreshToken != "" {
-		return `
-provider "last9" {
-  refresh_token = "` + refreshToken + `"
-  org          = "` + org + `"
-}
-`
+	// Build provider config
+	config := `provider "last9" {` + "\n"
+
+	// Authentication: prefer write refresh token > refresh_token > api_token
+	if writeRefreshToken != "" {
+		config += `  refresh_token = "` + writeRefreshToken + `"` + "\n"
+	} else if refreshToken != "" {
+		config += `  refresh_token = "` + refreshToken + `"` + "\n"
 	} else if apiToken != "" {
-		return `
-provider "last9" {
-  api_token = "` + apiToken + `"
-  org      = "` + org + `"
-}
-`
+		config += `  api_token = "` + apiToken + `"` + "\n"
+	} else {
+		// Fallback for tests that don't set env vars
+		config += `  refresh_token = "test-token"` + "\n"
 	}
 
-	return `
-provider "last9" {
-  refresh_token = "test-token"
-  org          = "test-org"
-}
-`
+	// Delete token: prefer delete refresh token > delete_token
+	if deleteRefreshToken != "" {
+		config += `  delete_refresh_token = "` + deleteRefreshToken + `"` + "\n"
+	} else if deleteToken != "" {
+		config += `  delete_token = "` + deleteToken + `"` + "\n"
+	}
+
+	// Add org
+	config += `  org = "` + org + `"` + "\n"
+
+	// Add api_base_url if set
+	if apiBaseURL != "" {
+		config += `  api_base_url = "` + apiBaseURL + `"` + "\n"
+	}
+
+	config += `}` + "\n"
+
+	return config
 }
