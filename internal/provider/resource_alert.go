@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -9,6 +11,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+// generateKPIName creates a unique KPI name from the rule name plus a random token
+func generateKPIName(ruleName string) string {
+	token := make([]byte, 4)
+	rand.Read(token)
+	return fmt.Sprintf("%s-%s", ruleName, hex.EncodeToString(token))
+}
 
 func resourceAlert() *schema.Resource {
 	return &schema.Resource{
@@ -35,10 +44,25 @@ func resourceAlert() *schema.Resource {
 				Optional:    true,
 				Description: "Alert description",
 			},
-			"indicator": {
+			"query": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Indicator name",
+				Description: "PromQL query for the KPI/indicator that will be created for this alert",
+			},
+			"kpi_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "ID of the automatically created KPI for this alert",
+			},
+			"kpi_name": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Name of the automatically created KPI for this alert",
+			},
+			"indicator": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Indicator name (derived from KPI name)",
 			},
 			"expression": {
 				Type:        schema.TypeString,
@@ -69,8 +93,8 @@ func resourceAlert() *schema.Resource {
 				Type:         schema.TypeString,
 				Optional:     true,
 				Default:      "breach",
-				Description:  "Alert severity (breach, threat, info)",
-				ValidateFunc: validation.StringInSlice([]string{"breach", "threat", "info"}, false),
+				Description:  "Alert severity (breach or threat)",
+				ValidateFunc: validation.StringInSlice([]string{"breach", "threat"}, false),
 			},
 			"mute": {
 				Type:        schema.TypeBool,
@@ -124,14 +148,43 @@ func resourceAlert() *schema.Resource {
 func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 	entityID := d.Get("entity_id").(string)
+	ruleName := d.Get("name").(string)
+	query := d.Get("query").(string)
 
+	// Step 1: Create a KPI for this alert
+	kpiName := generateKPIName(ruleName)
+	kpiReq := &client.KPICreateRequest{
+		Name: kpiName,
+		Definition: client.KPIDefinition{
+			Query:  query,
+			Source: "levitate",
+			Unit:   "count",
+		},
+		KPIType: "custom",
+	}
+
+	kpi, err := apiClient.CreateKPI(entityID, kpiReq)
+	if err != nil {
+		return diag.FromErr(fmt.Errorf("failed to create KPI for alert: %w", err))
+	}
+
+	// Store KPI info in state
+	d.Set("kpi_id", kpi.ID)
+	d.Set("kpi_name", kpi.Name)
+	d.Set("indicator", kpi.Name)
+
+	// Step 2: Create the alert using the KPI
 	req := &client.AlertCreateRequest{
-		RuleName:                     d.Get("name").(string),
-		PrimaryIndicator:             d.Get("indicator").(string),
+		RuleName:                     ruleName,
+		PrimaryIndicator:             kpi.Name,
 		Severity:                     d.Get("severity").(string),
 		IsDisabled:                   d.Get("is_disabled").(bool),
 		GroupTimeseriesNotifications: d.Get("group_timeseries_notifications").(bool),
-		ExpressionArgs:               make(map[string]interface{}),
+		ExpressionArgs: map[string]interface{}{
+			kpi.Name: map[string]interface{}{
+				"id": kpi.ID,
+			},
+		},
 	}
 
 	// Handle notification channels
@@ -199,6 +252,8 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 
 	alert, err := apiClient.CreateAlert(entityID, req)
 	if err != nil {
+		// Clean up the KPI if alert creation fails
+		apiClient.DeleteKPI(entityID, kpi.ID)
 		return diag.FromErr(fmt.Errorf("failed to create alert: %w", err))
 	}
 
@@ -259,100 +314,151 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 	entityID := d.Get("entity_id").(string)
+	oldKPIID := d.Get("kpi_id").(string)
+	oldKPIName := d.Get("kpi_name").(string)
+
+	// Track if we need to create a new KPI (name or query changed)
+	needsNewKPI := d.HasChange("name") || d.HasChange("query")
+	var newKPI *client.KPI
+
+	if needsNewKPI {
+		// Create new KPI with new name
+		newName := d.Get("name").(string)
+		newQuery := d.Get("query").(string)
+		newKPIName := generateKPIName(newName)
+
+		kpiReq := &client.KPICreateRequest{
+			Name: newKPIName,
+			Definition: client.KPIDefinition{
+				Query:  newQuery,
+				Source: "levitate",
+				Unit:   "count",
+			},
+			KPIType: "custom",
+		}
+
+		var err error
+		newKPI, err = apiClient.CreateKPI(entityID, kpiReq)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("failed to create new KPI for alert update: %w", err))
+		}
+	}
 
 	req := &client.AlertUpdateRequest{}
 
-	if d.HasChange("name") {
-		name := d.Get("name").(string)
-		req.RuleName = &name
-	}
-	if d.HasChange("indicator") {
-		indicator := d.Get("indicator").(string)
-		req.PrimaryIndicator = &indicator
-	}
-	if d.HasChange("expression") {
-		expression := d.Get("expression").(string)
-		req.Expression = &expression
-	}
-	if d.HasChange("severity") {
-		severity := d.Get("severity").(string)
-		req.Severity = &severity
-	}
-	if d.HasChange("mute") {
-		mute := d.Get("mute").(bool)
-		if mute {
-			muteUntil := -1
-			req.MuteUntil = &muteUntil
-		} else {
-			muteUntil := 0
-			req.MuteUntil = &muteUntil
-		}
-	}
-	if d.HasChange("is_disabled") {
-		isDisabled := d.Get("is_disabled").(bool)
-		req.IsDisabled = &isDisabled
-	}
-	if d.HasChange("group_timeseries_notifications") {
-		group := d.Get("group_timeseries_notifications").(bool)
-		req.GroupTimeseriesNotifications = &group
-	}
-	if d.HasChange("notification_channels") {
-		channelsList := d.Get("notification_channels").([]interface{})
-		channels := make([]string, len(channelsList))
-		for i, ch := range channelsList {
-			channels[i] = ch.(string)
-		}
-		req.NotificationChannels = channels
+	// PUT requires all fields - always include name, severity, indicator refs
+	// (Partial updates are not supported for alert-rules per OpenAPI spec)
+	name := d.Get("name").(string)
+	req.RuleName = &name
+
+	severity := d.Get("severity").(string)
+	req.Severity = &severity
+
+	// Determine KPI name and ID to use
+	kpiName := d.Get("kpi_name").(string)
+	kpiID := d.Get("kpi_id").(string)
+
+	// If we created a new KPI, use its details
+	if newKPI != nil {
+		kpiName = newKPI.Name
+		kpiID = newKPI.ID
 	}
 
-	// Handle static threshold changes
-	if d.HasChange("greater_than") || d.HasChange("less_than") || d.HasChange("bad_minutes") || d.HasChange("total_minutes") {
-		if greaterThan, ok := d.GetOk("greater_than"); ok {
-			badMinutes := d.Get("bad_minutes").(int)
-			totalMinutes := d.Get("total_minutes").(int)
-			condition := fmt.Sprintf("expr > %f", greaterThan.(float64))
-			alertCondition := fmt.Sprintf("count_true(result) >= %d", badMinutes)
-			req.Condition = &condition
-			req.AlertCondition = &alertCondition
-			req.EvalWindow = &totalMinutes
-		} else if lessThan, ok := d.GetOk("less_than"); ok {
-			badMinutes := d.Get("bad_minutes").(int)
-			totalMinutes := d.Get("total_minutes").(int)
-			condition := fmt.Sprintf("expr < %f", lessThan.(float64))
-			alertCondition := fmt.Sprintf("count_true(result) >= %d", badMinutes)
-			req.Condition = &condition
-			req.AlertCondition = &alertCondition
-			req.EvalWindow = &totalMinutes
-		}
+	req.PrimaryIndicator = &kpiName
+	req.ExpressionArgs = map[string]interface{}{
+		kpiName: map[string]interface{}{
+			"id": kpiID,
+		},
+	}
+	// Always include mute, is_disabled, group_timeseries_notifications (PUT requires all fields)
+	mute := d.Get("mute").(bool)
+	if mute {
+		muteUntil := -1
+		req.MuteUntil = &muteUntil
+	} else {
+		muteUntil := 0
+		req.MuteUntil = &muteUntil
 	}
 
-	if d.HasChange("properties") {
-		props := client.AlertProperties{
-			Description: d.Get("description").(string),
-		}
-		if v, ok := d.GetOk("properties"); ok {
-			propsList := v.([]interface{})
-			if len(propsList) > 0 {
-				propsMap := propsList[0].(map[string]interface{})
-				if runbookURL, ok := propsMap["runbook_url"].(string); ok && runbookURL != "" {
-					props.Runbook = map[string]interface{}{
-						"link": runbookURL,
-					}
+	isDisabled := d.Get("is_disabled").(bool)
+	req.IsDisabled = &isDisabled
+
+	group := d.Get("group_timeseries_notifications").(bool)
+	req.GroupTimeseriesNotifications = &group
+	// Always include notification_channels (PUT requires all fields)
+	channelsList := d.Get("notification_channels").([]interface{})
+	channels := make([]string, len(channelsList))
+	for i, ch := range channelsList {
+		channels[i] = ch.(string)
+	}
+	req.NotificationChannels = channels
+
+	// PUT requires all fields - always include condition, alert_condition, eval_window
+	// (Partial updates are not supported for alert-rules per OpenAPI spec)
+	badMinutes := d.Get("bad_minutes").(int)
+	totalMinutes := d.Get("total_minutes").(int)
+	alertCondition := fmt.Sprintf("count_true(result) >= %d", badMinutes)
+	req.AlertCondition = &alertCondition
+	req.EvalWindow = &totalMinutes
+
+	if greaterThan, ok := d.GetOk("greater_than"); ok {
+		condition := fmt.Sprintf("expr > %f", greaterThan.(float64))
+		req.Condition = &condition
+	} else if lessThan, ok := d.GetOk("less_than"); ok {
+		condition := fmt.Sprintf("expr < %f", lessThan.(float64))
+		req.Condition = &condition
+	}
+
+	// Always include properties (PUT requires all fields)
+	props := client.AlertProperties{
+		Description: d.Get("description").(string),
+	}
+	if v, ok := d.GetOk("properties"); ok {
+		propsList := v.([]interface{})
+		if len(propsList) > 0 {
+			propsMap := propsList[0].(map[string]interface{})
+			if runbookURL, ok := propsMap["runbook_url"].(string); ok && runbookURL != "" {
+				props.Runbook = map[string]interface{}{
+					"link": runbookURL,
 				}
-				if annotations, ok := propsMap["annotations"].(map[string]interface{}); ok {
-					props.Annotations = make(map[string]string)
-					for k, v := range annotations {
-						props.Annotations[k] = v.(string)
-					}
+			}
+			if annotations, ok := propsMap["annotations"].(map[string]interface{}); ok {
+				props.Annotations = make(map[string]string)
+				for k, v := range annotations {
+					props.Annotations[k] = v.(string)
 				}
 			}
 		}
-		req.Properties = &props
+	}
+	req.Properties = &props
+
+	updatedAlert, err := apiClient.UpdateAlert(entityID, d.Id(), req)
+	if err != nil {
+		// If we created a new KPI but alert update failed, clean it up
+		if newKPI != nil {
+			apiClient.DeleteKPI(entityID, newKPI.ID)
+		}
+		return diag.FromErr(fmt.Errorf("failed to update alert: %w", err))
 	}
 
-	_, err := apiClient.UpdateAlert(entityID, d.Id(), req)
-	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to update alert: %w", err))
+	// API deletes and recreates alert on update - update the ID
+	// (per OpenAPI spec: "Partial updating is not supported for alert-rules.
+	// The existing rule is deleted and a new one is created as process of updating alert-rules.")
+	if updatedAlert.ID != "" && updatedAlert.ID != d.Id() {
+		d.SetId(updatedAlert.ID)
+	}
+
+	// If we created a new KPI, delete the old one and update state
+	if newKPI != nil {
+		// Delete old KPI (ignore errors - it may already be gone)
+		if oldKPIID != "" && oldKPIName != "" {
+			apiClient.DeleteKPI(entityID, oldKPIID)
+		}
+
+		// Update state with new KPI info
+		d.Set("kpi_id", newKPI.ID)
+		d.Set("kpi_name", newKPI.Name)
+		d.Set("indicator", newKPI.Name)
 	}
 
 	return resourceAlertRead(ctx, d, m)
@@ -361,10 +467,17 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 func resourceAlertDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 	entityID := d.Get("entity_id").(string)
+	kpiID := d.Get("kpi_id").(string)
 
+	// Delete the alert first
 	err := apiClient.DeleteAlert(entityID, d.Id())
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to delete alert: %w", err))
+	}
+
+	// Delete the associated KPI (ignore errors - it may already be gone)
+	if kpiID != "" {
+		apiClient.DeleteKPI(entityID, kpiID)
 	}
 
 	d.SetId("")

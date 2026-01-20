@@ -12,10 +12,12 @@ import (
 )
 
 type Config struct {
-	// Direct access token (legacy)
+	// Direct access token (legacy) - for read/write operations
 	APIToken string
 	// Refresh token for automatic token management
 	RefreshToken string
+	// Delete token - required for delete operations (separate scope)
+	DeleteToken string
 	// Organization slug
 	Org string
 	// API base URL
@@ -38,11 +40,14 @@ type Client struct {
 	// Token management
 	tokenMutex  sync.RWMutex
 	accessToken *AccessToken
+	// Delete token (separate from access token due to scope requirements)
+	deleteToken string
 }
 
 func NewClient(config *Config) (*Client, error) {
 	client := &Client{
-		config: config,
+		config:      config,
+		deleteToken: config.DeleteToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -111,7 +116,7 @@ func (c *Client) refreshAccessToken() (*AccessToken, error) {
 		RefreshToken: c.config.RefreshToken,
 	}
 
-	reqURL := fmt.Sprintf("%s/organizations/%s/oauth/access_token", c.config.BaseURL, c.config.Org)
+	reqURL := fmt.Sprintf("%s/v4/oauth/access_token", c.config.BaseURL)
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
@@ -162,13 +167,13 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	reqURL := fmt.Sprintf("%s/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
 	req, err := http.NewRequest(method, reqURL, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Use X-LAST9-API-TOKEN header as per Last9 API spec
+	// Use X-LAST9-API-TOKEN header with Bearer prefix as per Last9 API docs
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", accessToken))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -236,11 +241,32 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 }
 
 func (c *Client) Delete(path string) error {
-	resp, err := c.doRequest("DELETE", path, nil)
+	// Delete operations require a separate token with delete scope
+	if c.deleteToken == "" {
+		return fmt.Errorf("delete_token is required for delete operations (delete scope)")
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+	req, err := http.NewRequest("DELETE", reqURL, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Use delete token for delete operations
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", c.deleteToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
 	return nil
 }
 
@@ -863,8 +889,8 @@ type Entity struct {
 	Indicators             []Indicator            `json:"indicators,omitempty"`
 	Links                  []EntityLink           `json:"links,omitempty"`
 	NotificationChannels   []string               `json:"notification_channels,omitempty"`
-	CreatedAt              string                 `json:"created_at,omitempty"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
+	CreatedAt              int64                  `json:"created_at,omitempty"`
+	UpdatedAt              int64                  `json:"updated_at,omitempty"`
 }
 
 type AdhocFilter struct {
@@ -962,10 +988,63 @@ func (c *Client) CreateEntity(entity *EntityCreateRequest) (*Entity, error) {
 
 func (c *Client) UpdateEntity(id string, entity *EntityUpdateRequest) (*Entity, error) {
 	var result Entity
-	err := c.Patch(fmt.Sprintf("/entities/%s", id), entity, &result)
+	err := c.Put(fmt.Sprintf("/entities/%s", id), entity, &result)
 	return &result, err
 }
 
 func (c *Client) DeleteEntity(id string) error {
 	return c.Delete(fmt.Sprintf("/entities/%s", id))
+}
+
+// KPI Types
+type KPI struct {
+	ID             string        `json:"id"`
+	Name           string        `json:"name"`
+	Definition     KPIDefinition `json:"definition"`
+	KPIType        string        `json:"kpi_type"`
+	OrganizationID string        `json:"organization_id"`
+	EntityID       string        `json:"entity_id"`
+	CreatedAt      int64         `json:"created_at"`
+	UpdatedAt      int64         `json:"updated_at"`
+}
+
+type KPIDefinition struct {
+	Query  string `json:"query"`
+	Source string `json:"source"`
+	Unit   string `json:"unit"`
+}
+
+type KPICreateRequest struct {
+	Name       string        `json:"name"`
+	Definition KPIDefinition `json:"definition"`
+	KPIType    string        `json:"kpi_type"`
+}
+
+type KPIUpdateRequest struct {
+	Name       string        `json:"name"`
+	Definition KPIDefinition `json:"definition"`
+	KPIType    string        `json:"kpi_type"`
+}
+
+// KPI methods
+func (c *Client) CreateKPI(entityID string, req *KPICreateRequest) (*KPI, error) {
+	var result KPI
+	err := c.Post(fmt.Sprintf("/entities/%s/kpis", entityID), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetKPI(entityID, kpiID string) (*KPI, error) {
+	var result KPI
+	err := c.Get(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateKPI(entityID, kpiID string, req *KPIUpdateRequest) (*KPI, error) {
+	var result KPI
+	err := c.Put(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteKPI(entityID, kpiID string) error {
+	return c.Delete(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID))
 }

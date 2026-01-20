@@ -48,7 +48,8 @@ func resourceEntity() *schema.Resource {
 			"data_source_id": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				Description: "Data source ID",
+				Computed:    true,
+				Description: "Data source ID (resolved from data_source name)",
 			},
 			"namespace": {
 				Type:        schema.TypeString,
@@ -379,7 +380,10 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 	}
 	if d.HasChange("data_source_id") {
 		dataSourceID := d.Get("data_source_id").(string)
-		req.DataSourceID = &dataSourceID
+		// Only set if non-empty to avoid sending invalid empty string
+		if dataSourceID != "" {
+			req.DataSourceID = &dataSourceID
+		}
 	}
 	if d.HasChange("namespace") {
 		namespace := d.Get("namespace").(string)
