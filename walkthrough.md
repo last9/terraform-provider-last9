@@ -459,3 +459,315 @@ ok      github.com/last9/terraform-provider-last9/internal/provider     2.646s
 ```
 
 Tests pass with refresh token authentication.
+
+---
+
+# Session: Control Plane Resources - Drop Rules and Forward Rules (2026-01-21)
+
+## Task Description
+
+Implement and verify control plane resources (Drop Rules and Forward Rules) for the Last9 Terraform provider. The approach was test-first: create integration tests to verify existing implementations work correctly, then fix issues discovered during testing.
+
+## Initial State
+
+| Resource | Implementation | Tests | Status |
+|----------|---------------|-------|--------|
+| Drop Rule | Existed (untested) | None | Needed verification |
+| Forward Rule | Existed (untested) | None | Needed verification |
+
+## Issues Discovered and Fixed
+
+### Issue 1: Drop Rule Delete Not Implemented
+- **Before**: `resourceDropRuleDelete()` only cleared `d.SetId("")` without calling API
+- **After**: Implemented list-based delete that fetches all rules, removes target rule, and POSTs updated list
+- **Reason**: Control plane APIs use list-based CRUD (POST replaces entire list)
+
+### Issue 2: Missing `cluster_id` Parameter
+- **Discovery**: POST operations to control plane APIs require `cluster_id` query parameter
+- **Before**: No `cluster_id` field in resource schema
+- **After**: Added `cluster_id` as required parameter for both Drop Rule and Forward Rule
+- **Source**: Found by exploring dashboard code in `~/repos/last9` per user direction
+
+### Issue 3: Import State Parsing
+- **Before**: `resourceDropRuleRead()` used `d.Get("region")` which is empty during import
+- **After**: Parse ID format `region:cluster_id:rule_name` to extract all values
+- **Reason**: During import, only the ID is available, not the schema values
+
+### Issue 4: ID Format Change
+- **Before**: ID format was `region:response_id:rule_name`
+- **After**: ID format is `region:cluster_id:rule_name`
+- **Reason**: The response ID from GET is not the cluster_id; cluster_id comes from clusters API
+
+### Issue 5: Forward Rule Required Same Fixes
+- Applied same changes to Forward Rule resource: cluster_id parameter, ID parsing, list-based CRUD
+
+## Files Created
+
+### `internal/provider/resource_drop_rule_test.go`
+
+**Unit Tests:**
+| Test | Purpose |
+|------|---------|
+| `TestExpandRoutingFilters` | Test filter expansion to client struct |
+| `TestFlattenRoutingFilters` | Test filter flattening from client struct |
+| `TestExpandRoutingFiltersWithConjunction` | Test filter with conjunction field |
+| `TestFlattenRoutingFiltersWithConjunction` | Test flatten with conjunction |
+| `TestExpandRoutingAction` | Test action expansion |
+| `TestFlattenRoutingAction` | Test action flattening |
+
+**Integration Tests:**
+| Test | Purpose |
+|------|---------|
+| `TestAccDropRule_basic` | Create/read/import drop rule |
+| `TestAccDropRule_update` | Update drop rule filter value |
+| `TestAccDropRule_multipleFilters` | Multiple filters with conjunction |
+
+### `internal/provider/resource_forward_rule_test.go`
+
+**Integration Tests:**
+| Test | Purpose |
+|------|---------|
+| `TestAccForwardRule_basic` | Create/read/import forward rule |
+| `TestAccForwardRule_update` | Update destination and filter value |
+| `TestAccForwardRule_multipleFilters` | Multiple filters with conjunction |
+
+### `llmtemp/cleanup_rules.sh`
+
+Shell script to clean up duplicate test rules from failed test runs.
+
+## Files Modified
+
+### `internal/client/client.go`
+
+| Addition | Purpose |
+|----------|---------|
+| `UpdateDropRules(region, clusterID string, rules *DropRulesRequest)` | POST drop rules with cluster_id param |
+| `UpdateForwardRules(region, clusterID string, rules *ForwardRulesRequest)` | POST forward rules with cluster_id param |
+
+### `internal/provider/resource_drop_rule.go`
+
+| Function | Change |
+|----------|--------|
+| Schema | Added `cluster_id` required field with ForceNew |
+| Import | Added `strings` import |
+| `resourceDropRuleCreate()` | Get existing rules, check duplicates, append new, POST with cluster_id |
+| `resourceDropRuleRead()` | Parse ID to extract region, cluster_id, rule_name |
+| `resourceDropRuleUpdate()` | List-based update: GET all, modify matching, POST full list |
+| `resourceDropRuleDelete()` | List-based delete: GET all, remove matching, POST remaining |
+
+### `internal/provider/resource_forward_rule.go`
+
+| Function | Change |
+|----------|--------|
+| Schema | Added `cluster_id` required field with ForceNew |
+| Import | Added `strings` import |
+| `resourceForwardRuleCreate()` | Get existing rules, check duplicates, append new, POST with cluster_id |
+| `resourceForwardRuleRead()` | Parse ID to extract region, cluster_id, rule_name |
+| `resourceForwardRuleUpdate()` | List-based update: GET all, modify matching, POST full list |
+| `resourceForwardRuleDelete()` | List-based delete: GET all, remove matching, POST remaining |
+
+## Trade-offs Considered
+
+1. **List-based CRUD pattern**: The control plane APIs don't support individual resource CRUD - they only support replacing the entire list. This means:
+   - Create: Fetch all, append new, POST full list
+   - Update: Fetch all, modify matching, POST full list
+   - Delete: Fetch all, remove matching, POST remaining
+   - **Risk**: Concurrent Terraform runs could overwrite each other's changes
+
+2. **cluster_id as user-provided parameter**: Rather than auto-discovering cluster_id, it's a required user input because:
+   - Cluster ID comes from a separate `/clusters` API endpoint
+   - Users may have multiple clusters and need to specify which one
+   - Avoids extra API call on every operation
+
+3. **ID format**: Using `region:cluster_id:rule_name` provides all info needed to identify the resource uniquely and supports import without additional lookups.
+
+## Environment Variables for Testing
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LAST9_WRITE_REFRESH_TOKEN` | Refresh token with write scope | Required |
+| `LAST9_DELETE_REFRESH_TOKEN` | Refresh token with delete scope | Required |
+| `LAST9_API_BASE_URL` | API hostname | `https://alpha.last9.io` |
+| `LAST9_ORG` | Organization slug | `last9` |
+| `LAST9_TEST_REGION` | Region for tests | `ap-south-1` |
+| `LAST9_TEST_CLUSTER_ID` | Cluster ID for tests | Required (no default) |
+
+## Running Tests
+
+```bash
+# Set environment variables
+export LAST9_WRITE_REFRESH_TOKEN="<write-refresh-token>"
+export LAST9_DELETE_REFRESH_TOKEN="<delete-refresh-token>"
+export LAST9_API_BASE_URL="https://alpha.last9.io"
+export LAST9_ORG="last9"
+export LAST9_TEST_REGION="ap-south-1"
+export LAST9_TEST_CLUSTER_ID="<cluster-id-from-clusters-api>"
+
+# Run drop rule tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccDropRule" -timeout 10m
+
+# Run forward rule tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccForwardRule" -timeout 10m
+
+# Run unit tests for helpers
+CGO_ENABLED=0 go test -v ./internal/provider/ -run "TestExpand|TestFlatten"
+```
+
+## Test Results (Live API)
+
+```
+=== RUN   TestExpandRoutingFilters
+--- PASS: TestExpandRoutingFilters (0.00s)
+=== RUN   TestFlattenRoutingFilters
+--- PASS: TestFlattenRoutingFilters (0.00s)
+=== RUN   TestExpandRoutingFiltersWithConjunction
+--- PASS: TestExpandRoutingFiltersWithConjunction (0.00s)
+=== RUN   TestFlattenRoutingFiltersWithConjunction
+--- PASS: TestFlattenRoutingFiltersWithConjunction (0.00s)
+=== RUN   TestExpandRoutingAction
+--- PASS: TestExpandRoutingAction (0.00s)
+=== RUN   TestFlattenRoutingAction
+--- PASS: TestFlattenRoutingAction (0.00s)
+=== RUN   TestAccDropRule_basic
+--- PASS: TestAccDropRule_basic (3.21s)
+=== RUN   TestAccDropRule_update
+--- PASS: TestAccDropRule_update (4.56s)
+=== RUN   TestAccDropRule_multipleFilters
+--- PASS: TestAccDropRule_multipleFilters (2.89s)
+=== RUN   TestAccForwardRule_basic
+--- PASS: TestAccForwardRule_basic (3.15s)
+=== RUN   TestAccForwardRule_update
+--- PASS: TestAccForwardRule_update (4.42s)
+=== RUN   TestAccForwardRule_multipleFilters
+--- PASS: TestAccForwardRule_multipleFilters (2.91s)
+PASS
+```
+
+All 12 tests pass (6 unit tests + 3 drop rule integration tests + 3 forward rule integration tests).
+
+## User Review Comments
+
+- User directed to check dashboard code in `~/repos/last9` to understand how cluster_id is used for control plane operations
+- User confirmed backend permissions were updated for control plane API access
+- cluster_id value (`40912c6e-2f2e-440b-b722-12026d793557`) was obtained from the clusters API
+
+---
+
+# Session: Scheduled Search Tests and API Fixes (2026-01-21)
+
+## Task Description
+
+1. Run scheduled search integration tests
+2. Verify that refresh token authentication works end-to-end (no pre-generated access tokens needed)
+
+## Issues Discovered and Fixed
+
+### Issue 1: Notification Destinations API Returns Array
+- **Before**: `ListNotificationDestinations()` expected `{"notification_destinations": [...]}`
+- **After**: API returns array directly `[...]`
+- **Fix**: Changed return type to `[]NotificationDestination` and fixed data source to iterate over array
+
+### Issue 2: Scheduled Search API Returns Array
+- **Before**: `GetScheduledSearchAlerts()` expected `{"properties": [...]}`
+- **After**: API returns array directly `[...]`
+- **Fix**: Created `ScheduledSearchAlertFull` type for API response, updated methods to return arrays
+
+### Issue 3: Scheduled Search API Uses Individual CRUD (Not List-Based)
+- **Before**: Code used list-based CRUD pattern (fetch all, modify, POST full list)
+- **After**: API expects individual alert objects for create/update/delete
+- **Fix**: Changed to REST-style individual operations:
+  - `POST /logs_settings/scheduled_search?region=X` - create single alert
+  - `PUT /logs_settings/scheduled_search/{id}?region=X` - update single alert
+  - `DELETE /logs_settings/scheduled_search/{id}?region=X` - delete single alert
+
+### Issue 4: Alert Destinations Drift
+- **Before**: API returns internal association IDs, not the notification destination IDs user specified
+- **After**: Don't read `alert_destinations` from API response
+- **Fix**: Preserve user's configured notification destination IDs, don't update from API
+
+### Issue 5: Tests Missing Provider Config
+- **Before**: Scheduled search test configs didn't include `testAccProviderConfig()`
+- **After**: Added `testAccProviderConfig()` to all test config functions
+
+### Issue 6: Destroy Check Not Implemented
+- **Before**: `testAccCheckScheduledSearchAlertDestroy()` was a no-op
+- **After**: Implemented actual destroy verification using API
+
+## Files Modified
+
+### `internal/client/client.go`
+
+| Change | Description |
+|--------|-------------|
+| Removed `NotificationDestinationsResponse` type | API returns array directly |
+| `ListNotificationDestinations()` | Returns `[]NotificationDestination` |
+| Added `ScheduledSearchAlertFull` type | Full API response with ID, region, etc. |
+| Added `ToScheduledSearchAlert()` method | Convert full response to request format |
+| `GetScheduledSearchAlerts()` | Returns `[]ScheduledSearchAlertFull` |
+| `CreateScheduledSearchAlert()` | POST single alert, returns `*ScheduledSearchAlertFull` |
+| `UpdateScheduledSearchAlert()` | PUT single alert by ID, returns `*ScheduledSearchAlertFull` |
+| `DeleteScheduledSearchAlert()` | DELETE single alert by ID |
+| Removed `ScheduledSearchRequest` usage | No longer needed for list-based CRUD |
+
+### `internal/provider/resource_scheduled_search_alert.go`
+
+| Function | Change |
+|----------|--------|
+| `resourceScheduledSearchAlertCreate()` | Use single-object response |
+| `resourceScheduledSearchAlertRead()` | Use `ScheduledSearchAlertFull` type |
+| `resourceScheduledSearchAlertRead()` | Don't read `alert_destinations` from API |
+| `resourceScheduledSearchAlertUpdate()` | Use alert ID for PUT request |
+| `resourceScheduledSearchAlertDelete()` | Use alert ID for DELETE request |
+
+### `internal/provider/resource_scheduled_search_alert_test.go`
+
+| Change | Description |
+|--------|-------------|
+| Added `testAccProviderConfig()` to all config functions | Proper provider configuration |
+| Implemented `testAccCheckScheduledSearchAlertDestroy()` | Actual destroy verification |
+| Changed `testAccPreCheck` to `testAccPreCheckWithDelete` | Tests need delete token |
+| Added `ImportStateVerifyIgnore: []string{"alert_destinations"}` | Ignore drift during import |
+
+### `internal/provider/data_sources.go`
+
+| Change | Description |
+|--------|-------------|
+| Fixed notification destination lookup | Iterate over array, not `.NotificationDestinations` |
+
+## Refresh Token Verification
+
+Confirmed that the Terraform provider correctly handles refresh token authentication internally:
+- **Test**: Ran `TestAccDropRule_basic` with only `LAST9_WRITE_REFRESH_TOKEN` and `LAST9_DELETE_REFRESH_TOKEN`
+- **Result**: Test passed - provider internally exchanges refresh tokens for access tokens via OAuth endpoint
+- **Note**: The shell scripts in `llmtemp/` that pre-generate access tokens are only for manual API testing, not required for Terraform operations
+
+## Environment Variables for Testing
+
+| Variable | Description |
+|----------|-------------|
+| `LAST9_WRITE_REFRESH_TOKEN` | Refresh token with write scope |
+| `LAST9_DELETE_REFRESH_TOKEN` | Refresh token with delete scope |
+| `LAST9_API_BASE_URL` | API hostname (e.g., `https://alpha.last9.io`) |
+| `LAST9_ORG` | Organization slug |
+| `LAST9_TEST_REGION` | Region for tests (e.g., `ap-south-1`) |
+| `LAST9_TEST_NOTIFICATION_DEST_ID` | Notification destination ID for scheduled search tests |
+
+## Test Results
+
+```
+=== RUN   TestAccScheduledSearchAlert_basic
+--- PASS: TestAccScheduledSearchAlert_basic (2.59s)
+=== RUN   TestAccScheduledSearchAlert_update
+--- PASS: TestAccScheduledSearchAlert_update (3.17s)
+=== RUN   TestAccScheduledSearchAlert_withGrouping
+--- PASS: TestAccScheduledSearchAlert_withGrouping (2.12s)
+PASS
+```
+
+All 3 scheduled search integration tests pass.
+
+## Trade-offs Considered
+
+1. **alert_destinations not read from API**: The API returns internal association IDs that differ from the notification destination IDs the user specified. We preserve the user's config to avoid drift. This means external changes to alert destinations won't be detected by Terraform.
+
+2. **Individual CRUD vs List-Based**: Unlike drop rules and forward rules, scheduled search alerts use standard REST operations (POST/PUT/DELETE individual resources). This is more Terraform-friendly as it avoids race conditions from list-based CRUD.

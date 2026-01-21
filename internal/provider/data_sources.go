@@ -288,7 +288,7 @@ func dataSourceNotificationDestinationRead(ctx context.Context, d *schema.Resour
 	// Search by ID or name
 	if id, ok := d.GetOk("id"); ok {
 		idInt := id.(int)
-		for _, dest := range result.NotificationDestinations {
+		for _, dest := range result {
 			if dest.ID == idInt {
 				destination = &dest
 				break
@@ -299,7 +299,7 @@ func dataSourceNotificationDestinationRead(ctx context.Context, d *schema.Resour
 		}
 	} else if name, ok := d.GetOk("name"); ok {
 		nameStr := name.(string)
-		for _, dest := range result.NotificationDestinations {
+		for _, dest := range result {
 			if dest.Name == nameStr {
 				destination = &dest
 				break

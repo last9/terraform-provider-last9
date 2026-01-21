@@ -214,7 +214,7 @@ func TestAccScheduledSearchAlert_basic(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
@@ -231,9 +231,10 @@ func TestAccScheduledSearchAlert_basic(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"alert_destinations"},
 			},
 		},
 	})
@@ -253,7 +254,7 @@ func TestAccScheduledSearchAlert_update(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
@@ -292,7 +293,7 @@ func TestAccScheduledSearchAlert_withGrouping(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
@@ -327,15 +328,43 @@ func testAccCheckScheduledSearchAlertExists(resourceName string, alertID *string
 }
 
 func testAccCheckScheduledSearchAlertDestroy(s *terraform.State) error {
-	// Note: Implement actual destroy check if needed
-	// For now, we'll skip the check as it requires API calls
+	provider := testAccProvider()
+	providerConfig := provider.Meta()
+	if providerConfig == nil {
+		// Provider not configured, skip check
+		return nil
+	}
+
+	apiClient := providerConfig.(*client.Client)
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "last9_scheduled_search_alert" {
+			continue
+		}
+
+		region := rs.Primary.Attributes["region"]
+		name := rs.Primary.Attributes["name"]
+
+		alerts, err := apiClient.GetScheduledSearchAlerts(region)
+		if err != nil {
+			// API error, assume deleted
+			continue
+		}
+
+		for _, alert := range alerts {
+			if alert.RuleName == name {
+				return fmt.Errorf("scheduled search alert %s still exists in region %s", name, region)
+			}
+		}
+	}
+
 	return nil
 }
 
 // Configuration helpers
 
 func testAccScheduledSearchAlertConfig_basic(region, destID string) string {
-	return fmt.Sprintf(`
+	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Error Count Alert"
@@ -378,7 +407,7 @@ resource "last9_scheduled_search_alert" "test" {
 }
 
 func testAccScheduledSearchAlertConfig_updated(region, destID string) string {
-	return fmt.Sprintf(`
+	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Error Count Alert"
@@ -421,7 +450,7 @@ resource "last9_scheduled_search_alert" "test" {
 }
 
 func testAccScheduledSearchAlertConfig_withGrouping(region, destID string) string {
-	return fmt.Sprintf(`
+	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Grouped Alert"

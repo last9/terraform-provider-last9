@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -25,6 +26,12 @@ func resourceForwardRule() *schema.Resource {
 				Required:    true,
 				ForceNew:    true,
 				Description: "Region for the forward rule",
+			},
+			"cluster_id": {
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "Cluster ID for the forward rule (from the clusters API)",
 			},
 			"name": {
 				Type:        schema.TypeString,
@@ -80,6 +87,8 @@ func resourceForwardRule() *schema.Resource {
 func resourceForwardRuleCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 	region := d.Get("region").(string)
+	clusterID := d.Get("cluster_id").(string)
+	ruleName := d.Get("name").(string)
 
 	// Get existing rules
 	existing, err := apiClient.GetForwardRules(region)
@@ -87,41 +96,57 @@ func resourceForwardRuleCreate(ctx context.Context, d *schema.ResourceData, m in
 		return diag.FromErr(fmt.Errorf("failed to get existing forward rules: %w", err))
 	}
 
+	// Check if rule already exists (to avoid duplicates)
+	for _, rule := range existing.Properties {
+		if rule.Name == ruleName {
+			return diag.FromErr(fmt.Errorf("forward rule %s already exists in region %s", ruleName, region))
+		}
+	}
+
 	// Create new rule
 	newRule := client.ForwardRule{
-		Name:        d.Get("name").(string),
+		Name:        ruleName,
 		Telemetry:   d.Get("telemetry").(string),
 		Destination: d.Get("destination").(string),
 		Filters:     expandRoutingFilters(d.Get("filters").([]interface{})),
 	}
 
 	// Add to existing rules
-	rules := existing.Properties
-	rules = append(rules, newRule)
+	rules := append(existing.Properties, newRule)
 
 	req := &client.ForwardRulesRequest{
 		Properties: rules,
 	}
 
-	result, err := apiClient.UpsertForwardRules(region, req)
+	_, err = apiClient.UpdateForwardRules(region, clusterID, req)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to create forward rule: %w", err))
 	}
 
-	d.SetId(fmt.Sprintf("%s:%s:%s", region, result.ID, newRule.Name))
+	d.SetId(fmt.Sprintf("%s:%s:%s", region, clusterID, ruleName))
 	return resourceForwardRuleRead(ctx, d, m)
 }
 
 func resourceForwardRuleRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
-	region := d.Get("region").(string)
+
+	// Parse ID to extract region, cluster_id, and rule name (format: region:cluster_id:rule_name)
+	// During import, d.Get("region") will be empty, so we need to parse from ID
+	id := d.Id()
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 {
+		return diag.FromErr(fmt.Errorf("invalid forward rule ID format: %s (expected region:cluster_id:rule_name)", id))
+	}
+
+	region := parts[0]
+	clusterID := parts[1]
+	ruleName := parts[2]
 
 	result, err := apiClient.GetForwardRules(region)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to read forward rules: %w", err))
 	}
 
-	ruleName := d.Get("name").(string)
 	var foundRule *client.ForwardRule
 	for i := range result.Properties {
 		if result.Properties[i].Name == ruleName {
@@ -135,6 +160,9 @@ func resourceForwardRuleRead(ctx context.Context, d *schema.ResourceData, m inte
 		return nil
 	}
 
+	// Set all attributes from the found rule
+	d.Set("region", region)
+	d.Set("cluster_id", clusterID)
 	d.Set("name", foundRule.Name)
 	d.Set("telemetry", foundRule.Telemetry)
 	d.Set("destination", foundRule.Destination)
@@ -146,6 +174,8 @@ func resourceForwardRuleRead(ctx context.Context, d *schema.ResourceData, m inte
 func resourceForwardRuleUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 	region := d.Get("region").(string)
+	clusterID := d.Get("cluster_id").(string)
+	ruleName := d.Get("name").(string)
 
 	// Get existing rules
 	existing, err := apiClient.GetForwardRules(region)
@@ -153,30 +183,35 @@ func resourceForwardRuleUpdate(ctx context.Context, d *schema.ResourceData, m in
 		return diag.FromErr(fmt.Errorf("failed to get existing forward rules: %w", err))
 	}
 
-	ruleName := d.Get("name").(string)
-	updated := false
+	// Create updated rule
+	updatedRule := client.ForwardRule{
+		Name:        ruleName,
+		Telemetry:   d.Get("telemetry").(string),
+		Destination: d.Get("destination").(string),
+		Filters:     expandRoutingFilters(d.Get("filters").([]interface{})),
+	}
 
 	// Update the rule in the list
 	rules := make([]client.ForwardRule, 0, len(existing.Properties))
+	found := false
 	for _, rule := range existing.Properties {
 		if rule.Name == ruleName {
-			rule.Telemetry = d.Get("telemetry").(string)
-			rule.Destination = d.Get("destination").(string)
-			rule.Filters = expandRoutingFilters(d.Get("filters").([]interface{}))
-			updated = true
+			rules = append(rules, updatedRule)
+			found = true
+		} else {
+			rules = append(rules, rule)
 		}
-		rules = append(rules, rule)
 	}
 
-	if !updated {
-		return diag.FromErr(fmt.Errorf("forward rule not found"))
+	if !found {
+		return diag.FromErr(fmt.Errorf("forward rule %s not found for update", ruleName))
 	}
 
 	req := &client.ForwardRulesRequest{
 		Properties: rules,
 	}
 
-	_, err = apiClient.UpsertForwardRules(region, req)
+	_, err = apiClient.UpdateForwardRules(region, clusterID, req)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to update forward rule: %w", err))
 	}
@@ -186,15 +221,23 @@ func resourceForwardRuleUpdate(ctx context.Context, d *schema.ResourceData, m in
 
 func resourceForwardRuleDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
-	region := d.Get("region").(string)
+
+	// Parse ID to extract region, cluster_id, and rule name (format: region:cluster_id:rule_name)
+	id := d.Id()
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 {
+		return diag.FromErr(fmt.Errorf("invalid forward rule ID format: %s", id))
+	}
+
+	region := parts[0]
+	clusterID := parts[1]
+	ruleName := parts[2]
 
 	// Get existing rules
 	existing, err := apiClient.GetForwardRules(region)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to get existing forward rules: %w", err))
 	}
-
-	ruleName := d.Get("name").(string)
 
 	// Remove the rule from the list
 	rules := make([]client.ForwardRule, 0)
@@ -208,7 +251,7 @@ func resourceForwardRuleDelete(ctx context.Context, d *schema.ResourceData, m in
 		Properties: rules,
 	}
 
-	_, err = apiClient.UpsertForwardRules(region, req)
+	_, err = apiClient.UpdateForwardRules(region, clusterID, req)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to delete forward rule: %w", err))
 	}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -596,6 +595,12 @@ func (c *Client) CreateDropRules(region string, rules *DropRulesRequest) (*DropR
 	return &result, err
 }
 
+func (c *Client) UpdateDropRules(region, clusterID string, rules *DropRulesRequest) (*DropRulesResponse, error) {
+	var result DropRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/routing?region=%s&cluster_id=%s", region, clusterID), rules, &result)
+	return &result, err
+}
+
 func (c *Client) GetForwardRules(region string) (*ForwardRulesResponse, error) {
 	var result ForwardRulesResponse
 	err := c.Get(fmt.Sprintf("/logs_settings/forward?region=%s", region), &result)
@@ -605,6 +610,12 @@ func (c *Client) GetForwardRules(region string) (*ForwardRulesResponse, error) {
 func (c *Client) UpsertForwardRules(region string, rules *ForwardRulesRequest) (*ForwardRulesResponse, error) {
 	var result ForwardRulesResponse
 	err := c.Post(fmt.Sprintf("/logs_settings/forward?region=%s", region), rules, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateForwardRules(region, clusterID string, rules *ForwardRulesRequest) (*ForwardRulesResponse, error) {
+	var result ForwardRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/forward?region=%s&cluster_id=%s", region, clusterID), rules, &result)
 	return &result, err
 }
 
@@ -772,9 +783,7 @@ type NotificationDestination struct {
 	SendResolved   bool                   `json:"send_resolved"`
 }
 
-type NotificationDestinationsResponse struct {
-	NotificationDestinations []NotificationDestination `json:"notification_destinations"`
-}
+// NotificationDestinationsResponse is kept for backward compatibility but the API returns an array directly
 
 // Scheduled Search Alert Types
 type ScheduledSearchAlert struct {
@@ -817,29 +826,48 @@ type ScheduledSearchRequest struct {
 	Properties []ScheduledSearchAlert `json:"properties"`
 }
 
-type ScheduledSearchResponse struct {
-	ID         string                 `json:"id"`
-	Region     string                 `json:"region"`
-	Properties []ScheduledSearchAlert `json:"properties"`
-	CreatedAt  int64                  `json:"created_at"`
-	UpdatedAt  int64                  `json:"updated_at"`
+// ScheduledSearchAlertFull represents the full alert object returned by the API
+type ScheduledSearchAlertFull struct {
+	ID             string                    `json:"id"`
+	RuleName       string                    `json:"rule_name"`
+	EntityID       string                    `json:"entity_id"`
+	RuleType       string                    `json:"rule_type"`
+	QueryType      string                    `json:"query_type"`
+	PhysicalIndex  string                    `json:"physical_index"`
+	Region         string                    `json:"region"`
+	OrganizationID string                    `json:"organization_id"`
+	Properties     ScheduledSearchProperties `json:"properties"`
+	CreatedBy      string                    `json:"created_by"`
+	CreatedAt      int64                     `json:"created_at"`
+	UpdatedAt      int64                     `json:"updated_at"`
+}
+
+// ToScheduledSearchAlert converts the full API response to the request format
+func (f *ScheduledSearchAlertFull) ToScheduledSearchAlert() ScheduledSearchAlert {
+	return ScheduledSearchAlert{
+		RuleName:      f.RuleName,
+		QueryType:     f.QueryType,
+		PhysicalIndex: f.PhysicalIndex,
+		RuleType:      f.RuleType,
+		Properties:    f.Properties,
+	}
 }
 
 // Notification Destination methods
-func (c *Client) ListNotificationDestinations() (*NotificationDestinationsResponse, error) {
-	var result NotificationDestinationsResponse
+func (c *Client) ListNotificationDestinations() ([]NotificationDestination, error) {
+	var result []NotificationDestination
 	err := c.Get("/notification_settings", &result)
-	return &result, err
+	return result, err
 }
 
 func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, error) {
-	result, err := c.ListNotificationDestinations()
+	destinations, err := c.ListNotificationDestinations()
 	if err != nil {
 		return nil, err
 	}
 
 	// Find destination by ID
-	for _, dest := range result.NotificationDestinations {
+	for _, dest := range destinations {
 		if dest.ID == id {
 			return &dest, nil
 		}
@@ -849,111 +877,36 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 }
 
 // Scheduled Search methods
-func (c *Client) GetScheduledSearchAlerts(region string) (*ScheduledSearchResponse, error) {
-	var result ScheduledSearchResponse
+func (c *Client) GetScheduledSearchAlerts(region string) ([]ScheduledSearchAlertFull, error) {
+	var result []ScheduledSearchAlertFull
 	err := c.Get(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), &result)
-	return &result, err
+	return result, err
 }
 
-func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
-	// Get existing alerts
-	// Note: This API uses array-based CRUD which has inherent race conditions.
-	// Terraform's state locking provides some protection, but concurrent operations
-	// outside Terraform could still cause data loss. This is an API limitation.
-	existing, err := c.GetScheduledSearchAlerts(region)
-	if err != nil {
-		// Only treat 404 as empty list, return other errors
-		if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
-			return nil, fmt.Errorf("failed to get existing alerts: %w", err)
-		}
-		existing = &ScheduledSearchResponse{Properties: []ScheduledSearchAlert{}}
-	}
-
-	// Check for duplicate name
-	for _, existingAlert := range existing.Properties {
-		if existingAlert.RuleName == alert.RuleName {
-			return nil, fmt.Errorf("scheduled search alert with name '%s' already exists in region %s", alert.RuleName, region)
-		}
-	}
-
-	// Append new alert
-	req := &ScheduledSearchRequest{
-		Properties: append(existing.Properties, *alert),
-	}
-
-	var result ScheduledSearchResponse
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
-	return &result, err
-}
-
-func (c *Client) UpdateScheduledSearchAlert(region, oldName string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
-	// Get existing alerts
-	existing, err := c.GetScheduledSearchAlerts(region)
+func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchAlertFull, error) {
+	// The scheduled search API expects a single alert object, not an array
+	// Each POST creates a new alert
+	var result ScheduledSearchAlertFull
+	err := c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), alert, &result)
 	if err != nil {
 		return nil, err
 	}
-
-	// Find and replace the alert with matching rule_name
-	// Use oldName to find the existing alert (in case name is being changed)
-	found := false
-	for i, existingAlert := range existing.Properties {
-		if existingAlert.RuleName == oldName {
-			existing.Properties[i] = *alert
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("scheduled search alert '%s' not found", oldName)
-	}
-
-	// If name is changing, check for duplicate new name
-	if oldName != alert.RuleName {
-		for _, existingAlert := range existing.Properties {
-			if existingAlert.RuleName == alert.RuleName {
-				return nil, fmt.Errorf("cannot rename: scheduled search alert with name '%s' already exists", alert.RuleName)
-			}
-		}
-	}
-
-	req := &ScheduledSearchRequest{
-		Properties: existing.Properties,
-	}
-
-	var result ScheduledSearchResponse
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
-	return &result, err
+	return &result, nil
 }
 
-func (c *Client) DeleteScheduledSearchAlert(region, ruleName string) error {
-	// Get existing alerts
-	existing, err := c.GetScheduledSearchAlerts(region)
+func (c *Client) UpdateScheduledSearchAlert(region, alertID string, alert *ScheduledSearchAlert) (*ScheduledSearchAlertFull, error) {
+	// The scheduled search API expects a single alert object for PUT updates
+	var result ScheduledSearchAlertFull
+	err := c.Put(fmt.Sprintf("/logs_settings/scheduled_search/%s?region=%s", alertID, region), alert, &result)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return &result, nil
+}
 
-	// Filter out the alert to delete
-	originalLen := len(existing.Properties)
-	filtered := []ScheduledSearchAlert{}
-	for _, alert := range existing.Properties {
-		if alert.RuleName != ruleName {
-			filtered = append(filtered, alert)
-		}
-	}
-
-	// Verify alert was found
-	if len(filtered) == originalLen {
-		return fmt.Errorf("scheduled search alert '%s' not found in region %s", ruleName, region)
-	}
-
-	// Update with filtered list
-	req := &ScheduledSearchRequest{
-		Properties: filtered,
-	}
-
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, nil)
-	return err
+func (c *Client) DeleteScheduledSearchAlert(region, alertID string) error {
+	// Delete individual scheduled search alert by ID
+	return c.Delete(fmt.Sprintf("/logs_settings/scheduled_search/%s?region=%s", alertID, region))
 }
 
 // Entity Types

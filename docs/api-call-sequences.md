@@ -421,6 +421,550 @@ If the alert name or query changes, a new KPI is created first:
 
 ---
 
+## Drop Rules
+
+Drop Rules are represented as `last9_drop_rule` resources in Terraform. They use a **list-based CRUD pattern** where the entire list of rules is replaced on each operation.
+
+**Important**: The API manages rules as a list. Each create/update/delete operation:
+1. GETs the current list of all rules
+2. Modifies the list (add/update/remove)
+3. POSTs the entire modified list back
+
+### Create
+
+**Terraform operation**: `terraform apply` (new resource)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Get existing rules                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/routing?region={region}                                   │
+│                                                                              │
+│ Response:                                                                    │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     { "name": "existing-rule-1", ... },                                      │
+│     { "name": "existing-rule-2", ... }                                       │
+│   ]                                                                          │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Check for duplicate name                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ If rule with same name exists → Error: "drop rule X already exists"          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: POST updated list with new rule appended                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /logs_settings/routing?region={region}&cluster_id={cluster_id}          │
+│                                                                              │
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     { "name": "existing-rule-1", ... },     ◄── Existing rules               │
+│     { "name": "existing-rule-2", ... },                                      │
+│     {                                        ◄── New rule appended           │
+│       "name": "my-drop-rule",                                                │
+│       "telemetry": "logs",                                                   │
+│       "filters": [                                                           │
+│         {                                                                    │
+│           "key": "attributes[\"service\"]",                                  │
+│           "value": "debug-service",                                          │
+│           "operator": "equals",                                              │
+│           "conjunction": "and"              ◄── Optional, for multiple       │
+│         }                                                                    │
+│       ],                                                                     │
+│       "action": {                                                            │
+│         "name": "drop",                                                      │
+│         "destination": "/dev/null",                                          │
+│         "properties": {}                                                     │
+│       }                                                                      │
+│     }                                                                        │
+│   ]                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Note: cluster_id is MANDATORY for POST operations                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Read rule (via list) to sync state                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/routing?region={region}                                   │
+│                                                                              │
+│ Find rule by name in response                                                │
+│                                                                              │
+│ Terraform ID format: {region}:{cluster_id}:{rule_name}                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Read
+
+**Terraform operation**: `terraform plan`, `terraform refresh`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GET /logs_settings/routing?region={region}                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Response:                                                                    │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     {                                                                        │
+│       "name": "my-drop-rule",                                                │
+│       "telemetry": "logs",                                                   │
+│       "filters": [...],                                                      │
+│       "action": {...}                                                        │
+│     },                                                                       │
+│     ...                                                                      │
+│   ]                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Provider finds the rule by name from the list                                │
+│ If not found → resource is removed from state                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Update
+
+**Terraform operation**: `terraform apply` (existing resource changed)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Get existing rules                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/routing?region={region}                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Replace matching rule in list                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Find rule by name → Replace with updated rule                                │
+│ If not found → Error: "drop rule X not found for update"                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: POST updated list                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /logs_settings/routing?region={region}&cluster_id={cluster_id}          │
+│                                                                              │
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     { "name": "other-rule", ... },                                           │
+│     { "name": "my-drop-rule", ... }         ◄── Updated rule                 │
+│   ]                                                                          │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Read rule to sync state                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/routing?region={region}                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Delete
+
+**Terraform operation**: `terraform destroy`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Get existing rules                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/routing?region={region}                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Remove rule from list                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Filter out rule by name                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: POST list without the deleted rule                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /logs_settings/routing?region={region}&cluster_id={cluster_id}          │
+│                                                                              │
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     { "name": "remaining-rule-1", ... },                                     │
+│     { "name": "remaining-rule-2", ... }                                      │
+│   ]                                                  ◄── Deleted rule absent │
+│ }                                                                            │
+│                                                                              │
+│ Note: Requires delete-scoped token                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Import
+
+**Terraform operation**: `terraform import last9_drop_rule.name <region>:<cluster_id>:<rule_name>`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Import ID format: region:cluster_id:rule_name                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Example: terraform import last9_drop_rule.my_rule ap-south-1:abc-123:my-rule │
+│                                                                              │
+│ The provider:                                                                │
+│ 1. Parses the composite ID                                                   │
+│ 2. Calls GET /logs_settings/routing?region=ap-south-1                        │
+│ 3. Finds rule by name in response                                            │
+│ 4. Sets region, cluster_id, and rule attributes in state                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Forward Rules
+
+Forward Rules are represented as `last9_forward_rule` resources in Terraform. Like Drop Rules, they use a **list-based CRUD pattern**.
+
+### Create
+
+**Terraform operation**: `terraform apply` (new resource)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Get existing rules                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/forward?region={region}                                   │
+│                                                                              │
+│ Response:                                                                    │
+│ {                                                                            │
+│   "properties": [...]                                                        │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Check for duplicate name                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ If rule with same name exists → Error                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: POST updated list with new rule appended                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /logs_settings/forward?region={region}&cluster_id={cluster_id}          │
+│                                                                              │
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     ...existing rules...,                                                    │
+│     {                                                                        │
+│       "name": "my-forward-rule",                                             │
+│       "telemetry": "logs",                                                   │
+│       "destination": "https://logs.example.com/ingest",                      │
+│       "filters": [                                                           │
+│         {                                                                    │
+│           "key": "attributes[\"service\"]",                                  │
+│           "value": "important-service",                                      │
+│           "operator": "equals"                                               │
+│         }                                                                    │
+│       ]                                                                      │
+│     }                                                                        │
+│   ]                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Note: cluster_id is MANDATORY for POST operations                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Read rule to sync state                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/forward?region={region}                                   │
+│                                                                              │
+│ Terraform ID format: {region}:{cluster_id}:{rule_name}                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Read
+
+**Terraform operation**: `terraform plan`, `terraform refresh`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GET /logs_settings/forward?region={region}                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Response:                                                                    │
+│ {                                                                            │
+│   "properties": [                                                            │
+│     {                                                                        │
+│       "name": "my-forward-rule",                                             │
+│       "telemetry": "logs",                                                   │
+│       "destination": "https://logs.example.com/ingest",                      │
+│       "filters": [...]                                                       │
+│     },                                                                       │
+│     ...                                                                      │
+│   ]                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Provider finds the rule by name from the list                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Update
+
+**Terraform operation**: `terraform apply` (existing resource changed)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: GET existing rules                                                   │
+│ Step 2: Replace matching rule by name                                        │
+│ Step 3: POST updated list                                                    │
+│ Step 4: Read to sync state                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Same pattern as Drop Rules - see above                                       │
+│                                                                              │
+│ POST /logs_settings/forward?region={region}&cluster_id={cluster_id}          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Delete
+
+**Terraform operation**: `terraform destroy`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: GET existing rules                                                   │
+│ Step 2: Filter out rule by name                                              │
+│ Step 3: POST list without deleted rule                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Same pattern as Drop Rules - see above                                       │
+│                                                                              │
+│ POST /logs_settings/forward?region={region}&cluster_id={cluster_id}          │
+│                                                                              │
+│ Note: Requires delete-scoped token                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Import
+
+**Terraform operation**: `terraform import last9_forward_rule.name <region>:<cluster_id>:<rule_name>`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Import ID format: region:cluster_id:rule_name                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Example: terraform import last9_forward_rule.my_rule ap-south-1:abc:my-rule  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Scheduled Search Alerts
+
+Scheduled Search Alerts are represented as `last9_scheduled_search_alert` resources in Terraform. Unlike Drop/Forward Rules, they use **individual REST CRUD operations** (not list-based).
+
+### Create
+
+**Terraform operation**: `terraform apply` (new resource)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Fetch notification destination details                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /notification_settings                                                   │
+│                                                                              │
+│ Response: Array of notification destinations                                 │
+│ [                                                                            │
+│   { "id": 1295, "name": "slack-alerts", "type": "slack", ... },              │
+│   { "id": 1296, "name": "pagerduty", "type": "pagerduty", ... }              │
+│ ]                                                                            │
+│                                                                              │
+│ Provider finds destination by ID from user config                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Create scheduled search alert                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /logs_settings/scheduled_search?region={region}                         │
+│                                                                              │
+│ Request Body (single alert object, NOT array):                               │
+│ {                                                                            │
+│   "rule_name": "High Error Rate Alert",                                      │
+│   "rule_type": "scheduled_search",                                           │
+│   "query_type": "logjson-aggregate",                                         │
+│   "physical_index": "logs",                                                  │
+│   "properties": {                                                            │
+│     "telemetry": "logs",                                                     │
+│     "query": "[{\"type\":\"filter\",\"query\":{...}}]",                      │
+│     "post_processor": [                                                      │
+│       {                                                                      │
+│         "type": "aggregate",                                                 │
+│         "aggregates": [                                                      │
+│           { "function": {"$count": []}, "as": "error_count" }                │
+│         ],                                                                   │
+│         "groupby": {}                                                        │
+│       }                                                                      │
+│     ],                                                                       │
+│     "search_frequency": 300,                  ◄── Seconds (5 minutes)        │
+│     "threshold": {                                                           │
+│       "operator": ">",                                                       │
+│       "value": 100                                                           │
+│     },                                                                       │
+│     "alert_destinations": [                   ◄── Full destination objects   │
+│       { "id": 1295, "name": "slack-alerts", ... }                            │
+│     ]                                                                        │
+│   }                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Response: Created alert with ID                                              │
+│ {                                                                            │
+│   "id": "alert-uuid-123",                                                    │
+│   "rule_name": "High Error Rate Alert",                                      │
+│   ...                                                                        │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Read alert to sync state                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/scheduled_search?region={region}                          │
+│                                                                              │
+│ Find alert by name in response array                                         │
+│                                                                              │
+│ Terraform ID format: {region}:{alert_id}:{rule_name}                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Read
+
+**Terraform operation**: `terraform plan`, `terraform refresh`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GET /logs_settings/scheduled_search?region={region}                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Response: Array of scheduled search alerts                                   │
+│ [                                                                            │
+│   {                                                                          │
+│     "id": "alert-uuid-123",                                                  │
+│     "rule_name": "High Error Rate Alert",                                    │
+│     "rule_type": "scheduled_search",                                         │
+│     "query_type": "logjson-aggregate",                                       │
+│     "physical_index": "logs",                                                │
+│     "region": "ap-south-1",                                                  │
+│     "properties": {                                                          │
+│       "telemetry": "logs",                                                   │
+│       "query": "...",                                                        │
+│       "post_processor": [...],                                               │
+│       "search_frequency": 300,                                               │
+│       "threshold": { "operator": ">", "value": 100 },                        │
+│       "alert_destinations": [...]           ◄── Contains internal IDs        │
+│     },                                                                       │
+│     "created_at": 1737500000,                                                │
+│     "updated_at": 1737500000                                                 │
+│   },                                                                         │
+│   ...                                                                        │
+│ ]                                                                            │
+│                                                                              │
+│ Provider finds alert by name in array                                        │
+│                                                                              │
+│ Note: alert_destinations is NOT read from API response because               │
+│       the API returns internal association IDs, not the notification         │
+│       destination IDs the user specified. User's config is preserved.        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Update
+
+**Terraform operation**: `terraform apply` (existing resource changed)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Fetch notification destinations (if destinations changed)            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /notification_settings                                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Update scheduled search alert                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ PUT /logs_settings/scheduled_search/{alert_id}?region={region}               │
+│                                                                              │
+│ Request Body (single alert object):                                          │
+│ {                                                                            │
+│   "rule_name": "Updated Alert Name",                                         │
+│   "rule_type": "scheduled_search",                                           │
+│   "query_type": "logjson-aggregate",                                         │
+│   "physical_index": "logs",                                                  │
+│   "properties": {                                                            │
+│     "telemetry": "logs",                                                     │
+│     "query": "...",                                                          │
+│     "post_processor": [...],                                                 │
+│     "search_frequency": 600,                  ◄── Updated                    │
+│     "threshold": { "operator": ">", "value": 200 },  ◄── Updated             │
+│     "alert_destinations": [...]                                              │
+│   }                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Response: Updated alert (may have new ID)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Read alert to sync state                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /logs_settings/scheduled_search?region={region}                          │
+│                                                                              │
+│ Update Terraform ID if alert ID changed                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Delete
+
+**Terraform operation**: `terraform destroy`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ DELETE /logs_settings/scheduled_search/{alert_id}?region={region}            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Note: Requires delete-scoped token                                           │
+│                                                                              │
+│ Response: 200 OK on success                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Import
+
+**Terraform operation**: `terraform import last9_scheduled_search_alert.name <region>:<alert_id>:<rule_name>`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Import ID format: region:alert_id:rule_name                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Example: terraform import last9_scheduled_search_alert.my_alert \            │
+│          ap-south-1:abc-uuid:My-Alert                                        │
+│                                                                              │
+│ The provider:                                                                │
+│ 1. Parses the composite ID                                                   │
+│ 2. Calls GET /logs_settings/scheduled_search?region=ap-south-1               │
+│ 3. Finds alert by name in response array                                     │
+│                                                                              │
+│ Note: alert_destinations is ignored during import since the API returns      │
+│       internal IDs that don't match user-specified notification IDs.         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Authentication
 
 All API calls require authentication via the `X-LAST9-API-TOKEN` header:
@@ -474,3 +1018,25 @@ All API calls require authentication via the `X-LAST9-API-TOKEN` header:
 | Alert | Read | GET /alert-rules/{id} |
 | Alert | Update | POST /kpis (if needed) → PUT /alert-rules/{id} → DELETE /kpis (old) → GET /alert-rules/{new_id} |
 | Alert | Delete | DELETE /alert-rules/{id} → DELETE /kpis/{id} |
+| Drop Rule | Create | GET /logs_settings/routing → POST /logs_settings/routing (list with new rule) |
+| Drop Rule | Read | GET /logs_settings/routing (find by name) |
+| Drop Rule | Update | GET /logs_settings/routing → POST /logs_settings/routing (list with updated rule) |
+| Drop Rule | Delete | GET /logs_settings/routing → POST /logs_settings/routing (list without rule) |
+| Forward Rule | Create | GET /logs_settings/forward → POST /logs_settings/forward (list with new rule) |
+| Forward Rule | Read | GET /logs_settings/forward (find by name) |
+| Forward Rule | Update | GET /logs_settings/forward → POST /logs_settings/forward (list with updated rule) |
+| Forward Rule | Delete | GET /logs_settings/forward → POST /logs_settings/forward (list without rule) |
+| Scheduled Search | Create | GET /notification_settings → POST /logs_settings/scheduled_search |
+| Scheduled Search | Read | GET /logs_settings/scheduled_search (find by name) |
+| Scheduled Search | Update | GET /notification_settings → PUT /logs_settings/scheduled_search/{id} |
+| Scheduled Search | Delete | DELETE /logs_settings/scheduled_search/{id} |
+
+### API Pattern Comparison
+
+| Resource Type | CRUD Pattern | Notes |
+|---------------|--------------|-------|
+| Entity, Alert | Individual REST | Standard create/read/update/delete per resource |
+| Drop Rule, Forward Rule | List-based | GET all → modify list → POST entire list |
+| Scheduled Search | Individual REST | Standard REST operations (POST/PUT/DELETE) |
+
+**List-based CRUD Limitation**: Drop Rules and Forward Rules use a list-based pattern where the entire list is replaced on each operation. This has inherent race conditions - concurrent Terraform runs could overwrite each other's changes.

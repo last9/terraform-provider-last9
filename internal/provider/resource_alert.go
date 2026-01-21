@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -26,7 +27,7 @@ func resourceAlert() *schema.Resource {
 		UpdateContext: resourceAlertUpdate,
 		DeleteContext: resourceAlertDelete,
 		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
+			StateContext: resourceAlertImportState,
 		},
 		Schema: map[string]*schema.Schema{
 			"entity_id": {
@@ -273,22 +274,24 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 		}
 	}
 
-	// Set properties
-	props := []interface{}{
-		map[string]interface{}{
-			"description": alert.Properties.Description,
-			"runbook_url": func() string {
-				if alert.Properties.Runbook != nil {
-					if runbook, ok := alert.Properties.Runbook["link"].(string); ok {
-						return runbook
-					}
-				}
-				return ""
-			}(),
-			"annotations": alert.Properties.Annotations,
-		},
+	// Set properties (only if there are runbook_url or annotations)
+	runbookURL := ""
+	if alert.Properties.Runbook != nil {
+		if link, ok := alert.Properties.Runbook["link"].(string); ok {
+			runbookURL = link
+		}
 	}
-	d.Set("properties", props)
+
+	// Only set properties block if there are values to set
+	if runbookURL != "" || len(alert.Properties.Annotations) > 0 {
+		props := []interface{}{
+			map[string]interface{}{
+				"runbook_url": runbookURL,
+				"annotations": alert.Properties.Annotations,
+			},
+		}
+		d.Set("properties", props)
+	}
 
 	return nil
 }
@@ -457,6 +460,22 @@ func resourceAlertDelete(ctx context.Context, d *schema.ResourceData, m interfac
 
 	d.SetId("")
 	return nil
+}
+
+// resourceAlertImportState handles importing alerts using composite ID format: entity_id:alert_id
+func resourceAlertImportState(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+	idParts := strings.Split(d.Id(), ":")
+	if len(idParts) != 2 || idParts[0] == "" || idParts[1] == "" {
+		return nil, fmt.Errorf("invalid import ID format, expected 'entity_id:alert_id', got: %s", d.Id())
+	}
+
+	entityID := idParts[0]
+	alertID := idParts[1]
+
+	d.Set("entity_id", entityID)
+	d.SetId(alertID)
+
+	return []*schema.ResourceData{d}, nil
 }
 
 // parseAndSetCondition parses the alert condition string and sets the appropriate
