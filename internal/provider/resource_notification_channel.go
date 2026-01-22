@@ -23,9 +23,9 @@ func resourceNotificationChannel() *schema.Resource {
 		},
 		Schema: map[string]*schema.Schema{
 			"name": {
-				Type:        schema.TypeString,
-				Required:    true,
-				Description: "Channel name (colons are not allowed)",
+				Type:         schema.TypeString,
+				Required:     true,
+				Description:  "Channel name (colons are not allowed)",
 				ValidateFunc: validation.StringDoesNotContainAny(":"),
 			},
 			"type": {

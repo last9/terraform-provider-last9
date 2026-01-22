@@ -147,8 +147,8 @@ terraform {
 
 provider "last9" {
   refresh_token = var.last9_refresh_token
-  org          = var.last9_org
-  api_base_url = "https://api.last9.io"
+  org           = var.last9_org
+  api_base_url  = var.last9_api_base_url  # required
 }
 
 variable "last9_refresh_token" {
