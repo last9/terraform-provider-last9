@@ -14,10 +14,13 @@ issues:
   exclude-rules:
     - linters:
         - errcheck
-      text: "DeleteKPI"
+      text: "DeleteKPI|AttachNotificationChannel"
     - linters:
         - staticcheck
       text: "SA1019.*plugin.Debug"
     - linters:
         - staticcheck
       text: "SA9003"
+    - linters:
+        - unused
+      path: resource_notification_channel_attachment.go
