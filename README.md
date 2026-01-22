@@ -74,8 +74,6 @@ provider "last9" {
 
 **Note**: Either `LAST9_REFRESH_TOKEN` or `LAST9_API_TOKEN` must be provided. Refresh tokens are recommended as they automatically handle token refresh.
 
-See [Authentication Guide](docs/AUTHENTICATION.md) for detailed information about authentication, token scopes, and RBAC.
-
 ## Usage Examples
 
 See the [examples](./examples/) directory for complete examples.

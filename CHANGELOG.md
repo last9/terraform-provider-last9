@@ -44,8 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Documentation
 - Complete README with usage examples
-- TESTING.md with comprehensive test guide
-- AUTHENTICATION.md with detailed auth setup
 - Examples for all resources including:
   - Basic usage examples
   - Entity configurations
