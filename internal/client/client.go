@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
 
 type Config struct {
-	// Direct access token (legacy)
+	// Direct access token (legacy) - for read/write operations
 	APIToken string
 	// Refresh token for automatic token management
 	RefreshToken string
+	// Delete token - required for delete operations (separate scope)
+	DeleteToken string
+	// Refresh token for delete operations (generates access tokens with delete scope)
+	DeleteRefreshToken string
 	// Organization slug
 	Org string
 	// API base URL
@@ -35,14 +38,19 @@ type AccessToken struct {
 type Client struct {
 	config     *Config
 	httpClient *http.Client
-	// Token management
+	// Token management for read/write operations
 	tokenMutex  sync.RWMutex
 	accessToken *AccessToken
+	// Delete token management (separate from access token due to scope requirements)
+	deleteToken        string       // Static delete token (legacy)
+	deleteAccessToken  *AccessToken // Cached delete access token from refresh
+	deleteTokenMutex   sync.RWMutex // Mutex for delete token refresh
 }
 
 func NewClient(config *Config) (*Client, error) {
 	client := &Client{
-		config: config,
+		config:      config,
+		deleteToken: config.DeleteToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -111,7 +119,7 @@ func (c *Client) refreshAccessToken() (*AccessToken, error) {
 		RefreshToken: c.config.RefreshToken,
 	}
 
-	reqURL := fmt.Sprintf("%s/organizations/%s/oauth/access_token", c.config.BaseURL, c.config.Org)
+	reqURL := fmt.Sprintf("%s/api/v4/oauth/access_token", c.config.BaseURL)
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
@@ -146,6 +154,89 @@ func (c *Client) refreshAccessToken() (*AccessToken, error) {
 	return &token, nil
 }
 
+// refreshDeleteAccessToken obtains a new access token using the delete refresh token.
+// The delete refresh token generates access tokens with delete scope.
+func (c *Client) refreshDeleteAccessToken() (*AccessToken, error) {
+	reqBody := struct {
+		RefreshToken string `json:"refresh_token"`
+	}{
+		RefreshToken: c.config.DeleteRefreshToken,
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v4/oauth/access_token", c.config.BaseURL)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
+	var token AccessToken
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Parse expires_at
+	token.expiresAt = time.Unix(token.ExpiresAt, 0)
+
+	return &token, nil
+}
+
+// getDeleteAccessToken returns a valid delete access token, refreshing if necessary.
+// Falls back to static delete token if no delete refresh token is configured.
+func (c *Client) getDeleteAccessToken() (string, error) {
+	// If delete refresh token is configured, use dynamic token management
+	if c.config.DeleteRefreshToken != "" {
+		c.deleteTokenMutex.RLock()
+		token := c.deleteAccessToken
+		c.deleteTokenMutex.RUnlock()
+
+		// Check if token is valid and not expiring soon
+		if token != nil && time.Now().Before(token.expiresAt.Add(-5*time.Minute)) {
+			return token.AccessToken, nil
+		}
+
+		// Token expired or missing, refresh it
+		c.deleteTokenMutex.Lock()
+		defer c.deleteTokenMutex.Unlock()
+
+		// Double-check after acquiring lock
+		if c.deleteAccessToken != nil && time.Now().Before(c.deleteAccessToken.expiresAt.Add(-5*time.Minute)) {
+			return c.deleteAccessToken.AccessToken, nil
+		}
+
+		newToken, err := c.refreshDeleteAccessToken()
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh delete access token: %w", err)
+		}
+		c.deleteAccessToken = newToken
+		return newToken.AccessToken, nil
+	}
+
+	// Fall back to static delete token (legacy mode)
+	if c.deleteToken != "" {
+		return c.deleteToken, nil
+	}
+
+	return "", fmt.Errorf("delete_token or delete_refresh_token is required for delete operations")
+}
+
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
 	// Get valid access token
 	accessToken, err := c.getAccessToken()
@@ -162,13 +253,13 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	reqURL := fmt.Sprintf("%s/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
 	req, err := http.NewRequest(method, reqURL, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Use X-LAST9-API-TOKEN header as per Last9 API spec
+	// Use X-LAST9-API-TOKEN header with Bearer prefix as per Last9 API docs
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", accessToken))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -236,11 +327,33 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 }
 
 func (c *Client) Delete(path string) error {
-	resp, err := c.doRequest("DELETE", path, nil)
+	// Get valid delete access token (handles refresh token or static token)
+	deleteToken, err := c.getDeleteAccessToken()
 	if err != nil {
 		return err
 	}
+
+	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+	req, err := http.NewRequest("DELETE", reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Use delete token for delete operations
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
 	return nil
 }
 
@@ -305,6 +418,47 @@ func (c *Client) UpsertMacro(clusterID string, macro *MacroUpsertRequest) (*Macr
 
 func (c *Client) DeleteMacro(clusterID string) error {
 	return c.Delete(fmt.Sprintf("/clusters/%s/macros", clusterID))
+}
+
+// Cluster represents a Last9 cluster
+type Cluster struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Region    string `json:"region"`
+	IsDefault bool   `json:"default"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// GetClusters fetches all clusters for a region
+func (c *Client) GetClusters(region string) ([]Cluster, error) {
+	var clusters []Cluster
+	err := c.Get(fmt.Sprintf("/clusters?region=%s", region), &clusters)
+	return clusters, err
+}
+
+// GetDefaultCluster returns the default cluster for a region.
+// If no default is found, returns the first cluster.
+// Returns an error if no clusters exist.
+func (c *Client) GetDefaultCluster(region string) (*Cluster, error) {
+	clusters, err := c.GetClusters(region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch clusters: %w", err)
+	}
+
+	if len(clusters) == 0 {
+		return nil, fmt.Errorf("no clusters found in region %s", region)
+	}
+
+	// Find the default cluster
+	for i := range clusters {
+		if clusters[i].IsDefault {
+			return &clusters[i], nil
+		}
+	}
+
+	// If no default is marked, return the first cluster
+	return &clusters[0], nil
 }
 
 // Policy methods
@@ -381,6 +535,7 @@ type Alert struct {
 	IsDisabled                   bool            `json:"is_disabled"`
 	Properties                   AlertProperties `json:"properties"`
 	GroupTimeseriesNotifications bool            `json:"group_timeseries_notifications"`
+	NotificationChannels         []string        `json:"notification_channels,omitempty"`
 }
 
 type AlertProperties struct {
@@ -402,6 +557,7 @@ type AlertCreateRequest struct {
 	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
 	MuteUntil                    int                    `json:"mute_until"`
 	ExpressionArgs               map[string]interface{} `json:"expression_args"`
+	NotificationChannels         []string               `json:"notification_channels,omitempty"`
 }
 
 type AlertUpdateRequest struct {
@@ -417,6 +573,7 @@ type AlertUpdateRequest struct {
 	GroupTimeseriesNotifications *bool                  `json:"group_timeseries_notifications,omitempty"`
 	MuteUntil                    *int                   `json:"mute_until,omitempty"`
 	ExpressionArgs               map[string]interface{} `json:"expression_args,omitempty"`
+	NotificationChannels         []string               `json:"notification_channels,omitempty"`
 }
 
 type Macro struct {
@@ -479,6 +636,12 @@ func (c *Client) CreateDropRules(region string, rules *DropRulesRequest) (*DropR
 	return &result, err
 }
 
+func (c *Client) UpdateDropRules(region, clusterID string, rules *DropRulesRequest) (*DropRulesResponse, error) {
+	var result DropRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/routing?region=%s&cluster_id=%s", region, clusterID), rules, &result)
+	return &result, err
+}
+
 func (c *Client) GetForwardRules(region string) (*ForwardRulesResponse, error) {
 	var result ForwardRulesResponse
 	err := c.Get(fmt.Sprintf("/logs_settings/forward?region=%s", region), &result)
@@ -488,6 +651,12 @@ func (c *Client) GetForwardRules(region string) (*ForwardRulesResponse, error) {
 func (c *Client) UpsertForwardRules(region string, rules *ForwardRulesRequest) (*ForwardRulesResponse, error) {
 	var result ForwardRulesResponse
 	err := c.Post(fmt.Sprintf("/logs_settings/forward?region=%s", region), rules, &result)
+	return &result, err
+}
+
+func (c *Client) UpdateForwardRules(region, clusterID string, rules *ForwardRulesRequest) (*ForwardRulesResponse, error) {
+	var result ForwardRulesResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/forward?region=%s&cluster_id=%s", region, clusterID), rules, &result)
 	return &result, err
 }
 
@@ -655,9 +824,7 @@ type NotificationDestination struct {
 	SendResolved   bool                   `json:"send_resolved"`
 }
 
-type NotificationDestinationsResponse struct {
-	NotificationDestinations []NotificationDestination `json:"notification_destinations"`
-}
+// NotificationDestinationsResponse is kept for backward compatibility but the API returns an array directly
 
 // Scheduled Search Alert Types
 type ScheduledSearchAlert struct {
@@ -700,29 +867,48 @@ type ScheduledSearchRequest struct {
 	Properties []ScheduledSearchAlert `json:"properties"`
 }
 
-type ScheduledSearchResponse struct {
-	ID         string                 `json:"id"`
-	Region     string                 `json:"region"`
-	Properties []ScheduledSearchAlert `json:"properties"`
-	CreatedAt  int64                  `json:"created_at"`
-	UpdatedAt  int64                  `json:"updated_at"`
+// ScheduledSearchAlertFull represents the full alert object returned by the API
+type ScheduledSearchAlertFull struct {
+	ID             string                    `json:"id"`
+	RuleName       string                    `json:"rule_name"`
+	EntityID       string                    `json:"entity_id"`
+	RuleType       string                    `json:"rule_type"`
+	QueryType      string                    `json:"query_type"`
+	PhysicalIndex  string                    `json:"physical_index"`
+	Region         string                    `json:"region"`
+	OrganizationID string                    `json:"organization_id"`
+	Properties     ScheduledSearchProperties `json:"properties"`
+	CreatedBy      string                    `json:"created_by"`
+	CreatedAt      int64                     `json:"created_at"`
+	UpdatedAt      int64                     `json:"updated_at"`
+}
+
+// ToScheduledSearchAlert converts the full API response to the request format
+func (f *ScheduledSearchAlertFull) ToScheduledSearchAlert() ScheduledSearchAlert {
+	return ScheduledSearchAlert{
+		RuleName:      f.RuleName,
+		QueryType:     f.QueryType,
+		PhysicalIndex: f.PhysicalIndex,
+		RuleType:      f.RuleType,
+		Properties:    f.Properties,
+	}
 }
 
 // Notification Destination methods
-func (c *Client) ListNotificationDestinations() (*NotificationDestinationsResponse, error) {
-	var result NotificationDestinationsResponse
+func (c *Client) ListNotificationDestinations() ([]NotificationDestination, error) {
+	var result []NotificationDestination
 	err := c.Get("/notification_settings", &result)
-	return &result, err
+	return result, err
 }
 
 func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, error) {
-	result, err := c.ListNotificationDestinations()
+	destinations, err := c.ListNotificationDestinations()
 	if err != nil {
 		return nil, err
 	}
 
 	// Find destination by ID
-	for _, dest := range result.NotificationDestinations {
+	for _, dest := range destinations {
 		if dest.ID == id {
 			return &dest, nil
 		}
@@ -732,109 +918,332 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 }
 
 // Scheduled Search methods
-func (c *Client) GetScheduledSearchAlerts(region string) (*ScheduledSearchResponse, error) {
-	var result ScheduledSearchResponse
+func (c *Client) GetScheduledSearchAlerts(region string) ([]ScheduledSearchAlertFull, error) {
+	var result []ScheduledSearchAlertFull
 	err := c.Get(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), &result)
-	return &result, err
+	return result, err
 }
 
-func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
-	// Get existing alerts
-	// Note: This API uses array-based CRUD which has inherent race conditions.
-	// Terraform's state locking provides some protection, but concurrent operations
-	// outside Terraform could still cause data loss. This is an API limitation.
-	existing, err := c.GetScheduledSearchAlerts(region)
-	if err != nil {
-		// Only treat 404 as empty list, return other errors
-		if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
-			return nil, fmt.Errorf("failed to get existing alerts: %w", err)
-		}
-		existing = &ScheduledSearchResponse{Properties: []ScheduledSearchAlert{}}
-	}
-
-	// Check for duplicate name
-	for _, existingAlert := range existing.Properties {
-		if existingAlert.RuleName == alert.RuleName {
-			return nil, fmt.Errorf("scheduled search alert with name '%s' already exists in region %s", alert.RuleName, region)
-		}
-	}
-
-	// Append new alert
-	req := &ScheduledSearchRequest{
-		Properties: append(existing.Properties, *alert),
-	}
-
-	var result ScheduledSearchResponse
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
-	return &result, err
-}
-
-func (c *Client) UpdateScheduledSearchAlert(region, oldName string, alert *ScheduledSearchAlert) (*ScheduledSearchResponse, error) {
-	// Get existing alerts
-	existing, err := c.GetScheduledSearchAlerts(region)
+func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchAlertFull, error) {
+	// The scheduled search API expects a single alert object, not an array
+	// Each POST creates a new alert
+	var result ScheduledSearchAlertFull
+	err := c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), alert, &result)
 	if err != nil {
 		return nil, err
 	}
+	return &result, nil
+}
 
-	// Find and replace the alert with matching rule_name
-	// Use oldName to find the existing alert (in case name is being changed)
-	found := false
-	for i, existingAlert := range existing.Properties {
-		if existingAlert.RuleName == oldName {
-			existing.Properties[i] = *alert
-			found = true
-			break
-		}
+func (c *Client) UpdateScheduledSearchAlert(region, alertID string, alert *ScheduledSearchAlert) (*ScheduledSearchAlertFull, error) {
+	// The scheduled search API expects a single alert object for PUT updates
+	var result ScheduledSearchAlertFull
+	err := c.Put(fmt.Sprintf("/logs_settings/scheduled_search/%s?region=%s", alertID, region), alert, &result)
+	if err != nil {
+		return nil, err
 	}
+	return &result, nil
+}
 
-	if !found {
-		return nil, fmt.Errorf("scheduled search alert '%s' not found", oldName)
+func (c *Client) DeleteScheduledSearchAlert(region, alertID string) error {
+	// Delete individual scheduled search alert by ID
+	return c.Delete(fmt.Sprintf("/logs_settings/scheduled_search/%s?region=%s", alertID, region))
+}
+
+// Entity Types
+
+// EntityMetadata contains metadata fields returned nested in the API response
+type EntityMetadata struct {
+	ID          string            `json:"id,omitempty"`
+	EntityID    string            `json:"entity_id,omitempty"`
+	Team        string            `json:"team,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Links       []EntityLink      `json:"links,omitempty"`
+	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+}
+
+type Entity struct {
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	Type                 string          `json:"type"`
+	ExternalRef          string          `json:"external_ref"`
+	Description          string          `json:"description"`
+	DataSource           string          `json:"data_source,omitempty"`
+	DataSourceID         string          `json:"data_source_id,omitempty"`
+	Namespace            string          `json:"namespace,omitempty"`
+	Team                 string          `json:"team,omitempty"`
+	Tier                 string          `json:"tier,omitempty"`
+	Workspace            string          `json:"workspace,omitempty"`
+	Tags                 []string        `json:"tags,omitempty"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	EntityClass          string          `json:"entity_class,omitempty"`
+	UIReadonly           bool            `json:"ui_readonly"`
+	AdhocFilter          *AdhocFilter    `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator     `json:"indicators,omitempty"`
+	Links                []EntityLink    `json:"links,omitempty"`
+	NotificationChannels []string        `json:"notification_channels,omitempty"`
+	CreatedAt            int64           `json:"created_at,omitempty"`
+	UpdatedAt            int64           `json:"updated_at,omitempty"`
+	// Metadata is returned nested in GET response - we extract fields from it
+	Metadata             *EntityMetadata `json:"metadata,omitempty"`
+}
+
+type AdhocFilter struct {
+	DataSource string            `json:"data_source"`
+	Labels     map[string]string `json:"labels"`
+}
+
+type Indicator struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+	Unit  string `json:"unit,omitempty"`
+}
+
+type EntityLink struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type EntityCreateRequest struct {
+	Name                 string            `json:"name"`
+	Type                 string            `json:"type"`
+	ExternalRef          string            `json:"external_ref"`
+	Description          string            `json:"description,omitempty"`
+	DataSource           string            `json:"data_source,omitempty"`
+	DataSourceID         string            `json:"data_source_id,omitempty"`
+	Namespace            string            `json:"namespace,omitempty"`
+	Team                 string            `json:"team,omitempty"`
+	Tier                 string            `json:"tier,omitempty"`
+	Workspace            string            `json:"workspace,omitempty"`
+	Tags                 []string          `json:"tags,omitempty"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	EntityClass          string            `json:"entity_class,omitempty"`
+	UIReadonly           bool              `json:"ui_readonly"`
+	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator       `json:"indicators,omitempty"`
+	Links                []EntityLink      `json:"links,omitempty"`
+	NotificationChannels []string          `json:"notification_channels,omitempty"`
+}
+
+type EntityUpdateRequest struct {
+	Name                 *string            `json:"name,omitempty"`
+	Type                 *string            `json:"type,omitempty"`
+	ExternalRef          *string            `json:"external_ref,omitempty"`
+	Description          *string            `json:"description,omitempty"`
+	DataSource           *string            `json:"data_source,omitempty"`
+	DataSourceID         *string            `json:"data_source_id,omitempty"`
+	Namespace            *string            `json:"namespace,omitempty"`
+	Team                 *string            `json:"team,omitempty"`
+	Tier                 *string            `json:"tier,omitempty"`
+	Workspace            *string            `json:"workspace,omitempty"`
+	Tags                 []string           `json:"tags,omitempty"`
+	Labels               map[string]string  `json:"labels,omitempty"`
+	EntityClass          *string            `json:"entity_class,omitempty"`
+	UIReadonly           *bool              `json:"ui_readonly,omitempty"`
+	AdhocFilter          *AdhocFilter       `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator        `json:"indicators,omitempty"`
+	Links                []EntityLink       `json:"links,omitempty"`
+	NotificationChannels []string           `json:"notification_channels,omitempty"`
+}
+
+type EntitiesListResponse struct {
+	Entities []Entity `json:"entities"`
+}
+
+// Entity methods
+func (c *Client) GetEntity(id string) (*Entity, error) {
+	var entity Entity
+	err := c.Get(fmt.Sprintf("/entities/%s", id), &entity)
+	return &entity, err
+}
+
+func (c *Client) GetEntityByExternalRef(externalRef string) (*Entity, error) {
+	var response EntitiesListResponse
+	err := c.Get(fmt.Sprintf("/entities?external_ref=%s", externalRef), &response)
+	if err != nil {
+		return nil, err
 	}
-
-	// If name is changing, check for duplicate new name
-	if oldName != alert.RuleName {
-		for _, existingAlert := range existing.Properties {
-			if existingAlert.RuleName == alert.RuleName {
-				return nil, fmt.Errorf("cannot rename: scheduled search alert with name '%s' already exists", alert.RuleName)
-			}
-		}
+	if len(response.Entities) == 0 {
+		return nil, fmt.Errorf("entity with external_ref '%s' not found", externalRef)
 	}
+	return &response.Entities[0], nil
+}
 
-	req := &ScheduledSearchRequest{
-		Properties: existing.Properties,
-	}
+func (c *Client) ListEntities() (*EntitiesListResponse, error) {
+	var response EntitiesListResponse
+	err := c.Get("/entities", &response)
+	return &response, err
+}
 
-	var result ScheduledSearchResponse
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, &result)
+func (c *Client) CreateEntity(entity *EntityCreateRequest) (*Entity, error) {
+	var result Entity
+	err := c.Post("/entities", entity, &result)
 	return &result, err
 }
 
-func (c *Client) DeleteScheduledSearchAlert(region, ruleName string) error {
-	// Get existing alerts
-	existing, err := c.GetScheduledSearchAlerts(region)
+func (c *Client) UpdateEntity(id string, entity *EntityUpdateRequest) (*Entity, error) {
+	var result Entity
+	err := c.Put(fmt.Sprintf("/entities/%s", id), entity, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteEntity(id string) error {
+	return c.Delete(fmt.Sprintf("/entities/%s", id))
+}
+
+// EntityMetadataUpdateRequest for updating entity metadata (tags, labels, team, links)
+// This is a separate API endpoint from entity update
+type EntityMetadataUpdateRequest struct {
+	Team        string            `json:"team"`
+	Tags        []string          `json:"tags,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Links       []EntityLink      `json:"links,omitempty"`
+	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+}
+
+func (c *Client) UpdateEntityMetadata(entityID string, metadata *EntityMetadataUpdateRequest) error {
+	var result map[string]interface{}
+	return c.Put(fmt.Sprintf("/entities/%s/metadata", entityID), metadata, &result)
+}
+
+// KPI Types
+type KPI struct {
+	ID             string        `json:"id"`
+	Name           string        `json:"name"`
+	Definition     KPIDefinition `json:"definition"`
+	KPIType        string        `json:"kpi_type"`
+	OrganizationID string        `json:"organization_id"`
+	EntityID       string        `json:"entity_id"`
+	CreatedAt      int64         `json:"created_at"`
+	UpdatedAt      int64         `json:"updated_at"`
+}
+
+type KPIDefinition struct {
+	Query  string `json:"query"`
+	Source string `json:"source"`
+	Unit   string `json:"unit"`
+}
+
+type KPICreateRequest struct {
+	Name       string        `json:"name"`
+	Definition KPIDefinition `json:"definition"`
+	KPIType    string        `json:"kpi_type"`
+}
+
+type KPIUpdateRequest struct {
+	Name       string        `json:"name"`
+	Definition KPIDefinition `json:"definition"`
+	KPIType    string        `json:"kpi_type"`
+}
+
+// NotificationChannel CRUD methods
+
+// NotificationChannelRequest represents the request body for creating/updating a notification channel
+type NotificationChannelRequest struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Destination  string `json:"destination"`
+	SendResolved bool   `json:"send_resolved"`
+}
+
+// CreateNotificationDestination creates a new notification channel (master channel)
+func (c *Client) CreateNotificationDestination(req *NotificationChannelRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Post("/notification_settings", req, &result)
+	return &result, err
+}
+
+// UpdateNotificationDestination updates an existing notification channel
+func (c *Client) UpdateNotificationDestination(id int, req *NotificationChannelRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Put(fmt.Sprintf("/notification_settings/%d", id), req, &result)
+	return &result, err
+}
+
+// DeleteNotificationDestination deletes a notification channel
+// Note: This uses a different endpoint format than other operations:
+// /api/organizations/{org}/workspace/{org}/notification_settings/{id} (no /v4 prefix)
+func (c *Client) DeleteNotificationDestination(id int) error {
+	// Get valid delete access token
+	deleteToken, err := c.getDeleteAccessToken()
 	if err != nil {
 		return err
 	}
 
-	// Filter out the alert to delete
-	originalLen := len(existing.Properties)
-	filtered := []ScheduledSearchAlert{}
-	for _, alert := range existing.Properties {
-		if alert.RuleName != ruleName {
-			filtered = append(filtered, alert)
-		}
+	// Use the workspace-based endpoint (no /v4 prefix)
+	reqURL := fmt.Sprintf("%s/api/organizations/%s/workspace/%s/notification_settings/%d",
+		c.config.BaseURL, c.config.Org, c.config.Org, id)
+
+	req, err := http.NewRequest("DELETE", reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Verify alert was found
-	if len(filtered) == originalLen {
-		return fmt.Errorf("scheduled search alert '%s' not found in region %s", ruleName, region)
+	// Use X-LAST9-API-TOKEN header with delete token
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
 	}
 
-	// Update with filtered list
-	req := &ScheduledSearchRequest{
-		Properties: filtered,
-	}
+	return nil
+}
 
-	err = c.Post(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), req, nil)
-	return err
+// NotificationChannelAttachRequest represents the request body for attaching a channel to an entity
+type NotificationChannelAttachRequest struct {
+	EntityID string `json:"entity_id"`
+	Severity string `json:"severity"`
+}
+
+// NotificationAttachment represents an attachment record (child channel linked to entity)
+type NotificationAttachment struct {
+	ID        int    `json:"id"`
+	ChannelID int    `json:"channel_id"`
+	EntityID  string `json:"entity_id"`
+	Severity  string `json:"severity"`
+}
+
+// AttachNotificationChannel attaches a notification channel to an entity with a severity level
+func (c *Client) AttachNotificationChannel(channelID int, req *NotificationChannelAttachRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Post(fmt.Sprintf("/notification_settings/%d/attach", channelID), req, &result)
+	return &result, err
+}
+
+// DetachNotificationChannel detaches a notification channel from an entity
+// The API uses DELETE with entity_id as a query parameter
+func (c *Client) DetachNotificationChannel(channelID int, entityID string) error {
+	return c.Delete(fmt.Sprintf("/notification_settings/%d/attach?entity_id=%s", channelID, entityID))
+}
+
+// KPI methods
+func (c *Client) CreateKPI(entityID string, req *KPICreateRequest) (*KPI, error) {
+	var result KPI
+	err := c.Post(fmt.Sprintf("/entities/%s/kpis", entityID), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetKPI(entityID, kpiID string) (*KPI, error) {
+	var result KPI
+	err := c.Get(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateKPI(entityID, kpiID string, req *KPIUpdateRequest) (*KPI, error) {
+	var result KPI
+	err := c.Put(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteKPI(entityID, kpiID string) error {
+	return c.Delete(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID))
 }

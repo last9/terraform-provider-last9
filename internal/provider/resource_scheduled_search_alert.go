@@ -176,8 +176,8 @@ func resourceScheduledSearchAlertCreate(ctx context.Context, d *schema.ResourceD
 		return diag.FromErr(fmt.Errorf("failed to create scheduled search alert: %w", err))
 	}
 
-	// Set composite ID: region:response_id:rule_name
-	d.SetId(fmt.Sprintf("%s:%s:%s", region, result.ID, alert.RuleName))
+	// Set composite ID: region:alert_id:rule_name
+	d.SetId(fmt.Sprintf("%s:%s:%s", region, result.ID, result.RuleName))
 
 	return resourceScheduledSearchAlertRead(ctx, d, m)
 }
@@ -194,16 +194,16 @@ func resourceScheduledSearchAlertRead(ctx context.Context, d *schema.ResourceDat
 	ruleName := idParts[2]
 
 	// Get all scheduled search alerts for the region
-	result, err := apiClient.GetScheduledSearchAlerts(region)
+	alerts, err := apiClient.GetScheduledSearchAlerts(region)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to read scheduled search alerts: %w", err))
 	}
 
 	// Find the alert by name
-	var alert *client.ScheduledSearchAlert
-	for _, a := range result.Properties {
-		if a.RuleName == ruleName {
-			alert = &a
+	var alert *client.ScheduledSearchAlertFull
+	for i := range alerts {
+		if alerts[i].RuleName == ruleName {
+			alert = &alerts[i]
 			break
 		}
 	}
@@ -236,12 +236,9 @@ func resourceScheduledSearchAlertRead(ctx context.Context, d *schema.ResourceDat
 	}
 	d.Set("threshold", threshold)
 
-	// Set alert destinations (extract IDs only)
-	destIDs := make([]int, len(alert.Properties.AlertDestinations))
-	for i, dest := range alert.Properties.AlertDestinations {
-		destIDs[i] = dest.ID
-	}
-	d.Set("alert_destinations", destIDs)
+	// Note: We don't update alert_destinations from the API response because
+	// the API returns internal association IDs, not the original notification
+	// destination IDs that the user specified. We preserve the user's config.
 
 	return nil
 }
@@ -252,10 +249,10 @@ func resourceScheduledSearchAlertUpdate(ctx context.Context, d *schema.ResourceD
 	// Parse composite ID
 	idParts := strings.Split(d.Id(), ":")
 	if len(idParts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid ID format, expected region:response_id:rule_name"))
+		return diag.FromErr(fmt.Errorf("invalid ID format, expected region:alert_id:rule_name"))
 	}
 	region := idParts[0]
-	oldRuleName := idParts[2] // Extract old name from ID
+	alertID := idParts[1]
 
 	// Build the updated alert
 	alert, err := buildScheduledSearchAlert(d, apiClient)
@@ -263,14 +260,14 @@ func resourceScheduledSearchAlertUpdate(ctx context.Context, d *schema.ResourceD
 		return diag.FromErr(fmt.Errorf("failed to build scheduled search alert: %w", err))
 	}
 
-	// Update the alert (passing oldRuleName to handle potential name changes)
-	result, err := apiClient.UpdateScheduledSearchAlert(region, oldRuleName, alert)
+	// Update the alert using its ID
+	result, err := apiClient.UpdateScheduledSearchAlert(region, alertID, alert)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to update scheduled search alert: %w", err))
 	}
 
-	// Update ID if name changed
-	d.SetId(fmt.Sprintf("%s:%s:%s", region, result.ID, alert.RuleName))
+	// Update ID (alert ID may change, name may change)
+	d.SetId(fmt.Sprintf("%s:%s:%s", region, result.ID, result.RuleName))
 
 	return resourceScheduledSearchAlertRead(ctx, d, m)
 }
@@ -281,13 +278,13 @@ func resourceScheduledSearchAlertDelete(ctx context.Context, d *schema.ResourceD
 	// Parse composite ID
 	idParts := strings.Split(d.Id(), ":")
 	if len(idParts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid ID format, expected region:response_id:rule_name"))
+		return diag.FromErr(fmt.Errorf("invalid ID format, expected region:alert_id:rule_name"))
 	}
 	region := idParts[0]
-	ruleName := idParts[2]
+	alertID := idParts[1]
 
-	// Delete the alert
-	err := apiClient.DeleteScheduledSearchAlert(region, ruleName)
+	// Delete the alert using its ID
+	err := apiClient.DeleteScheduledSearchAlert(region, alertID)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to delete scheduled search alert: %w", err))
 	}

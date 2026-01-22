@@ -28,6 +28,20 @@ func New() *schema.Provider {
 				Description: "Last9 refresh token for automatic access token management",
 				Sensitive:   true,
 			},
+			"delete_token": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("LAST9_DELETE_TOKEN", nil),
+				Description: "Last9 API token with delete scope (legacy - use delete_refresh_token instead)",
+				Sensitive:   true,
+			},
+			"delete_refresh_token": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("LAST9_DELETE_REFRESH_TOKEN", nil),
+				Description: "Last9 refresh token for delete operations (generates access tokens with delete scope)",
+				Sensitive:   true,
+			},
 			"org": {
 				Type:        schema.TypeString,
 				Required:    true,
@@ -44,12 +58,17 @@ func New() *schema.Provider {
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"last9_dashboard":              resourceDashboard(),
+			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
 			"last9_macro":                  resourceMacro(),
 			"last9_policy":                 resourcePolicy(),
 			"last9_drop_rule":              resourceDropRule(),
 			"last9_forward_rule":           resourceForwardRule(),
 			"last9_scheduled_search_alert": resourceScheduledSearchAlert(),
+			"last9_notification_channel":   resourceNotificationChannel(),
+			// Note: notification_channel_attachment is not registered because the API
+			// doesn't support reading child channels after creation. Attachments should
+			// be managed via the entity's notification_channels field instead.
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"last9_dashboard":                dataSourceDashboard(),
@@ -63,6 +82,8 @@ func New() *schema.Provider {
 func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.Diagnostics) {
 	apiToken := d.Get("api_token").(string)
 	refreshToken := d.Get("refresh_token").(string)
+	deleteToken := d.Get("delete_token").(string)
+	deleteRefreshToken := d.Get("delete_refresh_token").(string)
 	org := d.Get("org").(string)
 	apiBaseURL := d.Get("api_base_url").(string)
 
@@ -72,6 +93,12 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	}
 	if refreshToken == "" {
 		refreshToken = os.Getenv("LAST9_REFRESH_TOKEN")
+	}
+	if deleteToken == "" {
+		deleteToken = os.Getenv("LAST9_DELETE_TOKEN")
+	}
+	if deleteRefreshToken == "" {
+		deleteRefreshToken = os.Getenv("LAST9_DELETE_REFRESH_TOKEN")
 	}
 	if org == "" {
 		org = os.Getenv("LAST9_ORG")
@@ -87,10 +114,12 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	}
 
 	config := &client.Config{
-		APIToken:     apiToken,
-		RefreshToken: refreshToken,
-		Org:          org,
-		BaseURL:      apiBaseURL,
+		APIToken:           apiToken,
+		RefreshToken:       refreshToken,
+		DeleteToken:        deleteToken,
+		DeleteRefreshToken: deleteRefreshToken,
+		Org:                org,
+		BaseURL:            apiBaseURL,
 	}
 
 	apiClient, err := client.NewClient(config)

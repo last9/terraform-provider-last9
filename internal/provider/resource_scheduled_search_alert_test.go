@@ -208,18 +208,13 @@ func TestAccScheduledSearchAlert_basic(t *testing.T) {
 		region = "ap-south-1" // Default region
 	}
 
-	destID := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_ID")
-	if destID == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_ID not set")
-	}
-
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccScheduledSearchAlertConfig_basic(region, destID),
+				Config: testAccScheduledSearchAlertConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckScheduledSearchAlertExists(resourceName, &alertID),
 					resource.TestCheckResourceAttr(resourceName, "name", "Test Error Count Alert"),
@@ -231,9 +226,10 @@ func TestAccScheduledSearchAlert_basic(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"alert_destinations"},
 			},
 		},
 	})
@@ -247,18 +243,13 @@ func TestAccScheduledSearchAlert_update(t *testing.T) {
 		region = "ap-south-1"
 	}
 
-	destID := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_ID")
-	if destID == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_ID not set")
-	}
-
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccScheduledSearchAlertConfig_basic(region, destID),
+				Config: testAccScheduledSearchAlertConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckScheduledSearchAlertExists(resourceName, &alertID),
 					resource.TestCheckResourceAttr(resourceName, "name", "Test Error Count Alert"),
@@ -266,7 +257,7 @@ func TestAccScheduledSearchAlert_update(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccScheduledSearchAlertConfig_updated(region, destID),
+				Config: testAccScheduledSearchAlertConfig_updated(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckScheduledSearchAlertExists(resourceName, &alertID),
 					resource.TestCheckResourceAttr(resourceName, "name", "Test Error Count Alert"),
@@ -286,18 +277,13 @@ func TestAccScheduledSearchAlert_withGrouping(t *testing.T) {
 		region = "ap-south-1"
 	}
 
-	destID := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_ID")
-	if destID == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_ID not set")
-	}
-
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		CheckDestroy:      testAccCheckScheduledSearchAlertDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccScheduledSearchAlertConfig_withGrouping(region, destID),
+				Config: testAccScheduledSearchAlertConfig_withGrouping(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckScheduledSearchAlertExists(resourceName, &alertID),
 					resource.TestCheckResourceAttr(resourceName, "name", "Test Grouped Alert"),
@@ -327,15 +313,50 @@ func testAccCheckScheduledSearchAlertExists(resourceName string, alertID *string
 }
 
 func testAccCheckScheduledSearchAlertDestroy(s *terraform.State) error {
-	// Note: Implement actual destroy check if needed
-	// For now, we'll skip the check as it requires API calls
+	provider := testAccProvider()
+	providerConfig := provider.Meta()
+	if providerConfig == nil {
+		// Provider not configured, skip check
+		return nil
+	}
+
+	apiClient := providerConfig.(*client.Client)
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "last9_scheduled_search_alert" {
+			continue
+		}
+
+		region := rs.Primary.Attributes["region"]
+		name := rs.Primary.Attributes["name"]
+
+		alerts, err := apiClient.GetScheduledSearchAlerts(region)
+		if err != nil {
+			// API error, assume deleted
+			continue
+		}
+
+		for _, alert := range alerts {
+			if alert.RuleName == name {
+				return fmt.Errorf("scheduled search alert %s still exists in region %s", name, region)
+			}
+		}
+	}
+
 	return nil
 }
 
 // Configuration helpers
 
-func testAccScheduledSearchAlertConfig_basic(region, destID string) string {
-	return fmt.Sprintf(`
+func testAccScheduledSearchAlertConfig_basic(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Alert Channel"
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/scheduled-search-test"
+  send_resolved = true
+}
+
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Error Count Alert"
@@ -372,13 +393,20 @@ resource "last9_scheduled_search_alert" "test" {
     value    = 100
   }
 
-  alert_destinations = [%s]
+  alert_destinations = [last9_notification_channel.test.id]
 }
-`, region, destID)
+`, region)
 }
 
-func testAccScheduledSearchAlertConfig_updated(region, destID string) string {
-	return fmt.Sprintf(`
+func testAccScheduledSearchAlertConfig_updated(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Alert Channel"
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/scheduled-search-test"
+  send_resolved = true
+}
+
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Error Count Alert"
@@ -415,13 +443,20 @@ resource "last9_scheduled_search_alert" "test" {
     value    = 200
   }
 
-  alert_destinations = [%s]
+  alert_destinations = [last9_notification_channel.test.id]
 }
-`, region, destID)
+`, region)
 }
 
-func testAccScheduledSearchAlertConfig_withGrouping(region, destID string) string {
-	return fmt.Sprintf(`
+func testAccScheduledSearchAlertConfig_withGrouping(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Grouped Alert Channel"
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/grouped-alert-test"
+  send_resolved = true
+}
+
 resource "last9_scheduled_search_alert" "test" {
   region         = "%s"
   name           = "Test Grouped Alert"
@@ -461,7 +496,7 @@ resource "last9_scheduled_search_alert" "test" {
     value    = 50
   }
 
-  alert_destinations = [%s]
+  alert_destinations = [last9_notification_channel.test.id]
 }
-`, region, destID)
+`, region)
 }
