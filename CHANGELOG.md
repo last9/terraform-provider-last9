@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Resources
-- **last9_dashboard** - Create and manage custom dashboards with multiple panels
+- **last9_entity** - Manage entities (services, components) with KPIs and alerts
 - **last9_alert** - Configure alert rules with static thresholds or expressions
+- **last9_notification_channel** - Manage notification channels for alerts
 - **last9_macro** - Manage cluster-level macros for query templating
 - **last9_policy** - Define and enforce control plane policies
 - **last9_drop_rule** - Configure log drop rules for filtering and cost optimization
@@ -25,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multiple notification destinations
 
 #### Data Sources
-- **last9_dashboard** - Query dashboard information
 - **last9_entity** - Query entity information
 - **last9_notification_destination** - Query notification destinations for alerts
 
@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AUTHENTICATION.md with detailed auth setup
 - Examples for all resources including:
   - Basic usage examples
-  - Dashboard configurations
+  - Entity configurations
   - Alert setups
   - Log management rules
   - Scheduled search alerts with multiple patterns
@@ -97,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Release Notes
 
-This is the first stable release (v1.0.0) of the Last9 Terraform Provider. The provider enables infrastructure-as-code management of Last9 resources including dashboards, alerts, log management rules, and scheduled search alerts.
+This is the first stable release (v1.0.0) of the Last9 Terraform Provider. The provider enables infrastructure-as-code management of Last9 resources including entities, alerts, log management rules, and scheduled search alerts.
 
 ### Installation
 
@@ -120,13 +120,15 @@ terraform {
 ```bash
 export LAST9_REFRESH_TOKEN="your-refresh-token"
 export LAST9_ORG="your-org-slug"
+export LAST9_API_BASE_URL="https://app.last9.io"
 ```
 
 2. Configure the provider:
 ```hcl
 provider "last9" {
   refresh_token = var.last9_refresh_token
-  org          = var.last9_org
+  org           = var.last9_org
+  api_base_url  = var.last9_api_base_url
 }
 ```
 

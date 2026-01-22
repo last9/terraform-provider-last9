@@ -57,7 +57,6 @@ func New() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"last9_dashboard":              resourceDashboard(),
 			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
 			"last9_macro":                  resourceMacro(),
@@ -71,7 +70,6 @@ func New() *schema.Provider {
 			// be managed via the entity's notification_channels field instead.
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"last9_dashboard":                dataSourceDashboard(),
 			"last9_entity":                   dataSourceEntity(),
 			"last9_notification_destination": dataSourceNotificationDestination(),
 		},

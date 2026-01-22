@@ -357,29 +357,6 @@ func (c *Client) Delete(path string) error {
 	return nil
 }
 
-// Dashboard methods
-func (c *Client) GetDashboard(id string) (*Dashboard, error) {
-	var dashboard Dashboard
-	err := c.Get(fmt.Sprintf("/dashboards/%s", id), &dashboard)
-	return &dashboard, err
-}
-
-func (c *Client) CreateDashboard(dashboard *DashboardCreateRequest) (*Dashboard, error) {
-	var result Dashboard
-	err := c.Post("/dashboards", dashboard, &result)
-	return &result, err
-}
-
-func (c *Client) UpdateDashboard(id string, dashboard *DashboardUpdateRequest) (*Dashboard, error) {
-	var result Dashboard
-	err := c.Put(fmt.Sprintf("/dashboards/%s", id), dashboard, &result)
-	return &result, err
-}
-
-func (c *Client) DeleteDashboard(id string) error {
-	return c.Delete(fmt.Sprintf("/dashboards/%s", id))
-}
-
 // Alert methods
 func (c *Client) GetAlert(entityID, alertID string) (*Alert, error) {
 	var alert Alert
@@ -494,41 +471,6 @@ func (c *Client) DeletePolicy(id string) error {
 }
 
 // Types
-type Dashboard struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Readonly    bool             `json:"readonly"`
-	Panels      []DashboardPanel `json:"panels"`
-	Tags        []string         `json:"tags"`
-	CreatedAt   string           `json:"created_at"`
-	UpdatedAt   string           `json:"updated_at"`
-}
-
-type DashboardPanel struct {
-	ID            string                 `json:"id,omitempty"`
-	Title         string                 `json:"title"`
-	Query         string                 `json:"query"`
-	Visualization string                 `json:"visualization"`
-	Config        map[string]interface{} `json:"config,omitempty"`
-}
-
-type DashboardCreateRequest struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Readonly    bool             `json:"readonly"`
-	Panels      []DashboardPanel `json:"panels"`
-	Tags        []string         `json:"tags"`
-}
-
-type DashboardUpdateRequest struct {
-	Name        string           `json:"name,omitempty"`
-	Description string           `json:"description,omitempty"`
-	Readonly    *bool            `json:"readonly,omitempty"`
-	Panels      []DashboardPanel `json:"panels,omitempty"`
-	Tags        []string         `json:"tags,omitempty"`
-}
-
 type Alert struct {
 	ID                           string          `json:"id"`
 	Name                         string          `json:"rule_name"`

@@ -1,10 +1,9 @@
 # Terraform Provider for Last9
 
-A Terraform provider for managing Last9 resources including dashboards, alerts, macros, control plane policies, log management rules, and scheduled search alerts.
+A Terraform provider for managing Last9 resources including alerts, macros, control plane policies, log management rules, and scheduled search alerts.
 
 ## Features
 
-- **Dashboards**: Create, update, and manage custom dashboards
 - **Alerts**: Configure alert rules with static thresholds or expressions
 - **Macros**: Manage cluster-level macros for query templating
 - **Policies**: Define and enforce control plane rules
@@ -80,24 +79,6 @@ See [Authentication Guide](docs/AUTHENTICATION.md) for detailed information abou
 ## Usage Examples
 
 See the [examples](./examples/) directory for complete examples.
-
-### Dashboard
-
-```hcl
-resource "last9_dashboard" "example" {
-  name        = "Production Metrics"
-  description = "Dashboard for production environment metrics"
-  readonly    = false
-
-  panels {
-    title         = "Request Rate"
-    query         = "sum(rate(http_requests_total[5m]))"
-    visualization = "line"
-  }
-
-  tags = ["production", "monitoring"]
-}
-```
 
 ### Alert
 
@@ -206,7 +187,7 @@ resource "last9_forward_rule" "external_logs" {
 
 ## Resources
 
-- `last9_dashboard` - Manage custom dashboards
+- `last9_entity` - Manage entities (services, components)
 - `last9_alert` - Configure alert rules
 - `last9_macro` - Manage cluster macros
 - `last9_policy` - Define control plane policies
@@ -216,7 +197,6 @@ resource "last9_forward_rule" "external_logs" {
 
 ## Data Sources
 
-- `last9_dashboard` - Query dashboard information
 - `last9_entity` - Query entity information
 - `last9_notification_destination` - Query notification destinations for alerts
 
