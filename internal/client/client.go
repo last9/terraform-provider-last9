@@ -420,6 +420,47 @@ func (c *Client) DeleteMacro(clusterID string) error {
 	return c.Delete(fmt.Sprintf("/clusters/%s/macros", clusterID))
 }
 
+// Cluster represents a Last9 cluster
+type Cluster struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Region    string `json:"region"`
+	IsDefault bool   `json:"default"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// GetClusters fetches all clusters for a region
+func (c *Client) GetClusters(region string) ([]Cluster, error) {
+	var clusters []Cluster
+	err := c.Get(fmt.Sprintf("/clusters?region=%s", region), &clusters)
+	return clusters, err
+}
+
+// GetDefaultCluster returns the default cluster for a region.
+// If no default is found, returns the first cluster.
+// Returns an error if no clusters exist.
+func (c *Client) GetDefaultCluster(region string) (*Cluster, error) {
+	clusters, err := c.GetClusters(region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch clusters: %w", err)
+	}
+
+	if len(clusters) == 0 {
+		return nil, fmt.Errorf("no clusters found in region %s", region)
+	}
+
+	// Find the default cluster
+	for i := range clusters {
+		if clusters[i].IsDefault {
+			return &clusters[i], nil
+		}
+	}
+
+	// If no default is marked, return the first cluster
+	return &clusters[0], nil
+}
+
 // Policy methods
 func (c *Client) GetPolicy(id string) (*Policy, error) {
 	var policy Policy
@@ -1094,6 +1135,94 @@ type KPIUpdateRequest struct {
 	Name       string        `json:"name"`
 	Definition KPIDefinition `json:"definition"`
 	KPIType    string        `json:"kpi_type"`
+}
+
+// NotificationChannel CRUD methods
+
+// NotificationChannelRequest represents the request body for creating/updating a notification channel
+type NotificationChannelRequest struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Destination  string `json:"destination"`
+	SendResolved bool   `json:"send_resolved"`
+}
+
+// CreateNotificationDestination creates a new notification channel (master channel)
+func (c *Client) CreateNotificationDestination(req *NotificationChannelRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Post("/notification_settings", req, &result)
+	return &result, err
+}
+
+// UpdateNotificationDestination updates an existing notification channel
+func (c *Client) UpdateNotificationDestination(id int, req *NotificationChannelRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Put(fmt.Sprintf("/notification_settings/%d", id), req, &result)
+	return &result, err
+}
+
+// DeleteNotificationDestination deletes a notification channel
+// Note: This uses a different endpoint format than other operations:
+// /api/organizations/{org}/workspace/{org}/notification_settings/{id} (no /v4 prefix)
+func (c *Client) DeleteNotificationDestination(id int) error {
+	// Get valid delete access token
+	deleteToken, err := c.getDeleteAccessToken()
+	if err != nil {
+		return err
+	}
+
+	// Use the workspace-based endpoint (no /v4 prefix)
+	reqURL := fmt.Sprintf("%s/api/organizations/%s/workspace/%s/notification_settings/%d",
+		c.config.BaseURL, c.config.Org, c.config.Org, id)
+
+	req, err := http.NewRequest("DELETE", reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Use X-LAST9-API-TOKEN header with delete token
+	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
+	}
+
+	return nil
+}
+
+// NotificationChannelAttachRequest represents the request body for attaching a channel to an entity
+type NotificationChannelAttachRequest struct {
+	EntityID string `json:"entity_id"`
+	Severity string `json:"severity"`
+}
+
+// NotificationAttachment represents an attachment record (child channel linked to entity)
+type NotificationAttachment struct {
+	ID        int    `json:"id"`
+	ChannelID int    `json:"channel_id"`
+	EntityID  string `json:"entity_id"`
+	Severity  string `json:"severity"`
+}
+
+// AttachNotificationChannel attaches a notification channel to an entity with a severity level
+func (c *Client) AttachNotificationChannel(channelID int, req *NotificationChannelAttachRequest) (*NotificationDestination, error) {
+	var result NotificationDestination
+	err := c.Post(fmt.Sprintf("/notification_settings/%d/attach", channelID), req, &result)
+	return &result, err
+}
+
+// DetachNotificationChannel detaches a notification channel from an entity
+// The API uses DELETE with entity_id as a query parameter
+func (c *Client) DetachNotificationChannel(channelID int, entityID string) error {
+	return c.Delete(fmt.Sprintf("/notification_settings/%d/attach?entity_id=%s", channelID, entityID))
 }
 
 // KPI methods

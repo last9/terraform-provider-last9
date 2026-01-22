@@ -2,28 +2,26 @@ package provider
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 func TestAccDataSourceNotificationDestination_byName(t *testing.T) {
-	destName := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_NAME")
-	if destName == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_NAME not set")
-	}
+	timestamp := time.Now().UnixNano()
+	channelName := fmt.Sprintf("TF Test DS Channel %d", timestamp)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNotificationDestinationConfig_byName(destName),
+				Config: testAccDataSourceNotificationDestinationConfig_byName(channelName),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "name", destName),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "name", channelName),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "id"),
-					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "type"),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "type", "slack"),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "destination"),
 				),
 			},
@@ -32,21 +30,22 @@ func TestAccDataSourceNotificationDestination_byName(t *testing.T) {
 }
 
 func TestAccDataSourceNotificationDestination_byID(t *testing.T) {
-	destID := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_ID")
-	if destID == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_ID not set")
-	}
+	timestamp := time.Now().UnixNano()
+	channelName := fmt.Sprintf("TF Test DS By ID %d", timestamp)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNotificationDestinationConfig_byID(destID),
+				Config: testAccDataSourceNotificationDestinationConfig_byID(channelName),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "id", destID),
-					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "name"),
-					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "type"),
+					resource.TestCheckResourceAttrPair(
+						"data.last9_notification_destination.test", "id",
+						"last9_notification_channel.test", "id",
+					),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "name", channelName),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "type", "slack"),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "destination"),
 				),
 			},
@@ -55,21 +54,19 @@ func TestAccDataSourceNotificationDestination_byID(t *testing.T) {
 }
 
 func TestAccDataSourceNotificationDestination_attributes(t *testing.T) {
-	destName := os.Getenv("LAST9_TEST_NOTIFICATION_DEST_NAME")
-	if destName == "" {
-		t.Skip("Skipping test - LAST9_TEST_NOTIFICATION_DEST_NAME not set")
-	}
+	timestamp := time.Now().UnixNano()
+	channelName := fmt.Sprintf("TF Test DS Attrs %d", timestamp)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
 		ProviderFactories: testAccProviderFactories(),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNotificationDestinationConfig_byName(destName),
+				Config: testAccDataSourceNotificationDestinationConfig_byName(channelName),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "id"),
-					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "name"),
-					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "type"),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "name", channelName),
+					resource.TestCheckResourceAttr("data.last9_notification_destination.test", "type", "slack"),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "destination"),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "global"),
 					resource.TestCheckResourceAttrSet("data.last9_notification_destination.test", "send_resolved"),
@@ -83,17 +80,31 @@ func TestAccDataSourceNotificationDestination_attributes(t *testing.T) {
 // Configuration helpers
 
 func testAccDataSourceNotificationDestinationConfig_byName(name string) string {
-	return fmt.Sprintf(`
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_notification_channel" "test" {
+  name          = %q
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/datasource-test"
+  send_resolved = true
+}
+
 data "last9_notification_destination" "test" {
-  name = "%s"
+  name = last9_notification_channel.test.name
 }
 `, name)
 }
 
-func testAccDataSourceNotificationDestinationConfig_byID(id string) string {
-	return fmt.Sprintf(`
-data "last9_notification_destination" "test" {
-  id = %s
+func testAccDataSourceNotificationDestinationConfig_byID(name string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_notification_channel" "test" {
+  name          = %q
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/datasource-byid-test"
+  send_resolved = true
 }
-`, id)
+
+data "last9_notification_destination" "test" {
+  id = last9_notification_channel.test.id
+}
+`, name)
 }

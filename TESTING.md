@@ -24,33 +24,25 @@ export LAST9_API_TOKEN="your-api-token"
 
 For acceptance tests (resource-specific):
 ```bash
-# For alert tests
-export LAST9_TEST_ENTITY_ID="entity-uuid-here"
-
-# For scheduled search alert tests
-export LAST9_TEST_REGION="ap-south-1"  # Optional, defaults to ap-south-1
-export LAST9_TEST_NOTIFICATION_DEST_ID="12345"  # Numeric ID
-
-# For notification destination tests
-export LAST9_TEST_NOTIFICATION_DEST_NAME="Engineering Slack"
-export LAST9_TEST_NOTIFICATION_DEST_ID="12345"
+# Optional - defaults to ap-south-1
+export LAST9_TEST_REGION="ap-south-1"
 ```
+
+**Note**: All tests now create their own resources dynamically. The following environment variables are **no longer needed**:
+- `LAST9_TEST_ENTITY_ID` - Alert tests create entities dynamically
+- `LAST9_TEST_NOTIFICATION_DEST_ID` - Tests create notification channels dynamically
+- `LAST9_TEST_NOTIFICATION_DEST_NAME` - Tests create notification channels dynamically
+- `LAST9_TEST_CLUSTER_ID` - Drop rule and forward rule tests auto-fetch the default cluster
 
 ### How to Get Test Values
 
-**Entity ID:**
-```bash
-# List entities in your organization
-curl -H "X-LAST9-API-TOKEN: Bearer $LAST9_API_TOKEN" \
-  https://api.last9.io/organizations/$LAST9_ORG/entities | jq '.[0].id'
-```
+**Note**: Most test values are now auto-generated or auto-fetched. You typically don't need to set any resource-specific environment variables.
 
-**Notification Destination ID and Name:**
+If you need to manually specify a cluster ID (optional):
 ```bash
-# List notification destinations
-curl -H "authorization: Bearer $TOKEN" \
-  https://api.last9.io/organizations/$LAST9_ORG/notification_settings \
-  | jq '.notification_destinations[] | {id, name, type}'
+# List clusters in your organization
+curl -H "X-LAST9-API-TOKEN: Bearer $LAST9_API_TOKEN" \
+  "https://api.last9.io/api/v4/organizations/$LAST9_ORG/clusters?region=ap-south-1" | jq '.[0].id'
 ```
 
 ## Running Tests
@@ -201,18 +193,11 @@ TF_ACC=1 go test ./internal/provider -v \
 
 ### Common Issues
 
-#### "Skipping test - LAST9_TEST_* not set"
-**Solution:** Export the required environment variable
+#### "Skipping acceptance test - LAST9_WRITE_REFRESH_TOKEN not set"
+**Solution:** Export your refresh tokens
 ```bash
-export LAST9_TEST_NOTIFICATION_DEST_ID="12345"
-```
-
-#### "notification destination with ID X not found"
-**Solution:** Verify the destination exists and ID is correct
-```bash
-curl -H "authorization: Bearer $TOKEN" \
-  https://api.last9.io/organizations/$LAST9_ORG/notification_settings \
-  | jq '.notification_destinations[] | select(.id == 12345)'
+export LAST9_WRITE_REFRESH_TOKEN="your-write-refresh-token"
+export LAST9_DELETE_REFRESH_TOKEN="your-delete-refresh-token"
 ```
 
 #### "failed to create scheduled search alert"

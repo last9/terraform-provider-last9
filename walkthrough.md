@@ -771,3 +771,404 @@ All 3 scheduled search integration tests pass.
 1. **alert_destinations not read from API**: The API returns internal association IDs that differ from the notification destination IDs the user specified. We preserve the user's config to avoid drift. This means external changes to alert destinations won't be detected by Terraform.
 
 2. **Individual CRUD vs List-Based**: Unlike drop rules and forward rules, scheduled search alerts use standard REST operations (POST/PUT/DELETE individual resources). This is more Terraform-friendly as it avoids race conditions from list-based CRUD.
+
+---
+
+# Session: Notification Channel Resource Implementation (2026-01-22)
+
+## Task Description
+
+Implement `last9_notification_channel` and `last9_notification_channel_attachment` resources for managing notification channels. These resources separate two concerns:
+1. **Notification Channel** - The channel itself (name, type, destination, send_resolved)
+2. **Channel Attachment** - Linking a channel to an entity with severity (entity_id, severity)
+
+## API Endpoints
+
+| Operation | Endpoint | Method |
+|-----------|----------|--------|
+| List | `/notification_settings` | GET |
+| Create | `/notification_settings` | POST |
+| Update | `/notification_settings/{id}` | PUT |
+| Delete | `/notification_settings/{id}` | DELETE |
+| Attach | `/notification_settings/{id}/attach` | POST |
+| Detach | `/notification_settings/{id}/attach` | DELETE |
+
+**Notification Types**: `slack`, `pagerduty`, `opsgenie`, `email`, `generic_webhook`
+
+## Files Created
+
+### 1. `internal/provider/resource_notification_channel.go`
+
+Terraform resource for managing notification channels (master channels).
+
+| Function | Purpose |
+|----------|---------|
+| `resourceNotificationChannel()` | Schema definition with name, type, destination, send_resolved |
+| `resourceNotificationChannelCreate()` | Create new channel via POST |
+| `resourceNotificationChannelRead()` | Read channel by ID from list |
+| `resourceNotificationChannelUpdate()` | Update channel via PUT |
+| `resourceNotificationChannelDelete()` | Delete channel via DELETE |
+
+**Schema Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string (Required) | Channel name (no colons allowed) |
+| `type` | string (Required, ForceNew) | slack, pagerduty, opsgenie, email, generic_webhook |
+| `destination` | string (Required, Sensitive) | Webhook URL, email, or API key |
+| `send_resolved` | bool (Optional, default: true) | Send resolved notifications |
+| `global` | bool (Computed) | Always true for master channel |
+| `in_use` | bool (Computed) | Whether channel has attachments |
+| `organization_id` | string (Computed) | Organization ID |
+| `created_at` | string (Computed) | Creation timestamp |
+| `updated_at` | string (Computed) | Update timestamp |
+
+### 2. `internal/provider/resource_notification_channel_attachment.go` (NOT REGISTERED)
+
+**Note**: This resource was implemented but NOT registered in the provider because the API doesn't support reading child channels after creation. When you attach a channel to an entity, the API creates a "child" notification destination with a new ID, but this child is not visible in the list API and cannot be read back.
+
+**Recommendation**: Manage notification channel attachments via the entity's `notification_channels` field instead of using a separate attachment resource.
+
+### 3. `internal/provider/resource_notification_channel_test.go`
+
+**Test Cases:**
+| Test | Purpose |
+|------|---------|
+| `TestAccNotificationChannel_slack` | Create Slack channel, verify, import |
+| `TestAccNotificationChannel_email` | Create email channel |
+| `TestAccNotificationChannel_update` | Verify update works |
+| `TestAccNotificationChannel_pagerduty` | Create PagerDuty channel |
+| `TestAccNotificationChannel_genericWebhook` | Create generic webhook channel |
+
+### 4. `internal/provider/resource_notification_channel_attachment_test.go` (DELETED)
+
+**Note**: This test file was deleted because the attachment resource is not registered due to API limitations. The API creates child notification destinations when attaching to entities, but these children are not visible in the list API and cannot be read back, making Terraform lifecycle management impossible.
+
+## Files Modified
+
+### 1. `internal/client/client.go`
+
+| Addition | Purpose |
+|----------|---------|
+| `NotificationChannelRequest` type | Request body for create/update |
+| `CreateNotificationDestination()` | POST new channel |
+| `UpdateNotificationDestination()` | PUT update channel |
+| `DeleteNotificationDestination()` | DELETE channel |
+| `NotificationChannelAttachRequest` type | Request body for attach |
+| `NotificationAttachment` type | Attachment record |
+| `AttachNotificationChannel()` | POST attach channel to entity |
+| `DetachNotificationChannel()` | DELETE detach channel from entity |
+
+### 2. `internal/provider/provider.go`
+
+| Change |
+|--------|
+| Added `last9_notification_channel` to ResourcesMap |
+| Added comment explaining why `notification_channel_attachment` is NOT registered |
+
+### 3. `internal/provider/resource_scheduled_search_alert_test.go`
+
+| Change | Description |
+|--------|-------------|
+| Tests now create notification channel dynamically | No longer requires `LAST9_TEST_NOTIFICATION_DEST_ID` env var |
+| Updated test config functions to use `last9_notification_channel` resource | Dynamic channel creation |
+| Alert destinations now use `last9_notification_channel.test.id` reference | Resource dependency |
+
+## Design Decisions
+
+1. **Notification channel resource only**: The attachment resource was not registered because the API doesn't support reading child channels after creation. Attachments should be managed via the entity's `notification_channels` field.
+
+2. **`type` as ForceNew**: Changing notification type fundamentally changes the destination semantics (Slack webhook vs email address vs PagerDuty key).
+
+3. **`destination` as Sensitive**: Contains API keys, webhook URLs, or email addresses that should not be displayed in logs.
+
+4. **Different delete endpoint**: The delete operation uses a different URL path (`/api/organizations/{org}/workspace/{org}/notification_settings/{id}`) without the `/v4` prefix, discovered during testing.
+
+5. **Dynamic notification channels in scheduled search tests**: Tests no longer require pre-created notification destinations. This makes tests self-contained and easier to run.
+
+## Trade-offs Considered
+
+1. **Attachment resource not viable**: The API creates child notification destinations when attaching to entities, but these children are not visible in the list API and cannot be read back. This makes proper Terraform lifecycle management impossible. Users should use the entity's `notification_channels` field instead.
+
+2. **Scheduled search tests dynamically create channels**: This adds a small amount of overhead but makes tests more reliable and removes environment variable requirements.
+
+3. **Delete endpoint uses different path**: The notification channel delete operation uses `/api/organizations/{org}/workspace/{org}/notification_settings/{id}` (no `/v4` prefix) instead of the standard path. This was discovered during testing.
+
+## Verification
+
+| Check | Status |
+|-------|--------|
+| `go build ./...` | ✅ Passes |
+| Unit tests | ✅ All pass |
+| Notification channel tests | ✅ 5/5 pass |
+
+## Test Results (Live API)
+
+```
+=== RUN   TestAccNotificationChannel_slack
+--- PASS: TestAccNotificationChannel_slack (1.74s)
+=== RUN   TestAccNotificationChannel_email
+--- PASS: TestAccNotificationChannel_email (1.16s)
+=== RUN   TestAccNotificationChannel_update
+--- PASS: TestAccNotificationChannel_update (1.58s)
+=== RUN   TestAccNotificationChannel_pagerduty
+--- PASS: TestAccNotificationChannel_pagerduty (0.88s)
+=== RUN   TestAccNotificationChannel_genericWebhook
+--- PASS: TestAccNotificationChannel_genericWebhook (0.89s)
+PASS
+ok      github.com/last9/terraform-provider-last9/internal/provider     6.932s
+```
+
+## Running Tests
+
+```bash
+# Run notification channel tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccNotificationChannel_" -timeout 10m
+
+# Run scheduled search tests (now use dynamic channels)
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccScheduledSearch" -timeout 10m
+
+# Run all tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -timeout 15m
+```
+
+## Example Usage
+
+### 1. Notification Channel Resource
+
+```hcl
+resource "last9_notification_channel" "slack" {
+  name          = "Production Alerts"
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00/B00/XXX"
+  send_resolved = true
+}
+
+resource "last9_notification_channel" "pagerduty" {
+  name          = "On-Call Team"
+  type          = "pagerduty"
+  destination   = "your-integration-key"
+  send_resolved = true
+}
+
+resource "last9_notification_channel" "email" {
+  name          = "Team Email"
+  type          = "email"
+  destination   = "alerts@yourcompany.com"
+  send_resolved = false
+}
+```
+
+### 2. Use with Scheduled Search Alert
+
+```hcl
+resource "last9_scheduled_search_alert" "error_alert" {
+  # ... config ...
+  alert_destinations = [last9_notification_channel.slack.id]
+}
+```
+
+### 3. Use with Entity (for attachments)
+
+```hcl
+resource "last9_entity" "my_service" {
+  name         = "My Service"
+  type         = "service"
+  external_ref = "my-service"
+
+  # Attach notification channels directly on the entity
+  notification_channels = [
+    last9_notification_channel.slack.id,
+    last9_notification_channel.pagerduty.id
+  ]
+}
+```
+
+**Note**: The `notification_channel_attachment` resource is not available because the API doesn't support reading child channels after creation. Use the entity's `notification_channels` field to attach channels to entities.
+
+## Full Test Suite Results (2026-01-22)
+
+After implementing notification channel resource and updating scheduled search tests:
+
+| Category | Passed | Failed | Skipped |
+|----------|--------|--------|---------|
+| Provider | 1 | 0 | 0 |
+| Alert Integration | 6 | 0 | 0 |
+| Entity | 6 | 0 | 0 |
+| Notification Channel | 5 | 0 | 0 |
+| Scheduled Search | 3 | 0 | 0 |
+| Dashboard | 0 | 2 | 0 |
+| Other (env var dependent) | 0 | 0 | 11 |
+| **Total** | **22** | **2** | **11** |
+
+**Dashboard Test Failures**: The 2 dashboard tests fail with HTTP 500 Internal Server Error from the API. This is a backend issue, not fixable in the provider code.
+
+**Skipped Tests**: 11 tests are skipped due to missing environment variables:
+- `LAST9_TEST_CLUSTER_ID` - Required for drop rule and forward rule tests
+- `LAST9_TEST_ENTITY_ID` - Required for alert tests that need pre-existing entity
+- `LAST9_TEST_NOTIFICATION_DEST_ID` - No longer needed (tests create channels dynamically)
+
+### Test Commands
+
+```bash
+# Run all tests
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -timeout 15m
+
+# Run notification channel tests only
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccNotificationChannel" -timeout 10m
+
+# Run scheduled search tests (now self-contained)
+CGO_ENABLED=0 TF_ACC=1 go test -v ./internal/provider/ -run "TestAccScheduledSearch" -timeout 10m
+```
+
+---
+
+# Session: Make Tests Self-Contained (2026-01-22)
+
+## Task Description
+
+Update tests that required environment variables (`LAST9_TEST_ENTITY_ID`, `LAST9_TEST_NOTIFICATION_DEST_ID`, etc.) to create their own resources dynamically, making tests self-contained and easier to run.
+
+## Changes Made
+
+### 1. Deleted `internal/provider/resource_alert_test.go`
+
+**Reason**: This file contained obsolete tests that:
+- Required `LAST9_TEST_ENTITY_ID` environment variable
+- Used deprecated schema fields (`indicator`, `mute`, `expression`)
+- Were redundant with `resource_alert_integration_test.go` which already creates entities dynamically
+
+The integration tests (`TestAccAlertIntegration_*`) cover all the same scenarios with dynamic entity creation.
+
+### 2. Updated `internal/provider/data_source_notification_destination_test.go`
+
+**Before**: Tests required `LAST9_TEST_NOTIFICATION_DEST_NAME` and `LAST9_TEST_NOTIFICATION_DEST_ID` environment variables.
+
+**After**: Tests create a `last9_notification_channel` resource dynamically and then use the data source to query it.
+
+| Test | Change |
+|------|--------|
+| `TestAccDataSourceNotificationDestination_byName` | Creates channel, queries by name |
+| `TestAccDataSourceNotificationDestination_byID` | Creates channel, queries by ID |
+| `TestAccDataSourceNotificationDestination_attributes` | Creates channel, verifies all attributes |
+
+**Key changes**:
+- Uses `testAccPreCheckWithDelete(t)` since tests create/destroy resources
+- Uses unique names with timestamps to avoid conflicts
+- Uses `testAccProviderConfig()` for proper provider configuration
+
+## Environment Variables Status
+
+| Variable | Status | Notes |
+|----------|--------|-------|
+| `LAST9_TEST_ENTITY_ID` | **No longer needed** | Alert integration tests create entities dynamically |
+| `LAST9_TEST_NOTIFICATION_DEST_ID` | **No longer needed** | Data source and scheduled search tests create channels dynamically |
+| `LAST9_TEST_NOTIFICATION_DEST_NAME` | **No longer needed** | Data source tests create channels dynamically |
+| `LAST9_TEST_CLUSTER_ID` | Still required | Drop rule and forward rule tests need cluster ID |
+| `LAST9_TEST_REGION` | Optional | Defaults to `ap-south-1` |
+
+## Verification
+
+| Check | Status |
+|-------|--------|
+| `go build ./...` | ✅ Passes |
+| Unit tests | ✅ All pass |
+| Test compilation | ✅ No errors |
+
+---
+
+# Session: Auto-Fetch Default Cluster ID (2026-01-22)
+
+## Task Description
+
+Make `cluster_id` optional for drop rules and forward rules. If not specified, the default cluster for the region will be automatically fetched from the clusters API.
+
+## Changes Made
+
+### 1. `internal/client/client.go`
+
+Added cluster-related types and methods:
+
+| Addition | Purpose |
+|----------|---------|
+| `Cluster` struct | Represents a Last9 cluster with ID, name, region, and `IsDefault` flag |
+| `GetClusters(region)` | Fetches all clusters for a region |
+| `GetDefaultCluster(region)` | Returns the default cluster (marked with `default: true`) or first cluster if none marked |
+
+### 2. `internal/provider/resource_drop_rule.go`
+
+| Change | Description |
+|--------|-------------|
+| Schema: `cluster_id` | Changed from `Required` to `Optional` + `Computed` |
+| `resourceDropRuleCreate()` | If `cluster_id` not provided, fetch default cluster via `GetDefaultCluster()` |
+
+### 3. `internal/provider/resource_forward_rule.go`
+
+| Change | Description |
+|--------|-------------|
+| Schema: `cluster_id` | Changed from `Required` to `Optional` + `Computed` |
+| `resourceForwardRuleCreate()` | If `cluster_id` not provided, fetch default cluster via `GetDefaultCluster()` |
+
+### 4. `internal/provider/resource_drop_rule_test.go`
+
+| Change | Description |
+|--------|-------------|
+| Removed `LAST9_TEST_CLUSTER_ID` skip checks | Tests no longer require this env var |
+| Updated config functions | Removed `cluster_id` parameter - now auto-fetched |
+| Updated test checks | Changed from exact cluster_id match to `TestCheckResourceAttrSet` |
+
+### 5. `internal/provider/resource_forward_rule_test.go`
+
+| Change | Description |
+|--------|-------------|
+| Removed `LAST9_TEST_CLUSTER_ID` skip checks | Tests no longer require this env var |
+| Updated config functions | Removed `cluster_id` parameter - now auto-fetched |
+| Updated test checks | Changed from exact cluster_id match to `TestCheckResourceAttrSet` |
+
+## Environment Variables No Longer Needed
+
+| Variable | Status |
+|----------|--------|
+| `LAST9_TEST_CLUSTER_ID` | **No longer needed** - cluster_id is auto-fetched from default cluster |
+
+## Example Usage
+
+### Drop Rule (without cluster_id - uses default cluster)
+
+```hcl
+resource "last9_drop_rule" "example" {
+  region    = "ap-south-1"
+  name      = "drop-debug-logs"
+  telemetry = "logs"
+
+  filters {
+    key      = "attributes[\"service\"]"
+    value    = "debug-service"
+    operator = "equals"
+  }
+
+  action {
+    name        = "drop-matching"
+    destination = "/dev/null"
+  }
+}
+```
+
+### Drop Rule (with explicit cluster_id)
+
+```hcl
+resource "last9_drop_rule" "example" {
+  region     = "ap-south-1"
+  cluster_id = "your-specific-cluster-id"
+  name       = "drop-debug-logs"
+  telemetry  = "logs"
+  # ... rest of config
+}
+```
+
+## Verification
+
+| Check | Status |
+|-------|--------|
+| `go build ./...` | ✅ Passes |
+| Unit tests | ✅ All pass |
+| Test compilation | ✅ No errors |

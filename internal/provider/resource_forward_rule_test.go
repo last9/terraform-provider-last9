@@ -18,10 +18,6 @@ func TestAccForwardRule_basic(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -29,12 +25,12 @@ func TestAccForwardRule_basic(t *testing.T) {
 		CheckDestroy:      testAccCheckForwardRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccForwardRuleConfig_basic(region, clusterID),
+				Config: testAccForwardRuleConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckForwardRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-forward-rule"),
 					resource.TestCheckResourceAttr(resourceName, "region", region),
-					resource.TestCheckResourceAttr(resourceName, "cluster_id", clusterID),
+					resource.TestCheckResourceAttrSet(resourceName, "cluster_id"),
 					resource.TestCheckResourceAttr(resourceName, "telemetry", "logs"),
 					resource.TestCheckResourceAttr(resourceName, "destination", "https://example.com/logs"),
 					resource.TestCheckResourceAttr(resourceName, "filters.#", "1"),
@@ -58,10 +54,6 @@ func TestAccForwardRule_update(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -69,7 +61,7 @@ func TestAccForwardRule_update(t *testing.T) {
 		CheckDestroy:      testAccCheckForwardRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccForwardRuleConfig_basic(region, clusterID),
+				Config: testAccForwardRuleConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckForwardRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-forward-rule"),
@@ -77,7 +69,7 @@ func TestAccForwardRule_update(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccForwardRuleConfig_updated(region, clusterID),
+				Config: testAccForwardRuleConfig_updated(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckForwardRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-forward-rule"),
@@ -95,10 +87,6 @@ func TestAccForwardRule_multipleFilters(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -106,7 +94,7 @@ func TestAccForwardRule_multipleFilters(t *testing.T) {
 		CheckDestroy:      testAccCheckForwardRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccForwardRuleConfig_multipleFilters(region, clusterID),
+				Config: testAccForwardRuleConfig_multipleFilters(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckForwardRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-forward-rule-multi"),
@@ -169,12 +157,12 @@ func testAccCheckForwardRuleDestroy(s *terraform.State) error {
 }
 
 // Configuration helpers
+// Note: cluster_id is optional - if not specified, the default cluster for the region will be used
 
-func testAccForwardRuleConfig_basic(region, clusterID string) string {
+func testAccForwardRuleConfig_basic(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_forward_rule" "test" {
   region      = "%s"
-  cluster_id  = "%s"
   name        = "tf-test-forward-rule"
   telemetry   = "logs"
   destination = "https://example.com/logs"
@@ -185,14 +173,13 @@ resource "last9_forward_rule" "test" {
     operator = "equals"
   }
 }
-`, region, clusterID)
+`, region)
 }
 
-func testAccForwardRuleConfig_updated(region, clusterID string) string {
+func testAccForwardRuleConfig_updated(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_forward_rule" "test" {
   region      = "%s"
-  cluster_id  = "%s"
   name        = "tf-test-forward-rule"
   telemetry   = "logs"
   destination = "https://example.com/logs-v2"
@@ -203,14 +190,13 @@ resource "last9_forward_rule" "test" {
     operator = "equals"
   }
 }
-`, region, clusterID)
+`, region)
 }
 
-func testAccForwardRuleConfig_multipleFilters(region, clusterID string) string {
+func testAccForwardRuleConfig_multipleFilters(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_forward_rule" "test" {
   region      = "%s"
-  cluster_id  = "%s"
   name        = "tf-test-forward-rule-multi"
   telemetry   = "logs"
   destination = "https://example.com/logs"
@@ -228,5 +214,5 @@ resource "last9_forward_rule" "test" {
     operator = "equals"
   }
 }
-`, region, clusterID)
+`, region)
 }

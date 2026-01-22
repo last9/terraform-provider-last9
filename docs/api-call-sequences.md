@@ -421,6 +421,168 @@ If the alert name or query changes, a new KPI is created first:
 
 ---
 
+## Notification Channels
+
+Notification Channels are represented as `last9_notification_channel` resources in Terraform. They use standard REST CRUD operations.
+
+**Base URL**: `{api_base_url}/api/v4/organizations/{org}`
+
+### Create
+
+**Terraform operation**: `terraform apply` (new resource)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ POST /notification_settings                                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "name": "Production Alerts",                                               │
+│   "type": "slack",                          ◄── slack, pagerduty, opsgenie,  │
+│   "destination": "https://hooks.slack.com/...",      email, generic_webhook  │
+│   "send_resolved": true                                                      │
+│ }                                                                            │
+│                                                                              │
+│ Response:                                                                    │
+│ {                                                                            │
+│   "id": 1234,                                                                │
+│   "name": "Production Alerts",                                               │
+│   "type": "slack",                                                           │
+│   "destination": "https://hooks.slack.com/...",                              │
+│   "send_resolved": true,                                                     │
+│   "global": true,                                                            │
+│   "in_use": false,                                                           │
+│   "organization_id": "org-uuid",                                             │
+│   "created_at": "2024-01-15T10:00:00Z",                                      │
+│   "updated_at": "2024-01-15T10:00:00Z"                                       │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Read
+
+**Terraform operation**: `terraform plan`, `terraform refresh`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GET /notification_settings                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Response:                                                                    │
+│ {                                                                            │
+│   "notification_destinations": [                                             │
+│     {                                                                        │
+│       "id": 1234,                                                            │
+│       "name": "Production Alerts",                                           │
+│       "type": "slack",                                                       │
+│       "destination": "https://hooks.slack.com/...",                          │
+│       "send_resolved": true,                                                 │
+│       "global": true,                                                        │
+│       "in_use": false,                                                       │
+│       "organization_id": "org-uuid",                                         │
+│       "created_at": "2024-01-15T10:00:00Z",                                  │
+│       "updated_at": "2024-01-15T10:00:00Z"                                   │
+│     },                                                                       │
+│     ...                                                                      │
+│   ]                                                                          │
+│ }                                                                            │
+│                                                                              │
+│ Provider finds channel by ID in the list                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Update
+
+**Terraform operation**: `terraform apply` (existing resource changed)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PUT /notification_settings/{id}                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Request Body:                                                                │
+│ {                                                                            │
+│   "name": "Updated Alert Channel",                                           │
+│   "type": "slack",                          ◄── Cannot be changed (ForceNew) │
+│   "destination": "https://hooks.slack.com/new-url",                          │
+│   "send_resolved": false                                                     │
+│ }                                                                            │
+│                                                                              │
+│ Response: Updated channel object                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Delete
+
+**Terraform operation**: `terraform destroy`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ DELETE /api/organizations/{org}/workspace/{org}/notification_settings/{id}   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Note: Delete endpoint uses a DIFFERENT path (no /v4 prefix)                  │
+│                                                                              │
+│ Header: X-LAST9-API-TOKEN: Bearer {delete_access_token}                      │
+│                                                                              │
+│ Note: Requires delete-scoped token                                           │
+│                                                                              │
+│ Response: 200 OK on success                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Import
+
+**Terraform operation**: `terraform import last9_notification_channel.name <id>`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Import ID format: numeric channel ID                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Example: terraform import last9_notification_channel.slack 1234              │
+│                                                                              │
+│ The provider:                                                                │
+│ 1. Calls GET /notification_settings                                          │
+│ 2. Finds channel by ID in the response list                                  │
+│                                                                              │
+│ Note: destination field is ignored during import (sensitive)                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Clusters (Read-Only)
+
+Clusters are queried to determine the default cluster for Drop Rules and Forward Rules when `cluster_id` is not specified.
+
+### Get Clusters
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GET /clusters?region={region}                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Response:                                                                    │
+│ [                                                                            │
+│   {                                                                          │
+│     "id": "cluster-uuid-1",                                                  │
+│     "name": "default-cluster",                                               │
+│     "region": "ap-south-1",                                                  │
+│     "default": true,                        ◄── Default cluster flag         │
+│     "created_at": "2024-01-01T00:00:00Z",                                    │
+│     "updated_at": "2024-01-15T00:00:00Z"                                     │
+│   },                                                                         │
+│   {                                                                          │
+│     "id": "cluster-uuid-2",                                                  │
+│     "name": "secondary-cluster",                                             │
+│     "region": "ap-south-1",                                                  │
+│     "default": false,                                                        │
+│     ...                                                                      │
+│   }                                                                          │
+│ ]                                                                            │
+│                                                                              │
+│ Provider returns cluster with default=true, or first cluster if none marked │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Drop Rules
 
 Drop Rules are represented as `last9_drop_rule` resources in Terraform. They use a **list-based CRUD pattern** where the entire list of rules is replaced on each operation.
@@ -430,11 +592,22 @@ Drop Rules are represented as `last9_drop_rule` resources in Terraform. They use
 2. Modifies the list (add/update/remove)
 3. POSTs the entire modified list back
 
+**cluster_id**: If not specified, the provider automatically fetches the default cluster for the region using `GET /clusters?region={region}`.
+
 ### Create
 
 **Terraform operation**: `terraform apply` (new resource)
 
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 0: Get default cluster (if cluster_id not specified)                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /clusters?region={region}                                                │
+│                                                                              │
+│ Find cluster with default=true, or use first cluster                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ Step 1: Get existing rules                                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -630,11 +803,22 @@ Drop Rules are represented as `last9_drop_rule` resources in Terraform. They use
 
 Forward Rules are represented as `last9_forward_rule` resources in Terraform. Like Drop Rules, they use a **list-based CRUD pattern**.
 
+**cluster_id**: If not specified, the provider automatically fetches the default cluster for the region using `GET /clusters?region={region}`.
+
 ### Create
 
 **Terraform operation**: `terraform apply` (new resource)
 
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 0: Get default cluster (if cluster_id not specified)                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ GET /clusters?region={region}                                                │
+│                                                                              │
+│ Find cluster with default=true, or use first cluster                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ Step 1: Get existing rules                                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -1018,11 +1202,15 @@ All API calls require authentication via the `X-LAST9-API-TOKEN` header:
 | Alert | Read | GET /alert-rules/{id} |
 | Alert | Update | POST /kpis (if needed) → PUT /alert-rules/{id} → DELETE /kpis (old) → GET /alert-rules/{new_id} |
 | Alert | Delete | DELETE /alert-rules/{id} → DELETE /kpis/{id} |
-| Drop Rule | Create | GET /logs_settings/routing → POST /logs_settings/routing (list with new rule) |
+| Notification Channel | Create | POST /notification_settings |
+| Notification Channel | Read | GET /notification_settings (find by ID) |
+| Notification Channel | Update | PUT /notification_settings/{id} |
+| Notification Channel | Delete | DELETE /api/organizations/{org}/workspace/{org}/notification_settings/{id} |
+| Drop Rule | Create | (GET /clusters if needed) → GET /logs_settings/routing → POST /logs_settings/routing |
 | Drop Rule | Read | GET /logs_settings/routing (find by name) |
 | Drop Rule | Update | GET /logs_settings/routing → POST /logs_settings/routing (list with updated rule) |
 | Drop Rule | Delete | GET /logs_settings/routing → POST /logs_settings/routing (list without rule) |
-| Forward Rule | Create | GET /logs_settings/forward → POST /logs_settings/forward (list with new rule) |
+| Forward Rule | Create | (GET /clusters if needed) → GET /logs_settings/forward → POST /logs_settings/forward |
 | Forward Rule | Read | GET /logs_settings/forward (find by name) |
 | Forward Rule | Update | GET /logs_settings/forward → POST /logs_settings/forward (list with updated rule) |
 | Forward Rule | Delete | GET /logs_settings/forward → POST /logs_settings/forward (list without rule) |
@@ -1035,8 +1223,10 @@ All API calls require authentication via the `X-LAST9-API-TOKEN` header:
 
 | Resource Type | CRUD Pattern | Notes |
 |---------------|--------------|-------|
-| Entity, Alert | Individual REST | Standard create/read/update/delete per resource |
+| Entity, Alert, Notification Channel | Individual REST | Standard create/read/update/delete per resource |
 | Drop Rule, Forward Rule | List-based | GET all → modify list → POST entire list |
 | Scheduled Search | Individual REST | Standard REST operations (POST/PUT/DELETE) |
 
 **List-based CRUD Limitation**: Drop Rules and Forward Rules use a list-based pattern where the entire list is replaced on each operation. This has inherent race conditions - concurrent Terraform runs could overwrite each other's changes.
+
+**Auto-fetch Default Cluster**: Drop Rules and Forward Rules will automatically fetch the default cluster for the region if `cluster_id` is not specified. The provider calls `GET /clusters?region={region}` and uses the cluster marked with `default: true`.

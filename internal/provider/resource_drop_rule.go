@@ -29,9 +29,10 @@ func resourceDropRule() *schema.Resource {
 			},
 			"cluster_id": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
+				Computed:    true,
 				ForceNew:    true,
-				Description: "Cluster ID for the drop rule (from the clusters API)",
+				Description: "Cluster ID for the drop rule. If not specified, the default cluster for the region will be used.",
 			},
 			"name": {
 				Type:        schema.TypeString,
@@ -108,6 +109,16 @@ func resourceDropRuleCreate(ctx context.Context, d *schema.ResourceData, m inter
 	region := d.Get("region").(string)
 	clusterID := d.Get("cluster_id").(string)
 	ruleName := d.Get("name").(string)
+
+	// If cluster_id is not provided, fetch the default cluster for the region
+	if clusterID == "" {
+		defaultCluster, err := apiClient.GetDefaultCluster(region)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("failed to get default cluster for region %s: %w", region, err))
+		}
+		clusterID = defaultCluster.ID
+		d.Set("cluster_id", clusterID)
+	}
 
 	newRule := client.DropRule{
 		Name:      ruleName,

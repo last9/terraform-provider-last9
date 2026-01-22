@@ -240,10 +240,6 @@ func TestAccDropRule_basic(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -251,12 +247,12 @@ func TestAccDropRule_basic(t *testing.T) {
 		CheckDestroy:      testAccCheckDropRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDropRuleConfig_basic(region, clusterID),
+				Config: testAccDropRuleConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckDropRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule"),
 					resource.TestCheckResourceAttr(resourceName, "region", region),
-					resource.TestCheckResourceAttr(resourceName, "cluster_id", clusterID),
+					resource.TestCheckResourceAttrSet(resourceName, "cluster_id"),
 					resource.TestCheckResourceAttr(resourceName, "telemetry", "logs"),
 					resource.TestCheckResourceAttr(resourceName, "filters.#", "1"),
 					resource.TestCheckResourceAttr(resourceName, "filters.0.key", `attributes["service"]`),
@@ -279,10 +275,6 @@ func TestAccDropRule_update(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -290,7 +282,7 @@ func TestAccDropRule_update(t *testing.T) {
 		CheckDestroy:      testAccCheckDropRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDropRuleConfig_basic(region, clusterID),
+				Config: testAccDropRuleConfig_basic(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckDropRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule"),
@@ -298,7 +290,7 @@ func TestAccDropRule_update(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccDropRuleConfig_updated(region, clusterID),
+				Config: testAccDropRuleConfig_updated(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckDropRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule"),
@@ -315,10 +307,6 @@ func TestAccDropRule_multipleFilters(t *testing.T) {
 	if region == "" {
 		region = "ap-south-1"
 	}
-	clusterID := os.Getenv("LAST9_TEST_CLUSTER_ID")
-	if clusterID == "" {
-		t.Skip("Skipping test - LAST9_TEST_CLUSTER_ID not set")
-	}
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckWithDelete(t) },
@@ -326,7 +314,7 @@ func TestAccDropRule_multipleFilters(t *testing.T) {
 		CheckDestroy:      testAccCheckDropRuleDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDropRuleConfig_multipleFilters(region, clusterID),
+				Config: testAccDropRuleConfig_multipleFilters(region),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckDropRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule-multi"),
@@ -389,14 +377,14 @@ func testAccCheckDropRuleDestroy(s *terraform.State) error {
 }
 
 // Configuration helpers
+// Note: cluster_id is optional - if not specified, the default cluster for the region will be used
 
-func testAccDropRuleConfig_basic(region, clusterID string) string {
+func testAccDropRuleConfig_basic(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_drop_rule" "test" {
-  region     = "%s"
-  cluster_id = "%s"
-  name       = "tf-test-drop-rule"
-  telemetry  = "logs"
+  region    = "%s"
+  name      = "tf-test-drop-rule"
+  telemetry = "logs"
 
   filters {
     key      = "attributes[\"service\"]"
@@ -409,16 +397,15 @@ resource "last9_drop_rule" "test" {
     destination = "/dev/null"
   }
 }
-`, region, clusterID)
+`, region)
 }
 
-func testAccDropRuleConfig_updated(region, clusterID string) string {
+func testAccDropRuleConfig_updated(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_drop_rule" "test" {
-  region     = "%s"
-  cluster_id = "%s"
-  name       = "tf-test-drop-rule"
-  telemetry  = "logs"
+  region    = "%s"
+  name      = "tf-test-drop-rule"
+  telemetry = "logs"
 
   filters {
     key      = "attributes[\"service\"]"
@@ -431,16 +418,15 @@ resource "last9_drop_rule" "test" {
     destination = "/dev/null"
   }
 }
-`, region, clusterID)
+`, region)
 }
 
-func testAccDropRuleConfig_multipleFilters(region, clusterID string) string {
+func testAccDropRuleConfig_multipleFilters(region string) string {
 	return testAccProviderConfig() + fmt.Sprintf(`
 resource "last9_drop_rule" "test" {
-  region     = "%s"
-  cluster_id = "%s"
-  name       = "tf-test-drop-rule-multi"
-  telemetry  = "logs"
+  region    = "%s"
+  name      = "tf-test-drop-rule-multi"
+  telemetry = "logs"
 
   filters {
     key         = "attributes[\"service\"]"
@@ -460,5 +446,5 @@ resource "last9_drop_rule" "test" {
     destination = "/dev/null"
   }
 }
-`, region, clusterID)
+`, region)
 }
