@@ -42,9 +42,9 @@ type Client struct {
 	tokenMutex  sync.RWMutex
 	accessToken *AccessToken
 	// Delete token management (separate from access token due to scope requirements)
-	deleteToken        string       // Static delete token (legacy)
-	deleteAccessToken  *AccessToken // Cached delete access token from refresh
-	deleteTokenMutex   sync.RWMutex // Mutex for delete token refresh
+	deleteToken       string       // Static delete token (legacy)
+	deleteAccessToken *AccessToken // Cached delete access token from refresh
+	deleteTokenMutex  sync.RWMutex // Mutex for delete token refresh
 }
 
 func NewClient(config *Config) (*Client, error) {
@@ -357,29 +357,6 @@ func (c *Client) Delete(path string) error {
 	return nil
 }
 
-// Dashboard methods
-func (c *Client) GetDashboard(id string) (*Dashboard, error) {
-	var dashboard Dashboard
-	err := c.Get(fmt.Sprintf("/dashboards/%s", id), &dashboard)
-	return &dashboard, err
-}
-
-func (c *Client) CreateDashboard(dashboard *DashboardCreateRequest) (*Dashboard, error) {
-	var result Dashboard
-	err := c.Post("/dashboards", dashboard, &result)
-	return &result, err
-}
-
-func (c *Client) UpdateDashboard(id string, dashboard *DashboardUpdateRequest) (*Dashboard, error) {
-	var result Dashboard
-	err := c.Put(fmt.Sprintf("/dashboards/%s", id), dashboard, &result)
-	return &result, err
-}
-
-func (c *Client) DeleteDashboard(id string) error {
-	return c.Delete(fmt.Sprintf("/dashboards/%s", id))
-}
-
 // Alert methods
 func (c *Client) GetAlert(entityID, alertID string) (*Alert, error) {
 	var alert Alert
@@ -426,15 +403,24 @@ type Cluster struct {
 	Name      string `json:"name"`
 	Region    string `json:"region"`
 	IsDefault bool   `json:"default"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// ClustersResponse wraps the API response for clusters
+type ClustersResponse struct {
+	Data   []Cluster `json:"data"`
+	Status string    `json:"status"`
 }
 
 // GetClusters fetches all clusters for a region
 func (c *Client) GetClusters(region string) ([]Cluster, error) {
-	var clusters []Cluster
-	err := c.Get(fmt.Sprintf("/clusters?region=%s", region), &clusters)
-	return clusters, err
+	var response ClustersResponse
+	err := c.Get(fmt.Sprintf("/clusters?region=%s", region), &response)
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
 }
 
 // GetDefaultCluster returns the default cluster for a region.
@@ -485,41 +471,6 @@ func (c *Client) DeletePolicy(id string) error {
 }
 
 // Types
-type Dashboard struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Readonly    bool             `json:"readonly"`
-	Panels      []DashboardPanel `json:"panels"`
-	Tags        []string         `json:"tags"`
-	CreatedAt   string           `json:"created_at"`
-	UpdatedAt   string           `json:"updated_at"`
-}
-
-type DashboardPanel struct {
-	ID            string                 `json:"id,omitempty"`
-	Title         string                 `json:"title"`
-	Query         string                 `json:"query"`
-	Visualization string                 `json:"visualization"`
-	Config        map[string]interface{} `json:"config,omitempty"`
-}
-
-type DashboardCreateRequest struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Readonly    bool             `json:"readonly"`
-	Panels      []DashboardPanel `json:"panels"`
-	Tags        []string         `json:"tags"`
-}
-
-type DashboardUpdateRequest struct {
-	Name        string           `json:"name,omitempty"`
-	Description string           `json:"description,omitempty"`
-	Readonly    *bool            `json:"readonly,omitempty"`
-	Panels      []DashboardPanel `json:"panels,omitempty"`
-	Tags        []string         `json:"tags,omitempty"`
-}
-
 type Alert struct {
 	ID                           string          `json:"id"`
 	Name                         string          `json:"rule_name"`
@@ -964,29 +915,29 @@ type EntityMetadata struct {
 }
 
 type Entity struct {
-	ID                   string          `json:"id"`
-	Name                 string          `json:"name"`
-	Type                 string          `json:"type"`
-	ExternalRef          string          `json:"external_ref"`
-	Description          string          `json:"description"`
-	DataSource           string          `json:"data_source,omitempty"`
-	DataSourceID         string          `json:"data_source_id,omitempty"`
-	Namespace            string          `json:"namespace,omitempty"`
-	Team                 string          `json:"team,omitempty"`
-	Tier                 string          `json:"tier,omitempty"`
-	Workspace            string          `json:"workspace,omitempty"`
-	Tags                 []string        `json:"tags,omitempty"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	Type                 string            `json:"type"`
+	ExternalRef          string            `json:"external_ref"`
+	Description          string            `json:"description"`
+	DataSource           string            `json:"data_source,omitempty"`
+	DataSourceID         string            `json:"data_source_id,omitempty"`
+	Namespace            string            `json:"namespace,omitempty"`
+	Team                 string            `json:"team,omitempty"`
+	Tier                 string            `json:"tier,omitempty"`
+	Workspace            string            `json:"workspace,omitempty"`
+	Tags                 []string          `json:"tags,omitempty"`
 	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          string          `json:"entity_class,omitempty"`
-	UIReadonly           bool            `json:"ui_readonly"`
-	AdhocFilter          *AdhocFilter    `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator     `json:"indicators,omitempty"`
-	Links                []EntityLink    `json:"links,omitempty"`
-	NotificationChannels []string        `json:"notification_channels,omitempty"`
-	CreatedAt            int64           `json:"created_at,omitempty"`
-	UpdatedAt            int64           `json:"updated_at,omitempty"`
+	EntityClass          string            `json:"entity_class,omitempty"`
+	UIReadonly           bool              `json:"ui_readonly"`
+	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator       `json:"indicators,omitempty"`
+	Links                []EntityLink      `json:"links,omitempty"`
+	NotificationChannels []string          `json:"notification_channels,omitempty"`
+	CreatedAt            int64             `json:"created_at,omitempty"`
+	UpdatedAt            int64             `json:"updated_at,omitempty"`
 	// Metadata is returned nested in GET response - we extract fields from it
-	Metadata             *EntityMetadata `json:"metadata,omitempty"`
+	Metadata *EntityMetadata `json:"metadata,omitempty"`
 }
 
 type AdhocFilter struct {
@@ -1027,24 +978,24 @@ type EntityCreateRequest struct {
 }
 
 type EntityUpdateRequest struct {
-	Name                 *string            `json:"name,omitempty"`
-	Type                 *string            `json:"type,omitempty"`
-	ExternalRef          *string            `json:"external_ref,omitempty"`
-	Description          *string            `json:"description,omitempty"`
-	DataSource           *string            `json:"data_source,omitempty"`
-	DataSourceID         *string            `json:"data_source_id,omitempty"`
-	Namespace            *string            `json:"namespace,omitempty"`
-	Team                 *string            `json:"team,omitempty"`
-	Tier                 *string            `json:"tier,omitempty"`
-	Workspace            *string            `json:"workspace,omitempty"`
-	Tags                 []string           `json:"tags,omitempty"`
-	Labels               map[string]string  `json:"labels,omitempty"`
-	EntityClass          *string            `json:"entity_class,omitempty"`
-	UIReadonly           *bool              `json:"ui_readonly,omitempty"`
-	AdhocFilter          *AdhocFilter       `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator        `json:"indicators,omitempty"`
-	Links                []EntityLink       `json:"links,omitempty"`
-	NotificationChannels []string           `json:"notification_channels,omitempty"`
+	Name                 *string           `json:"name,omitempty"`
+	Type                 *string           `json:"type,omitempty"`
+	ExternalRef          *string           `json:"external_ref,omitempty"`
+	Description          *string           `json:"description,omitempty"`
+	DataSource           *string           `json:"data_source,omitempty"`
+	DataSourceID         *string           `json:"data_source_id,omitempty"`
+	Namespace            *string           `json:"namespace,omitempty"`
+	Team                 *string           `json:"team,omitempty"`
+	Tier                 *string           `json:"tier,omitempty"`
+	Workspace            *string           `json:"workspace,omitempty"`
+	Tags                 []string          `json:"tags,omitempty"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	EntityClass          *string           `json:"entity_class,omitempty"`
+	UIReadonly           *bool             `json:"ui_readonly,omitempty"`
+	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators           []Indicator       `json:"indicators,omitempty"`
+	Links                []EntityLink      `json:"links,omitempty"`
+	NotificationChannels []string          `json:"notification_channels,omitempty"`
 }
 
 type EntitiesListResponse struct {

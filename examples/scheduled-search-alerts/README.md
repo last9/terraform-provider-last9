@@ -214,6 +214,5 @@ Supported destination types:
 
 ## Additional Resources
 
-- [Last9 LogJSON Query Documentation](https://docs.last9.io)
+- [Last9 Documentation](https://docs.last9.io)
 - [Terraform Provider Documentation](../README.md)
-- [Authentication Guide](../../docs/AUTHENTICATION.md)

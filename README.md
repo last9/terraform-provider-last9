@@ -1,10 +1,9 @@
 # Terraform Provider for Last9
 
-A Terraform provider for managing Last9 resources including dashboards, alerts, macros, control plane policies, log management rules, and scheduled search alerts.
+A Terraform provider for managing Last9 resources including alerts, macros, control plane policies, log management rules, and scheduled search alerts.
 
 ## Features
 
-- **Dashboards**: Create, update, and manage custom dashboards
 - **Alerts**: Configure alert rules with static thresholds or expressions
 - **Macros**: Manage cluster-level macros for query templating
 - **Policies**: Define and enforce control plane rules
@@ -51,8 +50,8 @@ Configure the provider with your Last9 credentials. You can use either refresh t
 ```hcl
 provider "last9" {
   refresh_token = var.last9_refresh_token  # or use LAST9_REFRESH_TOKEN env var
-  org          = var.last9_org             # or use LAST9_ORG env var
-  api_base_url = "https://api.last9.io"   # optional, defaults to https://api.last9.io
+  org           = var.last9_org            # or use LAST9_ORG env var
+  api_base_url  = var.last9_api_base_url   # required - or use LAST9_API_BASE_URL env var
 }
 ```
 
@@ -60,9 +59,9 @@ provider "last9" {
 
 ```hcl
 provider "last9" {
-  api_token  = var.last9_api_token  # or use LAST9_API_TOKEN env var
-  org        = var.last9_org        # or use LAST9_ORG env var
-  api_base_url = "https://api.last9.io"  # optional, defaults to https://api.last9.io
+  api_token    = var.last9_api_token     # or use LAST9_API_TOKEN env var
+  org          = var.last9_org           # or use LAST9_ORG env var
+  api_base_url = var.last9_api_base_url  # required - or use LAST9_API_BASE_URL env var
 }
 ```
 
@@ -71,33 +70,13 @@ provider "last9" {
 - `LAST9_REFRESH_TOKEN` - Your Last9 refresh token (recommended)
 - `LAST9_API_TOKEN` - Your Last9 API access token (legacy)
 - `LAST9_ORG` - Your Last9 organization slug
-- `LAST9_API_BASE_URL` - API base URL (optional)
+- `LAST9_API_BASE_URL` - API base URL (required)
 
 **Note**: Either `LAST9_REFRESH_TOKEN` or `LAST9_API_TOKEN` must be provided. Refresh tokens are recommended as they automatically handle token refresh.
-
-See [Authentication Guide](docs/AUTHENTICATION.md) for detailed information about authentication, token scopes, and RBAC.
 
 ## Usage Examples
 
 See the [examples](./examples/) directory for complete examples.
-
-### Dashboard
-
-```hcl
-resource "last9_dashboard" "example" {
-  name        = "Production Metrics"
-  description = "Dashboard for production environment metrics"
-  readonly    = false
-
-  panels {
-    title         = "Request Rate"
-    query         = "sum(rate(http_requests_total[5m]))"
-    visualization = "line"
-  }
-
-  tags = ["production", "monitoring"]
-}
-```
 
 ### Alert
 
@@ -206,7 +185,7 @@ resource "last9_forward_rule" "external_logs" {
 
 ## Resources
 
-- `last9_dashboard` - Manage custom dashboards
+- `last9_entity` - Manage entities (services, components)
 - `last9_alert` - Configure alert rules
 - `last9_macro` - Manage cluster macros
 - `last9_policy` - Define control plane policies
@@ -216,7 +195,6 @@ resource "last9_forward_rule" "external_logs" {
 
 ## Data Sources
 
-- `last9_dashboard` - Query dashboard information
 - `last9_entity` - Query entity information
 - `last9_notification_destination` - Query notification destinations for alerts
 

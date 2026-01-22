@@ -31,6 +31,10 @@ func testAccPreCheck(t *testing.T) {
 	if v := os.Getenv("LAST9_ORG"); v == "" {
 		t.Skip("Skipping acceptance test - LAST9_ORG must be set")
 	}
+
+	if v := os.Getenv("LAST9_API_BASE_URL"); v == "" {
+		t.Skip("Skipping acceptance test - LAST9_API_BASE_URL must be set")
+	}
 }
 
 // testAccPreCheckWithDelete checks for environment variables including delete token

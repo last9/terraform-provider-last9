@@ -1,1 +1,46 @@
+# LLM temp files
 llmtemp/**
+
+# Compiled binaries
+terraform-provider-last9
+terraform-provider-last9.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+provider.test
+
+# Output directories
+dist/
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Go
+vendor/
+
+# Coverage
+coverage.out
+coverage.html
+
+# Debug logs
+debug.log
+*.log

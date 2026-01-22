@@ -50,14 +50,13 @@ func New() *schema.Provider {
 			},
 			"api_base_url": {
 				Type:         schema.TypeString,
-				Optional:     true,
-				DefaultFunc:  schema.EnvDefaultFunc("LAST9_API_BASE_URL", "https://api.last9.io"),
-				Description:  "Last9 API base URL",
+				Required:     true,
+				DefaultFunc:  schema.EnvDefaultFunc("LAST9_API_BASE_URL", nil),
+				Description:  "Last9 API base URL (required - set via LAST9_API_BASE_URL env var or provider config)",
 				ValidateFunc: validation.IsURLWithHTTPorHTTPS,
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"last9_dashboard":              resourceDashboard(),
 			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
 			"last9_macro":                  resourceMacro(),
@@ -71,7 +70,6 @@ func New() *schema.Provider {
 			// be managed via the entity's notification_channels field instead.
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"last9_dashboard":                dataSourceDashboard(),
 			"last9_entity":                   dataSourceEntity(),
 			"last9_notification_destination": dataSourceNotificationDestination(),
 		},
@@ -103,9 +101,15 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (any, diag.D
 	if org == "" {
 		org = os.Getenv("LAST9_ORG")
 	}
+	if apiBaseURL == "" {
+		apiBaseURL = os.Getenv("LAST9_API_BASE_URL")
+	}
 
 	if org == "" {
 		return nil, diag.FromErr(fmt.Errorf("org is required"))
+	}
+	if apiBaseURL == "" {
+		return nil, diag.FromErr(fmt.Errorf("api_base_url is required - set via LAST9_API_BASE_URL environment variable or provider config"))
 	}
 
 	// Require either api_token or refresh_token
