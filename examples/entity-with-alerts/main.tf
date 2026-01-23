@@ -111,18 +111,18 @@ resource "last9_entity" "production_api" {
 
   # Notification channels for this entity
   notification_channels = [
-    "slack-platform-alerts",
-    "pagerduty-oncall"
+    "testing-integrations",
+    "PD Test"
   ]
 }
 
 # Query existing notification destinations
 data "last9_notification_destination" "slack_platform" {
-  name = "slack-platform-alerts"
+  name = "testing-integrations"
 }
 
 data "last9_notification_destination" "pagerduty_oncall" {
-  name = "pagerduty-oncall"
+  name = "PD Test"
 }
 
 # Loss of Signal Alert - triggers when 'up' metric stops reporting

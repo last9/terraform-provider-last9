@@ -7,18 +7,35 @@ terraform {
 }
 
 provider "last9" {
-  # Configuration will be read from environment variables:
-  # LAST9_REFRESH_TOKEN or LAST9_API_TOKEN
-  # LAST9_ORG
+  api_token    = var.last9_api_token
+  org          = var.last9_org
+  api_base_url = var.last9_api_base_url
+}
+
+variable "last9_api_token" {
+  type        = string
+  description = "Last9 API access token"
+  sensitive   = true
+}
+
+variable "last9_org" {
+  type        = string
+  description = "Last9 organization slug"
+}
+
+variable "last9_api_base_url" {
+  type        = string
+  description = "Last9 API base URL"
+  default     = "https://app.last9.io"
 }
 
 # Data source to lookup notification destinations
 data "last9_notification_destination" "slack_alerts" {
-  name = "Engineering Slack"
+  name = "testing-integrations"
 }
 
 data "last9_notification_destination" "pagerduty" {
-  name = "PagerDuty Production"
+  name = "PD Test"
 }
 
 # Example 1: Error count alert
@@ -225,6 +242,11 @@ output "api_error_alert_id" {
 }
 
 output "slack_destination_id" {
-  description = "ID of the Slack notification destination"
+  description = "ID of the testing-integrations notification destination"
   value       = data.last9_notification_destination.slack_alerts.id
+}
+
+output "pagerduty_destination_id" {
+  description = "ID of the PD test notification destination"
+  value       = data.last9_notification_destination.pagerduty.id
 }

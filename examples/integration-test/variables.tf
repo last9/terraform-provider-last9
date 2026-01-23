@@ -38,6 +38,7 @@ variable "region" {
 variable "cluster_id" {
   description = "Cluster ID for macros"
   type        = string
+  default     = "test-cluster"
 }
 
 # ====================================================================

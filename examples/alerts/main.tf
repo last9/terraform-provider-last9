@@ -10,8 +10,9 @@ terraform {
 }
 
 provider "last9" {
-  api_token = var.last9_api_token
-  org       = var.last9_org
+  api_token    = var.last9_api_token
+  org          = var.last9_org
+  api_base_url = var.last9_api_base_url
 }
 
 # Static threshold alert
@@ -64,6 +65,12 @@ variable "last9_api_token" {
 
 variable "last9_org" {
   type = string
+}
+
+variable "last9_api_base_url" {
+  type        = string
+  description = "Last9 API base URL"
+  default     = "https://app.last9.io"
 }
 
 variable "entity_id" {
