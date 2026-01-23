@@ -68,16 +68,20 @@ resource "last9_alert" "low_availability" {
 }
 ```
 
-### Expression-Based Alert
+### Loss of Signal Alert
 
 ```terraform
-resource "last9_alert" "custom_expression" {
-  entity_id   = last9_entity.api_service.id
-  name        = "Custom Alert"
-  description = "Custom expression-based alert"
-  expression  = "low_spike(0.5, availability)"
+resource "last9_alert" "service_down" {
+  entity_id     = last9_entity.api_alerts.id
+  name          = "Service Down"
+  description   = "Alert when service stops reporting metrics"
+  query         = "up{service=\"api\"}"
 
-  severity = "warning"
+  less_than     = 1
+  bad_minutes   = 3
+  total_minutes = 5
+
+  severity = "breach"
 }
 ```
 
@@ -87,25 +91,28 @@ resource "last9_alert" "custom_expression" {
 
 - `entity_id` (String) ID of the alert group (`last9_entity`) this alert belongs to.
 - `name` (String) Alert name.
-- `severity` (String) Alert severity: `breach`, `threat`, or `warning`.
+- `query` (String) PromQL query that defines the metric for this alert. A KPI is automatically created.
 
 ### Optional
 
 - `description` (String) Alert description.
-- `query` (String) PromQL query. Required for threshold-based alerts.
-- `expression` (String) Expression for expression-based alerts.
+- `severity` (String) Alert severity: `breach` or `threat`. Default: `breach`.
 - `greater_than` (Number) Fire when query result exceeds this value.
 - `less_than` (Number) Fire when query result drops below this value.
 - `bad_minutes` (Number) Minutes the condition must be true before firing.
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.
-- `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `false`.
-- `notification_channels` (List of Number) Notification channel IDs to notify when alert fires.
+- `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `true`.
+- `notification_channels` (List of String) Notification channel IDs to notify when alert fires.
 - `properties` (Block) Additional alert properties. See [Properties](#properties).
 
 ### Read-Only
 
 - `id` (String) Alert ID.
+- `indicator` (String) Indicator name (derived from auto-created KPI).
+- `expression` (String) Alert expression (computed from KPI).
+- `kpi_id` (String) ID of the automatically created KPI.
+- `kpi_name` (String) Name of the automatically created KPI.
 
 ### Properties
 

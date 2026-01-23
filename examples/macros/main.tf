@@ -10,54 +10,51 @@ terraform {
 }
 
 provider "last9" {
-  refresh_token = var.last9_refresh_token
-  org           = var.last9_org
+  api_token    = var.last9_api_token
+  org          = var.last9_org
+  api_base_url = var.last9_api_base_url
 }
 
 # Define reusable PromQL macros for the cluster
 resource "last9_macro" "production_macros" {
   cluster_id = var.cluster_id
 
-  body = <<-EOT
-    # Availability macro - calculates success rate
-    function availability(metric, window, service) {
-      let exclude = "/metrics|/health"
-      let good_codes = "2.*"
-      let all_codes = "2.*|4.*|5.*"
+  # The body must be a JSON object containing macro definitions
+  body = jsonencode({
+    macros = {
+      # Availability calculation: successful requests / total requests
+      availability = "sum(rate(http_requests_total{status=~\"2..\"}[$window])) / sum(rate(http_requests_total[$window]))"
 
-      return sum(rate(metric{handler!~exclude, service=service, code=~good_codes}[window])) / sum(rate(metric{handler!~exclude, service=service, code=~all_codes}[window]))
-    }
+      # Error rate as percentage
+      error_rate = "sum(rate(http_requests_total{status=~\"5..\"}[$window])) / sum(rate(http_requests_total[$window])) * 100"
 
-    # Error rate as percentage
-    function error_rate(service, window) {
-      return sum(rate(http_requests_total{service=service, status=~"5.."}[window])) / sum(rate(http_requests_total{service=service}[window])) * 100
-    }
+      # Request rate per second
+      request_rate = "sum(rate(http_requests_total[$window]))"
 
-    # Request rate per second
-    function request_rate(service, window) {
-      return sum(rate(http_requests_total{service=service}[window]))
-    }
+      # Latency P95
+      latency_p95 = "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[$window])) by (le))"
 
-    # Latency percentiles
-    function latency_p95(service, window) {
-      return histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=service}[window])) by (le))
+      # Latency P99
+      latency_p99 = "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[$window])) by (le))"
     }
-
-    function latency_p99(service, window) {
-      return histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service=service}[window])) by (le))
-    }
-  EOT
+  })
 }
 
-variable "last9_refresh_token" {
+variable "last9_api_token" {
   type        = string
   sensitive   = true
-  description = "Last9 refresh token"
+  description = "Last9 API access token"
 }
 
 variable "last9_org" {
   type        = string
   description = "Last9 organization"
+}
+
+variable "last9_api_base_url" {
+  type        = string
+  description = "Last9 API base URL"
+  default     = "https://app.last9.io"
 }
 
 variable "cluster_id" {

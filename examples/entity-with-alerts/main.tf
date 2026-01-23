@@ -11,8 +11,9 @@ terraform {
 }
 
 provider "last9" {
-  refresh_token = var.last9_refresh_token
-  org           = var.last9_org
+  api_token    = var.last9_api_token
+  org          = var.last9_org
+  api_base_url = var.last9_api_base_url
 }
 
 # Create an entity (alert group) with comprehensive configuration
@@ -129,7 +130,7 @@ resource "last9_alert" "loss_of_signal" {
   entity_id   = last9_entity.production_api.id
   name        = "Loss of Signal - API Service"
   description = "Alert when the API service stops reporting metrics (loss of signal)"
-  indicator   = "up"
+  query       = "up{job=\"api-server\"}"
 
   # Triggers when up metric < 1 for 3 out of 5 minutes
   less_than     = 1
@@ -138,7 +139,6 @@ resource "last9_alert" "loss_of_signal" {
 
   severity    = "breach"
   is_disabled = false
-  mute        = false
 
   properties {
     runbook_url = "https://wiki.example.com/runbooks/loss-of-signal"
@@ -168,7 +168,7 @@ resource "last9_alert" "high_error_rate" {
   entity_id   = last9_entity.production_api.id
   name        = "High Error Rate - API Service"
   description = "Alert when API error rate exceeds 5%"
-  indicator   = "error_rate"
+  query       = "100 * (sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])))"
 
   greater_than  = 5
   bad_minutes   = 5
@@ -193,16 +193,17 @@ resource "last9_alert" "high_error_rate" {
   ]
 }
 
-# Low Availability Alert (using expression)
+# Low Availability Alert
 resource "last9_alert" "low_availability" {
   entity_id   = last9_entity.production_api.id
   name        = "Low Availability - API Service"
   description = "Alert when availability drops below 99.5%"
-  indicator   = "availability"
+  query       = "100 * (1 - sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])))"
 
-  # Using expression-based alert
-  expression = "low_spike(0.5, availability)"
-  severity   = "threat"
+  less_than     = 99.5
+  bad_minutes   = 5
+  total_minutes = 10
+  severity      = "threat"
 
   properties {
     runbook_url = "https://wiki.example.com/runbooks/low-availability"

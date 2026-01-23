@@ -19,7 +19,7 @@ resource "last9_alert" "high_throughput" {
   entity_id   = var.entity_id
   name        = "High Throughput Alert"
   description = "Alert when throughput exceeds 2000 req/min"
-  indicator   = "throughput"
+  query       = "sum(rate(http_requests_total[5m])) * 60"
 
   greater_than  = 2000
   bad_minutes   = 4
@@ -36,15 +36,17 @@ resource "last9_alert" "high_throughput" {
   }
 }
 
-# Expression-based alert
+# Availability alert with threshold
 resource "last9_alert" "availability_breach" {
   entity_id   = var.entity_id
   name        = "Availability Breach"
   description = "Availability drops below 99.5%"
-  indicator   = "availability"
+  query       = "100 * (1 - sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])))"
 
-  expression = "low_spike(0.5, availability)"
-  severity   = "breach"
+  less_than     = 99.5
+  bad_minutes   = 5
+  total_minutes = 10
+  severity      = "breach"
 
   properties {
     runbook_url = "https://wiki.example.com/runbooks/availability"
@@ -53,8 +55,6 @@ resource "last9_alert" "availability_breach" {
       team     = "reliability"
     }
   }
-
-  mute = false
 }
 
 variable "last9_api_token" {
