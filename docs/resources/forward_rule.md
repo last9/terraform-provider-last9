@@ -7,7 +7,41 @@ description: |-
 
 # last9_forward_rule (Resource)
 
-Manages a Last9 log forward rule. Forward rules route logs matching specified criteria to external destinations like SIEM systems, data lakes, or other logging platforms.
+Manages a Last9 forward rule. Forward rules route telemetry matching specified criteria to external destinations like object storage (AWS S3), SIEM systems, or data lakes. Forwarded data is automatically compressed and stored in `.gz` format.
+
+For more information, see the [Forward Rules documentation](https://last9.io/docs/control-plane-forward/).
+
+~> **Warning** Data matching forward rules is NOT stored in Last9 and cannot be recovered from Last9. Use the "View Logs" preview feature in the Last9 UI to verify filters before saving.
+
+## Prerequisites for S3 Forwarding
+
+Before creating forward rules to AWS S3, configure the S3 backend in Last9:
+
+1. **Create an S3 bucket** for storing forwarded telemetry
+2. **Configure IAM AssumeRole** permissions for Last9:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "AWS": "arn:aws:iam::LAST9_ACCOUNT_ID:root"
+         },
+         "Action": "sts:AssumeRole",
+         "Condition": {
+           "StringEquals": {
+             "sts:ExternalId": "<your-external-id>"
+           }
+         }
+       }
+     ]
+   }
+   ```
+3. **Add Cold Storage configuration** in Last9 Control Plane → Cold Storage with your IAM AssumeRole ARN
+4. Create forward rules that route to the configured S3 backend
+
+-> **Note** Contact Last9 support for the exact `LAST9_ACCOUNT_ID` and setup assistance.
 
 ## Example Usage
 
@@ -78,7 +112,7 @@ The `filters` block supports:
 
 - `key` (String, Required) The field key to filter on (e.g., "SeverityText", "attributes[\"service\"]").
 - `value` (String, Required) The value to match.
-- `operator` (String, Required) Comparison operator. Valid values: `equals`, `not_equals`, `contains`, `not_contains`, `regex`.
+- `operator` (String, Required) Comparison operator. Valid values: `equals`, `not_equals`.
 - `conjunction` (String, Required) Logical conjunction. Valid values: `and`, `or`.
 
 ## Import

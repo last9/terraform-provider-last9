@@ -2,43 +2,57 @@
 page_title: "last9_entity Resource - Last9"
 subcategory: ""
 description: |-
-  Manages a Last9 entity (service, component, or other monitored resource).
+  Creates an alert group for organizing metric-based alerts.
 ---
 
 # last9_entity (Resource)
 
-Manages a Last9 entity. Entities represent services, components, or other monitored resources in your infrastructure.
+Creates an alert group for organizing related metric-based alerts. Each `last9_alert` must belong to an alert group.
+
+-> **Note** For log-based alerting, use `last9_scheduled_search_alert` instead, which does not require an alert group.
 
 ## Example Usage
 
+### Alert Group with Alerts
+
 ```terraform
-resource "last9_entity" "api_service" {
+# Create an alert group
+resource "last9_entity" "api_alerts" {
   name         = "api-service"
   type         = "service"
   external_ref = "api-service-prod"
-  description  = "Production API Service"
-
-  tags = {
-    environment = "production"
-    team        = "platform"
-  }
+  description  = "Alerts for Production API Service"
+  ui_readonly  = true  # Manage via Terraform only
 
   labels = {
-    tier = "backend"
+    tier        = "backend"
+    environment = "production"
   }
+}
+
+# Create alerts in the group
+resource "last9_alert" "high_error_rate" {
+  entity_id    = last9_entity.api_alerts.id
+  name         = "High Error Rate"
+  query        = "sum(rate(http_errors_total[5m]))"
+  greater_than = 100
+  bad_minutes  = 5
+  total_minutes = 10
+  severity     = "breach"
 }
 ```
 
-### With Notification Channels
+### With Default Notification Channels
 
 ```terraform
-resource "last9_entity" "api_service" {
+resource "last9_entity" "api_alerts" {
   name         = "api-service"
   type         = "service"
   external_ref = "api-service-prod"
-  description  = "Production API Service"
+  ui_readonly  = true
 
-  notification_channels = [123, 456]
+  # Default notification channels for all alerts in this group
+  notification_channels = ["slack-platform-alerts", "pagerduty-oncall"]
 }
 ```
 
@@ -46,33 +60,31 @@ resource "last9_entity" "api_service" {
 
 ### Required
 
-- `name` (String) Name of the entity.
-- `type` (String) Type of the entity (e.g., "service", "component").
+- `name` (String) Alert group name.
+- `type` (String) Type (e.g., `service`, `component`).
+- `external_ref` (String) Unique identifier slug for this alert group.
 
 ### Optional
 
-- `external_ref` (String) External reference identifier for the entity.
-- `description` (String) Description of the entity.
-- `data_source` (String) Data source for the entity.
-- `data_source_id` (String) Data source ID.
-- `namespace` (String) Namespace for the entity.
-- `team` (String) Team responsible for the entity.
-- `tier` (String) Service tier.
-- `workspace` (String) Workspace for the entity.
-- `entity_class` (String) Entity class.
-- `tags` (Map of String) Tags for the entity.
-- `labels` (Map of String) Labels for the entity.
-- `notification_channels` (List of Number) List of notification channel IDs.
-- `ui_readonly` (Boolean) Whether the entity is read-only in the UI.
+- `description` (String) Description of the alert group.
+- `data_source` (String) Metrics data source name.
+- `data_source_id` (String) Metrics data source ID.
+- `namespace` (String) Namespace.
+- `team` (String) Owning team.
+- `tier` (String) Tier (e.g., `critical`, `high`, `medium`, `low`).
+- `workspace` (String) Workspace.
+- `labels` (Map of String) Key-value labels for grouping and filtering.
+- `notification_channels` (List of String) Default notification channel IDs/names for alerts in this group.
+- `ui_readonly` (Boolean) When `true`, prevents edits via UI. Recommended for IaC-managed resources. Default: `false`.
 
 ### Read-Only
 
-- `id` (String) The ID of the entity.
+- `id` (String) Alert group ID. Use this as `entity_id` when creating alerts.
 
 ## Import
 
-Entities can be imported using the entity ID:
+Import using the alert group ID:
 
 ```shell
-terraform import last9_entity.example <entity_id>
+terraform import last9_entity.example <id>
 ```

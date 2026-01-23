@@ -20,7 +20,7 @@ resource "last9_entity" "production_api" {
   # Required fields
   name         = "production-api-service"
   type         = "service"
-  external_ref = "production-api-service-v1"  # Unique slug identifier
+  external_ref = "production-api-service-v1" # Unique slug identifier
 
   # Description
   description = "Production API service monitoring"
@@ -143,14 +143,14 @@ resource "last9_alert" "loss_of_signal" {
   properties {
     runbook_url = "https://wiki.example.com/runbooks/loss-of-signal"
     annotations = {
-      priority     = "critical"
-      team         = "platform-engineering"
-      alert_type   = "loss_of_signal"
-      metric       = "up"
-      description  = "Service heartbeat lost - no metrics being reported"
-      escalation   = "immediate"
-      impact       = "Service monitoring unavailable"
-      remediation  = "Check service health and metric collection pipeline"
+      priority    = "critical"
+      team        = "platform-engineering"
+      alert_type  = "loss_of_signal"
+      metric      = "up"
+      description = "Service heartbeat lost - no metrics being reported"
+      escalation  = "immediate"
+      impact      = "Service monitoring unavailable"
+      remediation = "Check service health and metric collection pipeline"
     }
   }
 
@@ -179,12 +179,12 @@ resource "last9_alert" "high_error_rate" {
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-error-rate"
     annotations = {
-      priority     = "high"
-      team         = "platform-engineering"
-      alert_type   = "error_rate"
-      threshold    = "5%"
-      description  = "API error rate exceeded threshold"
-      escalation   = "page_on_call"
+      priority    = "high"
+      team        = "platform-engineering"
+      alert_type  = "error_rate"
+      threshold   = "5%"
+      description = "API error rate exceeded threshold"
+      escalation  = "page_on_call"
     }
   }
 
@@ -207,11 +207,11 @@ resource "last9_alert" "low_availability" {
   properties {
     runbook_url = "https://wiki.example.com/runbooks/low-availability"
     annotations = {
-      priority     = "high"
-      team         = "platform-engineering"
-      alert_type   = "availability"
-      slo          = "99.5%"
-      impact       = "Service reliability degraded"
+      priority   = "high"
+      team       = "platform-engineering"
+      alert_type = "availability"
+      slo        = "99.5%"
+      impact     = "Service reliability degraded"
     }
   }
 

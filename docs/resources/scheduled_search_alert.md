@@ -9,6 +9,10 @@ description: |-
 
 Manages a Last9 scheduled search alert. These alerts run log queries on a schedule and trigger when results match threshold conditions.
 
+For more information about scheduled search alerts, see the [Last9 Control Plane documentation](https://last9.io/docs/control-plane/). For notification channel configuration, see [Notification Channels](https://last9.io/docs/notification-channels/).
+
+-> **Note** Scheduled search alerts are region-scoped. Use `last9_notification_destination` data source or `last9_notification_channel` resource to get notification destination IDs.
+
 ## Example Usage
 
 ### Basic Error Count Alert

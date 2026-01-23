@@ -191,9 +191,7 @@ Supported destination types:
 - `email`: Email addresses
 - `slack`: Slack channels/webhooks
 - `pagerduty`: PagerDuty integration
-- `webhook`: Custom webhook URLs
-- `opsgenie`: Opsgenie alerts
-- `msteams`: Microsoft Teams
+- `generic_webhook`: Custom webhook URLs
 
 ## Troubleshooting
 

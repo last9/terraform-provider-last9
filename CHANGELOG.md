@@ -5,6 +5,31 @@ All notable changes to the Last9 Terraform Provider will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-23
+
+### Changed
+
+#### Documentation
+- Improved authentication documentation with token expiry details and delete token requirements
+- Added links to Last9 documentation throughout provider docs
+- Reframed `last9_entity` as "alert groups" for clarity
+- Added "Alerting Lifecycle" section explaining metric-based and log-based alerting flows
+- Updated notification channel docs with supported types table
+
+#### Removed
+- Removed `last9_policy` resource (unused, not integrated with other features)
+- Removed Opsgenie from documented notification channel types
+
+### Added
+- Documentation links to Last9 docs:
+  - [API Getting Started](https://last9.io/docs/getting-started-with-api/)
+  - [Control Plane](https://last9.io/docs/control-plane/)
+  - [Drop Rules](https://last9.io/docs/control-plane-drop/)
+  - [Forward Rules](https://last9.io/docs/control-plane-forward/)
+  - [PromQL Macros](https://last9.io/docs/promql-macros/)
+  - [Alerting Overview](https://last9.io/docs/alerting-overview/)
+  - [Notification Channels](https://last9.io/docs/notification-channels/)
+
 ## [1.0.0] - 2026-01-14
 
 ### Added

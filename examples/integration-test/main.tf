@@ -94,18 +94,18 @@ resource "last9_alert" "high_error_rate" {
   bad_minutes   = var.alert_bad_minutes
   total_minutes = var.alert_total_minutes
 
-  severity   = "breach"
+  severity    = "breach"
   is_disabled = false
   mute        = false
 
   properties {
     runbook_url = var.runbook_base_url != "" ? "${var.runbook_base_url}/high-error-rate" : ""
     annotations = {
-      priority     = "critical"
-      team         = var.team_name
-      environment  = var.environment
-      alert_type   = "error_rate"
-      escalation   = "immediate"
+      priority    = "critical"
+      team        = var.team_name
+      environment = var.environment
+      alert_type  = "error_rate"
+      escalation  = "immediate"
     }
   }
 
@@ -123,17 +123,17 @@ resource "last9_alert" "low_availability" {
   bad_minutes   = var.alert_bad_minutes
   total_minutes = var.alert_total_minutes
 
-  severity   = "threat"
+  severity    = "threat"
   is_disabled = false
   mute        = false
 
   properties {
     runbook_url = var.runbook_base_url != "" ? "${var.runbook_base_url}/low-availability" : ""
     annotations = {
-      priority     = "high"
-      team         = var.team_name
-      environment  = var.environment
-      alert_type   = "availability"
+      priority    = "high"
+      team        = var.team_name
+      environment = var.environment
+      alert_type  = "availability"
     }
   }
 
@@ -147,18 +147,18 @@ resource "last9_alert" "high_response_time" {
   description = "Alert when P95 response time exceeds ${var.response_time_threshold}ms"
   indicator   = "latency_p95"
 
-  expression = "spike(${var.response_time_threshold / 1000}, latency_p95)"
-  severity   = "info"
+  expression  = "spike(${var.response_time_threshold / 1000}, latency_p95)"
+  severity    = "info"
   is_disabled = false
   mute        = false
 
   properties {
     runbook_url = var.runbook_base_url != "" ? "${var.runbook_base_url}/high-response-time" : ""
     annotations = {
-      priority     = "medium"
-      team         = var.team_name
-      environment  = var.environment
-      alert_type   = "latency"
+      priority    = "medium"
+      team        = var.team_name
+      environment = var.environment
+      alert_type  = "latency"
     }
   }
 
@@ -173,11 +173,11 @@ resource "last9_macro" "environment_macros" {
 
   body = jsonencode({
     macros = {
-      "service_name"     = var.service_name
-      "environment"      = var.environment
-      "error_rate_query" = "100 * sum(rate(http_requests_total{service=\"${var.service_name}\",status=~\"5..\",env=\"${var.environment}\"}[5m])) / sum(rate(http_requests_total{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m]))"
+      "service_name"       = var.service_name
+      "environment"        = var.environment
+      "error_rate_query"   = "100 * sum(rate(http_requests_total{service=\"${var.service_name}\",status=~\"5..\",env=\"${var.environment}\"}[5m])) / sum(rate(http_requests_total{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m]))"
       "request_rate_query" = "sum(rate(http_requests_total{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m])) * 60"
-      "latency_p95_query" = "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m])) by (le)) * 1000"
+      "latency_p95_query"  = "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m])) by (le)) * 1000"
       "availability_query" = "100 * (1 - sum(rate(http_requests_total{service=\"${var.service_name}\",status=~\"5..\",env=\"${var.environment}\"}[5m])) / sum(rate(http_requests_total{service=\"${var.service_name}\",env=\"${var.environment}\"}[5m])))"
     }
   })

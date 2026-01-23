@@ -1,12 +1,12 @@
 # API Call Sequences for Terraform Provider Resources
 
-This document details the sequence of API calls made for CRUD operations on Alert Groups (Entities) and Alerts.
+This document details the sequence of API calls made for CRUD operations on Alert Groups and Alerts.
 
 **Base URL**: `{api_base_url}/api/v4/organizations/{org}`
 
 ---
 
-## Alert Groups (Entities)
+## Alert Groups
 
 Alert Groups are represented as `last9_entity` resources in Terraform.
 
@@ -438,7 +438,7 @@ Notification Channels are represented as `last9_notification_channel` resources 
 │ Request Body:                                                                │
 │ {                                                                            │
 │   "name": "Production Alerts",                                               │
-│   "type": "slack",                          ◄── slack, pagerduty, opsgenie,  │
+│   "type": "slack",                          ◄── slack, pagerduty,            │
 │   "destination": "https://hooks.slack.com/...",      email, generic_webhook  │
 │   "send_resolved": true                                                      │
 │ }                                                                            │

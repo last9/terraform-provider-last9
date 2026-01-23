@@ -447,29 +447,6 @@ func (c *Client) GetDefaultCluster(region string) (*Cluster, error) {
 	return &clusters[0], nil
 }
 
-// Policy methods
-func (c *Client) GetPolicy(id string) (*Policy, error) {
-	var policy Policy
-	err := c.Get(fmt.Sprintf("/policies/%s", id), &policy)
-	return &policy, err
-}
-
-func (c *Client) CreatePolicy(policy *PolicyCreateRequest) (*Policy, error) {
-	var result Policy
-	err := c.Post("/policies", policy, &result)
-	return &result, err
-}
-
-func (c *Client) UpdatePolicy(id string, policy *PolicyUpdateRequest) (*Policy, error) {
-	var result Policy
-	err := c.Patch(fmt.Sprintf("/policies/%s", id), policy, &result)
-	return &result, err
-}
-
-func (c *Client) DeletePolicy(id string) error {
-	return c.Delete(fmt.Sprintf("/policies/%s", id))
-}
-
 // Types
 type Alert struct {
 	ID                           string          `json:"id"`
@@ -537,35 +514,6 @@ type Macro struct {
 
 type MacroUpsertRequest struct {
 	Body string `json:"body"`
-}
-
-type Policy struct {
-	ID                   string                 `json:"id"`
-	Name                 string                 `json:"name"`
-	Description          string                 `json:"description"`
-	Rules                []PolicyRule           `json:"rules"`
-	Filters              map[string]interface{} `json:"filters"`
-	EntityCount          int                    `json:"entity_count"`
-	EntityCompliantCount int                    `json:"entity_compliant_count"`
-}
-
-type PolicyRule struct {
-	Type   string                 `json:"type"`
-	Config map[string]interface{} `json:"config"`
-}
-
-type PolicyCreateRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Rules       []PolicyRule           `json:"rules"`
-	Filters     map[string]interface{} `json:"filters,omitempty"`
-}
-
-type PolicyUpdateRequest struct {
-	Name        *string                `json:"name,omitempty"`
-	Description *string                `json:"description,omitempty"`
-	Rules       []PolicyRule           `json:"rules,omitempty"`
-	Filters     map[string]interface{} `json:"filters,omitempty"`
 }
 
 // Control Plane methods

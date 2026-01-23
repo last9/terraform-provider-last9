@@ -44,14 +44,14 @@ output "alert_summary" {
   value = {
     total_alerts = 3
     severities = {
-      breach = 1  # high_error_rate
-      threat = 1  # low_availability
-      info   = 1  # high_response_time
+      breach = 1 # high_error_rate
+      threat = 1 # low_availability
+      info   = 1 # high_response_time
     }
     thresholds = {
-      error_rate_percent    = var.error_rate_threshold
-      availability_percent  = var.availability_threshold
-      response_time_ms      = var.response_time_threshold
+      error_rate_percent   = var.error_rate_threshold
+      availability_percent = var.availability_threshold
+      response_time_ms     = var.response_time_threshold
     }
   }
 }
@@ -68,8 +68,8 @@ output "macro_cluster_id" {
 output "macro_details" {
   description = "Details of the created macros"
   value = {
-    cluster_id = var.cluster_id
-    environment = var.environment
+    cluster_id   = var.cluster_id
+    environment  = var.environment
     service_name = var.service_name
     total_macros = 5 # service_name, environment, error_rate_query, request_rate_query, latency_p95_query, availability_query
   }
@@ -92,9 +92,9 @@ output "policy_name" {
 output "policy_summary" {
   description = "Summary of policy configuration"
   value = {
-    name         = last9_policy.slo_compliance.name
-    total_rules  = 3  # 2 SLO compliance rules + 1 alert coverage rule
-    environment  = var.environment
+    name        = last9_policy.slo_compliance.name
+    total_rules = 3 # 2 SLO compliance rules + 1 alert coverage rule
+    environment = var.environment
     filters = {
       entity_type = "service"
       environment = var.environment
@@ -129,18 +129,18 @@ output "log_management_summary" {
     region = var.region
     drop_rules = {
       debug_logs = {
-        name = last9_drop_rule.drop_debug_logs.name
+        name      = last9_drop_rule.drop_debug_logs.name
         telemetry = last9_drop_rule.drop_debug_logs.telemetry
       }
       test_logs = var.environment != "test" ? {
-        name = try(last9_drop_rule.drop_test_logs[0].name, null)
+        name      = try(last9_drop_rule.drop_test_logs[0].name, null)
         telemetry = try(last9_drop_rule.drop_test_logs[0].telemetry, null)
       } : null
     }
     forward_rules = {
       critical_errors_enabled = var.external_log_destination != ""
       security_logs_enabled   = var.security_log_destination != ""
-      traces_enabled         = var.trace_destination != ""
+      traces_enabled          = var.trace_destination != ""
     }
   }
 }
@@ -152,9 +152,9 @@ output "log_management_summary" {
 output "integration_test_summary" {
   description = "Complete summary for integration test validation"
   value = {
-    environment = var.environment
+    environment  = var.environment
     service_name = var.service_name
-    region = var.region
+    region       = var.region
 
     # Resource counts
     resources_created = {
@@ -169,7 +169,7 @@ output "integration_test_summary" {
     # Configuration validation
     configuration = {
       authentication_method = var.last9_refresh_token != "" ? "refresh_token" : "api_token"
-      api_base_url = var.last9_api_base_url
+      api_base_url          = var.last9_api_base_url
       thresholds = {
         error_rate_percent   = var.error_rate_threshold
         availability_percent = var.availability_threshold
@@ -187,7 +187,7 @@ output "integration_test_summary" {
       log_forwarding = {
         critical_errors = var.external_log_destination != ""
         security_logs   = var.security_log_destination != ""
-        traces         = var.trace_destination != ""
+        traces          = var.trace_destination != ""
       }
     }
   }
@@ -210,7 +210,7 @@ output "validation_urls" {
 output "terraform_validation" {
   description = "Information for Terraform validation"
   value = {
-    provider_version = "~> 1.0"
+    provider_version  = "~> 1.0"
     terraform_version = ">= 1.0"
     resources_managed = [
       "last9_dashboard.production_monitoring",

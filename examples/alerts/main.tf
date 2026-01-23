@@ -20,13 +20,13 @@ resource "last9_alert" "high_throughput" {
   name        = "High Throughput Alert"
   description = "Alert when throughput exceeds 2000 req/min"
   indicator   = "throughput"
-  
+
   greater_than  = 2000
   bad_minutes   = 4
   total_minutes = 10
-  
+
   severity = "breach"
-  
+
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-throughput"
     annotations = {
@@ -42,10 +42,10 @@ resource "last9_alert" "availability_breach" {
   name        = "Availability Breach"
   description = "Availability drops below 99.5%"
   indicator   = "availability"
-  
+
   expression = "low_spike(0.5, availability)"
   severity   = "breach"
-  
+
   properties {
     runbook_url = "https://wiki.example.com/runbooks/availability"
     annotations = {
@@ -53,7 +53,7 @@ resource "last9_alert" "availability_breach" {
       team     = "reliability"
     }
   }
-  
+
   mute = false
 }
 

@@ -7,7 +7,11 @@ description: |-
 
 # last9_drop_rule (Resource)
 
-Manages a Last9 log drop rule. Drop rules filter out logs that match specified criteria, helping reduce storage costs and noise.
+Manages a Last9 drop rule. Drop rules filter out telemetry that matches specified criteria, helping reduce storage costs and noise. Rules are applied at the ingestion layer without requiring code changes or redeployment.
+
+For more information, see the [Drop Rules documentation](https://last9.io/docs/control-plane-drop/).
+
+~> **Warning** Data matching drop rules is permanently discarded and cannot be recovered. Use the "View in Dashboard" preview feature in the Last9 UI to verify filters before saving.
 
 ## Example Usage
 
@@ -84,7 +88,7 @@ The `filters` block supports:
 
 - `key` (String, Required) The field key to filter on (e.g., "SeverityText", "attributes[\"service\"]").
 - `value` (String, Required) The value to match.
-- `operator` (String, Required) Comparison operator. Valid values: `equals`, `not_equals`, `contains`, `not_contains`, `regex`.
+- `operator` (String, Required) Comparison operator. Valid values: `equals`, `not_equals`.
 - `conjunction` (String, Required) Logical conjunction. Valid values: `and`, `or`.
 
 ### Action

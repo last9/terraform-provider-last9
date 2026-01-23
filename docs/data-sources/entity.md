@@ -2,12 +2,12 @@
 page_title: "last9_entity Data Source - Last9"
 subcategory: ""
 description: |-
-  Retrieves information about a Last9 entity.
+  Retrieves information about a Last9 alert group.
 ---
 
 # last9_entity (Data Source)
 
-Retrieves information about an existing Last9 entity by ID or external reference.
+Retrieves information about an existing alert group by ID or external reference.
 
 ## Example Usage
 
@@ -15,10 +15,10 @@ Retrieves information about an existing Last9 entity by ID or external reference
 
 ```terraform
 data "last9_entity" "example" {
-  id = "entity-uuid-here"
+  id = "alert-group-uuid-here"
 }
 
-output "entity_name" {
+output "alert_group_name" {
   value = data.last9_entity.example.name
 }
 ```
@@ -30,7 +30,7 @@ data "last9_entity" "example" {
   external_ref = "api-service-prod"
 }
 
-output "entity_id" {
+output "alert_group_id" {
   value = data.last9_entity.example.id
 }
 ```
@@ -39,24 +39,22 @@ output "entity_id" {
 
 ### Optional
 
-- `id` (String) The ID of the entity to retrieve.
-- `external_ref` (String) The external reference of the entity to retrieve.
+- `id` (String) The ID of the alert group to retrieve.
+- `external_ref` (String) The external reference of the alert group to retrieve.
 
 ~> **Note** Either `id` or `external_ref` must be provided.
 
 ### Read-Only
 
-- `name` (String) Name of the entity.
-- `type` (String) Type of the entity.
-- `description` (String) Description of the entity.
-- `data_source` (String) Data source for the entity.
+- `name` (String) Alert group name.
+- `type` (String) Type.
+- `description` (String) Description.
+- `data_source` (String) Data source name.
 - `data_source_id` (String) Data source ID.
-- `namespace` (String) Namespace for the entity.
-- `team` (String) Team responsible for the entity.
-- `tier` (String) Service tier.
-- `workspace` (String) Workspace for the entity.
-- `entity_class` (String) Entity class.
-- `tags` (Map of String) Tags for the entity.
-- `labels` (Map of String) Labels for the entity.
-- `notification_channels` (List of Number) List of notification channel IDs.
-- `ui_readonly` (Boolean) Whether the entity is read-only in the UI.
+- `namespace` (String) Namespace.
+- `team` (String) Owning team.
+- `tier` (String) Tier.
+- `workspace` (String) Workspace.
+- `labels` (Map of String) Labels.
+- `notification_channels` (List of Number) Default notification channel IDs.
+- `ui_readonly` (Boolean) Whether read-only in UI.

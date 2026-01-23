@@ -1,16 +1,14 @@
 # Terraform Provider for Last9
 
-A Terraform provider for managing Last9 resources including alerts, macros, control plane policies, log management rules, and scheduled search alerts.
+A Terraform provider for managing Last9 resources including alerts, log management rules, and notification channels.
 
 ## Features
 
-- **Alerts**: Configure alert rules with static thresholds or expressions
-- **Macros**: Manage cluster-level macros for query templating
-- **Policies**: Define and enforce control plane rules
-- **Drop Rules**: Configure log drop rules for filtering and cost optimization
-- **Forward Rules**: Set up log forwarding to external destinations
-- **Scheduled Search Alerts**: Create log-based alerts with custom queries and thresholds
-- **Notification Destinations**: Query available notification channels (data source)
+- **Alerts**: Configure alerting rules (metric-based with thresholds/expressions, or log-based with scheduled searches)
+- **Notification Channels**: Manage alert destinations (Slack, PagerDuty, webhooks, email, etc.)
+- **Drop Rules**: Filter and drop logs for cost optimization
+- **Forward Rules**: Forward logs to external destinations
+- **Macros**: Cluster-level query templating
 
 ## Installation
 
@@ -118,29 +116,6 @@ resource "last9_macro" "example" {
 }
 ```
 
-### Policy
-
-```hcl
-resource "last9_policy" "slo_compliance" {
-  name        = "SLO Compliance Policy"
-  description = "Ensures all services meet SLO requirements"
-
-  filters = {
-    entity_type = "service"
-    tags        = "production"
-  }
-
-  rules {
-    type = "slo_compliance"
-    config = {
-      slo_name          = "availability"
-      threshold         = "99.9"
-      evaluation_window = "30d"
-    }
-  }
-}
-```
-
 ### Drop Rule
 
 ```hcl
@@ -185,17 +160,17 @@ resource "last9_forward_rule" "external_logs" {
 
 ## Resources
 
-- `last9_entity` - Manage entities (services, components)
-- `last9_alert` - Configure alert rules
+- `last9_entity` - Create alert groups for organizing metric-based alerts
+- `last9_alert` - Configure metric-based alert rules
 - `last9_macro` - Manage cluster macros
-- `last9_policy` - Define control plane policies
 - `last9_drop_rule` - Configure log drop rules for filtering
 - `last9_forward_rule` - Set up log forwarding to external destinations
 - `last9_scheduled_search_alert` - Create log-based scheduled search alerts
+- `last9_notification_channel` - Manage alert notification destinations
 
 ## Data Sources
 
-- `last9_entity` - Query entity information
+- `last9_entity` - Query alert group information
 - `last9_notification_destination` - Query notification destinations for alerts
 
 ## Development

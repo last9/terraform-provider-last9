@@ -48,7 +48,7 @@ resource "last9_alert" "minimal_test" {
   bad_minutes   = 2
   total_minutes = 5
 
-  severity   = "info"
+  severity    = "info"
   is_disabled = false
   mute        = false
 
@@ -118,11 +118,11 @@ variable "region" {
 output "test_results" {
   description = "Minimal test results"
   value = {
-    entity_found = data.last9_entity.test.id != ""
+    entity_found      = data.last9_entity.test.id != ""
     dashboard_created = last9_dashboard.minimal_test.id
-    alert_created = last9_alert.minimal_test.id
+    alert_created     = last9_alert.minimal_test.id
     drop_rule_created = last9_drop_rule.minimal_test.id
-    test_suffix = random_string.suffix.result
+    test_suffix       = random_string.suffix.result
   }
 }
 
@@ -144,9 +144,9 @@ output "drop_rule_id" {
 output "validation_summary" {
   description = "Summary for validation"
   value = {
-    provider_working = true
-    resources_created = 3
+    provider_working     = true
+    resources_created    = 3
     data_sources_working = true
-    test_id = random_string.suffix.result
+    test_id              = random_string.suffix.result
   }
 }
