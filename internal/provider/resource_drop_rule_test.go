@@ -136,97 +136,62 @@ func TestFlattenRoutingFilters(t *testing.T) {
 	}
 }
 
-func TestExpandRoutingAction(t *testing.T) {
+func TestExpandDropAction(t *testing.T) {
 	tests := []struct {
 		name  string
 		input map[string]interface{}
 		want  client.RoutingAction
 	}{
 		{
-			name: "basic action",
+			name: "drop-matching action",
 			input: map[string]interface{}{
-				"name":        "drop-matching",
-				"destination": "/dev/null",
+				"name": "drop-matching",
 			},
 			want: client.RoutingAction{
-				Name:        "drop-matching",
-				Destination: "/dev/null",
-				Properties:  map[string]string{},
-			},
-		},
-		{
-			name: "action with properties",
-			input: map[string]interface{}{
-				"name":        "forward",
-				"destination": "https://example.com",
-				"properties": map[string]interface{}{
-					"header": "value",
-				},
-			},
-			want: client.RoutingAction{
-				Name:        "forward",
-				Destination: "https://example.com",
-				Properties:  map[string]string{"header": "value"},
+				Name: "drop-matching",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := expandRoutingAction(tt.input)
+			result := expandDropAction(tt.input)
 			if result.Name != tt.want.Name {
-				t.Errorf("expandRoutingAction() Name = %v, want %v", result.Name, tt.want.Name)
-			}
-			if result.Destination != tt.want.Destination {
-				t.Errorf("expandRoutingAction() Destination = %v, want %v", result.Destination, tt.want.Destination)
+				t.Errorf("expandDropAction() Name = %v, want %v", result.Name, tt.want.Name)
 			}
 		})
 	}
 }
 
-func TestFlattenRoutingAction(t *testing.T) {
+func TestFlattenDropAction(t *testing.T) {
 	tests := []struct {
 		name  string
 		input client.RoutingAction
 	}{
 		{
-			name: "basic action",
+			name: "drop-matching action",
 			input: client.RoutingAction{
-				Name:        "drop-matching",
-				Destination: "/dev/null",
-				Properties:  map[string]string{},
-			},
-		},
-		{
-			name: "action with properties",
-			input: client.RoutingAction{
-				Name:        "forward",
-				Destination: "https://example.com",
-				Properties:  map[string]string{"header": "value"},
+				Name: "drop-matching",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := flattenRoutingAction(tt.input)
+			result := flattenDropAction(tt.input)
 			if len(result) != 1 {
-				t.Errorf("flattenRoutingAction() returned %d items, want 1", len(result))
+				t.Errorf("flattenDropAction() returned %d items, want 1", len(result))
 				return
 			}
 
 			m, ok := result[0].(map[string]interface{})
 			if !ok {
-				t.Errorf("flattenRoutingAction() item is not a map")
+				t.Errorf("flattenDropAction() item is not a map")
 				return
 			}
 
-			// Check required fields
 			if m["name"] != tt.input.Name {
-				t.Errorf("flattenRoutingAction() name = %v, want %v", m["name"], tt.input.Name)
-			}
-			if m["destination"] != tt.input.Destination {
-				t.Errorf("flattenRoutingAction() destination = %v, want %v", m["destination"], tt.input.Destination)
+				t.Errorf("flattenDropAction() name = %v, want %v", m["name"], tt.input.Name)
 			}
 		})
 	}
@@ -238,7 +203,7 @@ func TestAccDropRule_basic(t *testing.T) {
 	resourceName := "last9_drop_rule.test"
 	region := os.Getenv("LAST9_TEST_REGION")
 	if region == "" {
-		region = "ap-south-1"
+		region = "us-west-2"
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -273,7 +238,7 @@ func TestAccDropRule_update(t *testing.T) {
 	resourceName := "last9_drop_rule.test"
 	region := os.Getenv("LAST9_TEST_REGION")
 	if region == "" {
-		region = "ap-south-1"
+		region = "us-west-2"
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -305,7 +270,7 @@ func TestAccDropRule_multipleFilters(t *testing.T) {
 	resourceName := "last9_drop_rule.test"
 	region := os.Getenv("LAST9_TEST_REGION")
 	if region == "" {
-		region = "ap-south-1"
+		region = "us-west-2"
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -319,6 +284,56 @@ func TestAccDropRule_multipleFilters(t *testing.T) {
 					testAccCheckDropRuleExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule-multi"),
 					resource.TestCheckResourceAttr(resourceName, "filters.#", "2"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccDropRule_traces(t *testing.T) {
+	resourceName := "last9_drop_rule.test"
+	region := os.Getenv("LAST9_TEST_REGION")
+	if region == "" {
+		region = "us-west-2"
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckDropRuleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDropRuleConfig_traces(region),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckDropRuleExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule-traces"),
+					resource.TestCheckResourceAttr(resourceName, "telemetry", "traces"),
+					resource.TestCheckResourceAttr(resourceName, "filters.0.operator", "like"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccDropRule_metrics(t *testing.T) {
+	resourceName := "last9_drop_rule.test"
+	region := os.Getenv("LAST9_TEST_REGION")
+	if region == "" {
+		region = "us-west-2"
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckDropRuleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDropRuleConfig_metrics(region),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckDropRuleExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "name", "tf-test-drop-rule-metrics"),
+					resource.TestCheckResourceAttr(resourceName, "telemetry", "metrics"),
+					resource.TestCheckResourceAttr(resourceName, "filters.0.key", "name"),
 				),
 			},
 		},
@@ -393,8 +408,7 @@ resource "last9_drop_rule" "test" {
   }
 
   action {
-    name        = "drop-matching"
-    destination = "/dev/null"
+    name = "drop-matching"
   }
 }
 `, region)
@@ -414,8 +428,7 @@ resource "last9_drop_rule" "test" {
   }
 
   action {
-    name        = "drop-matching"
-    destination = "/dev/null"
+    name = "drop-matching"
   }
 }
 `, region)
@@ -432,7 +445,7 @@ resource "last9_drop_rule" "test" {
     key         = "attributes[\"service\"]"
     value       = "debug-service"
     operator    = "equals"
-    conjunction = "and"
+    conjunction = "AND"
   }
 
   filters {
@@ -442,8 +455,47 @@ resource "last9_drop_rule" "test" {
   }
 
   action {
-    name        = "drop-matching"
-    destination = "/dev/null"
+    name = "drop-matching"
+  }
+}
+`, region)
+}
+
+func testAccDropRuleConfig_traces(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_drop_rule" "test" {
+  region    = "%s"
+  name      = "tf-test-drop-rule-traces"
+  telemetry = "traces"
+
+  filters {
+    key      = "resource.attributes[\"service.name\"]"
+    value    = "test-.*"
+    operator = "like"
+  }
+
+  action {
+    name = "drop-matching"
+  }
+}
+`, region)
+}
+
+func testAccDropRuleConfig_metrics(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_drop_rule" "test" {
+  region    = "%s"
+  name      = "tf-test-drop-rule-metrics"
+  telemetry = "metrics"
+
+  filters {
+    key      = "name"
+    value    = "tf_test_fake_metric"
+    operator = "equals"
+  }
+
+  action {
+    name = "drop-matching"
   }
 }
 `, region)

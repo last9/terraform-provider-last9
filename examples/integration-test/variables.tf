@@ -39,7 +39,7 @@ variable "environment" {
 variable "region" {
   description = "Region for control plane rules"
   type        = string
-  default     = "us-west-2"
+  default     = "ap-south-1"
 }
 
 # ====================================================================
@@ -80,8 +80,27 @@ variable "runbook_base_url" {
   default     = ""
 }
 
-variable "external_log_destination" {
-  description = "Destination for forwarding critical logs (optional - leave empty to skip forward rule)"
+
+variable "webhook_url" {
+  description = "Webhook URL for generic webhook notification channel and forward rule tests"
   type        = string
-  default     = ""
+  default     = ""  # Will be generated with unique timestamp
+}
+
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for notification channel test"
+  type        = string
+  default     = ""  # Will be generated with unique timestamp
+}
+
+variable "pagerduty_integration_key" {
+  description = "PagerDuty integration key for notification channel test"
+  type        = string
+  default     = ""  # Will be generated with unique timestamp
+}
+
+variable "alert_email" {
+  description = "Email address for notification channel test (must be company domain, not personal)"
+  type        = string
+  default     = ""  # Will be generated with unique timestamp
 }

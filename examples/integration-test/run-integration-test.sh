@@ -58,6 +58,7 @@ ENVIRONMENT VARIABLES:
     LAST9_ORG              Required: Your Last9 organization slug
     LAST9_API_TOKEN        Required: Your Last9 API access token
     LAST9_DELETE_TOKEN     Optional: Your Last9 delete token (for destroy)
+    LAST9_REGION           Optional: Region for control plane rules (default: ap-south-1)
 
 EXAMPLE:
     export LAST9_ORG="my-org"
@@ -143,6 +144,9 @@ setup_terraform_config() {
     if [[ "$USE_EXISTING_VARS" == "false" || ! -f "terraform.tfvars" ]]; then
         log_info "Creating terraform.tfvars from environment variables..."
 
+        # Use LAST9_REGION env var if set, otherwise default to ap-south-1
+        local test_region="${LAST9_REGION:-ap-south-1}"
+
         cat > terraform.tfvars << EOF
 # Generated terraform.tfvars for integration test
 last9_org          = "${LAST9_ORG}"
@@ -152,7 +156,7 @@ last9_api_base_url = "https://app.last9.io"
 
 # Integration test configuration
 environment = "integration-test-$(date +%s)"
-region      = "us-west-2"
+region      = "${test_region}"
 
 # Alert thresholds for testing
 error_rate_threshold   = 10.0
@@ -234,34 +238,63 @@ validate_resources() {
     cd "$TEST_DIR"
 
     # Get outputs
-    local dashboard_id=$(terraform output -raw dashboard_id 2>/dev/null || echo "")
+    local entity_id=$(terraform output -raw entity_id 2>/dev/null || echo "")
     local alert_ids=$(terraform output -json alert_ids 2>/dev/null || echo "{}")
-    local policy_id=$(terraform output -raw policy_id 2>/dev/null || echo "")
+    local drop_rule_ids=$(terraform output -json drop_rule_ids 2>/dev/null || echo "{}")
+    local notification_channel_ids=$(terraform output -json notification_channel_ids 2>/dev/null || echo "{}")
+    local forward_rule_id=$(terraform output -raw forward_rule_id 2>/dev/null || echo "")
+    local scheduled_search_alert_id=$(terraform output -raw scheduled_search_alert_id 2>/dev/null || echo "")
 
     local validation_passed=true
 
-    # Validate dashboard
-    if [[ -n "$dashboard_id" ]]; then
-        log_success "Dashboard created with ID: $dashboard_id"
+    # Validate entity
+    if [[ -n "$entity_id" ]]; then
+        log_success "Entity created with ID: $entity_id"
     else
-        log_error "Dashboard ID not found in outputs"
+        log_error "Entity ID not found in outputs"
         validation_passed=false
     fi
 
-    # Validate alerts
+    # Validate alerts (expecting 2)
     local alert_count=$(echo "$alert_ids" | jq -r '. | length' 2>/dev/null || echo "0")
-    if [[ "$alert_count" -ge 3 ]]; then
+    if [[ "$alert_count" -ge 2 ]]; then
         log_success "Created $alert_count alerts as expected"
     else
-        log_error "Expected 3 alerts, found $alert_count"
+        log_error "Expected 2 alerts, found $alert_count"
         validation_passed=false
     fi
 
-    # Validate policy
-    if [[ -n "$policy_id" ]]; then
-        log_success "Policy created with ID: $policy_id"
+    # Validate drop rules (expecting 3: logs, traces, metrics)
+    local drop_rule_count=$(echo "$drop_rule_ids" | jq -r '. | length' 2>/dev/null || echo "0")
+    if [[ "$drop_rule_count" -ge 3 ]]; then
+        log_success "Created $drop_rule_count drop rules as expected"
     else
-        log_error "Policy ID not found in outputs"
+        log_error "Expected 3 drop rules, found $drop_rule_count"
+        validation_passed=false
+    fi
+
+    # Validate notification channels (expecting 4: webhook, slack, pagerduty, email)
+    local notification_channel_count=$(echo "$notification_channel_ids" | jq -r '. | length' 2>/dev/null || echo "0")
+    if [[ "$notification_channel_count" -ge 4 ]]; then
+        log_success "Created $notification_channel_count notification channels as expected"
+    else
+        log_error "Expected 4 notification channels, found $notification_channel_count"
+        validation_passed=false
+    fi
+
+    # Validate forward rule
+    if [[ -n "$forward_rule_id" ]]; then
+        log_success "Forward rule created with ID: $forward_rule_id"
+    else
+        log_error "Forward rule ID not found in outputs"
+        validation_passed=false
+    fi
+
+    # Validate scheduled search alert
+    if [[ -n "$scheduled_search_alert_id" ]]; then
+        log_success "Scheduled search alert created with ID: $scheduled_search_alert_id"
+    else
+        log_error "Scheduled search alert ID not found in outputs"
         validation_passed=false
     fi
 
@@ -305,6 +338,7 @@ cleanup() {
     rm -f integration-test.tfplan
     rm -rf .terraform/
     rm -f .terraform.lock.hcl
+    rm -f terraform.tfstate terraform.tfstate.backup
 
     log_success "Cleanup completed"
 }

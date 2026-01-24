@@ -28,9 +28,31 @@ output "alert_ids" {
 # DROP RULE OUTPUTS
 # ====================================================================
 
-output "drop_rule_id" {
-  description = "ID of the drop rule"
-  value       = last9_drop_rule.drop_debug_logs.id
+output "drop_rule_ids" {
+  description = "IDs of created drop rules"
+  value = {
+    logs    = last9_drop_rule.drop_debug_logs.id
+    traces  = last9_drop_rule.drop_test_traces.id
+    metrics = last9_drop_rule.drop_test_metrics.id
+  }
+}
+
+# ====================================================================
+# FORWARD RULE OUTPUTS
+# ====================================================================
+
+# ====================================================================
+# NOTIFICATION CHANNEL OUTPUTS
+# ====================================================================
+
+output "notification_channel_ids" {
+  description = "IDs of created notification channels"
+  value = {
+    webhook   = last9_notification_channel.webhook.id
+    slack     = last9_notification_channel.slack.id
+    pagerduty = last9_notification_channel.pagerduty.id
+    email     = last9_notification_channel.email.id
+  }
 }
 
 # ====================================================================
@@ -38,8 +60,17 @@ output "drop_rule_id" {
 # ====================================================================
 
 output "forward_rule_id" {
-  description = "ID of the forward rule (if created)"
-  value       = var.external_log_destination != "" ? try(last9_forward_rule.forward_critical_errors[0].id, null) : null
+  description = "ID of the forward rule"
+  value       = last9_forward_rule.forward_critical_errors.id
+}
+
+# ====================================================================
+# SCHEDULED SEARCH ALERT OUTPUTS
+# ====================================================================
+
+output "scheduled_search_alert_id" {
+  description = "ID of the scheduled search alert"
+  value       = last9_scheduled_search_alert.high_error_count.id
 }
 
 # ====================================================================
@@ -53,10 +84,12 @@ output "integration_test_summary" {
     region      = var.region
 
     resources_created = {
-      entities      = 1
-      alerts        = 2
-      drop_rules    = 1
-      forward_rules = var.external_log_destination != "" ? 1 : 0
+      entities                = 1
+      alerts                  = 2
+      drop_rules              = 3  # logs, traces, metrics
+      notification_channels   = 4  # webhook, slack, pagerduty, email
+      forward_rules           = 1
+      scheduled_search_alerts = 1
     }
 
     configuration = {

@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+// dropRuleMutex serializes drop rule operations to prevent race conditions.
+// The drop rules API stores all rules as a single list, so concurrent
+// create/update/delete operations can overwrite each other.
+var dropRuleMutex sync.Mutex
 
 func resourceDropRule() *schema.Resource {
 	return &schema.Resource{
@@ -37,39 +43,42 @@ func resourceDropRule() *schema.Resource {
 			"name": {
 				Type:        schema.TypeString,
 				Required:    true,
+				ForceNew:    true,
 				Description: "Name of the drop rule",
 			},
 			"telemetry": {
-				Type:        schema.TypeString,
-				Required:    true,
-				Description: "Telemetry type (logs, traces, metrics)",
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				Description:  "Telemetry type: 'logs', 'traces', or 'metrics'.",
+				ValidateFunc: validation.StringInSlice([]string{"logs", "traces", "metrics"}, false),
 			},
 			"filters": {
 				Type:        schema.TypeList,
 				Required:    true,
-				Description: "Filters to match logs for dropping",
+				Description: "Filters to match telemetry for dropping. For logs/traces, use attribute filters. For metrics, use PromQL expressions in the value field.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"key": {
 							Type:        schema.TypeString,
-							Required:    true,
-							Description: "Filter key (must use attributes[\"key\"] or resource.attributes[\"key\"])",
+							Optional:    true,
+							Description: "Filter key. For logs/traces: must use attributes[\"key\"] or resource.attributes[\"key\"]. For metrics: can be empty (PromQL goes in value).",
 						},
 						"value": {
 							Type:        schema.TypeString,
 							Required:    true,
-							Description: "Filter value",
+							Description: "Filter value. For logs/traces: the attribute value to match. For metrics: a PromQL expression like {__name__=~\"metric_name\"}.",
 						},
 						"operator": {
 							Type:         schema.TypeString,
 							Required:     true,
-							Description:  "Filter operator (equals, not_equals)",
-							ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals"}, false),
+							Description:  "Filter operator: equals, not_equals, or like (regex match)",
+							ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals", "like"}, false),
 						},
 						"conjunction": {
 							Type:        schema.TypeString,
 							Optional:    true,
-							Description: "Conjunction for combining filters (and)",
+							Description: "Conjunction for combining filters (AND)",
 						},
 					},
 				},
@@ -78,24 +87,13 @@ func resourceDropRule() *schema.Resource {
 				Type:        schema.TypeList,
 				Required:    true,
 				MaxItems:    1,
-				Description: "Action to take when rule matches",
+				Description: "Action to take when rule matches. Use name = 'drop-matching' for drop rules.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
 							Type:        schema.TypeString,
 							Required:    true,
-							Description: "Action name",
-						},
-						"destination": {
-							Type:        schema.TypeString,
-							Required:    true,
-							Description: "Action destination",
-						},
-						"properties": {
-							Type:        schema.TypeMap,
-							Optional:    true,
-							Description: "Action properties",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+							Description: "Action name. Must be 'drop-matching' for drop rules.",
 						},
 					},
 				},
@@ -124,8 +122,12 @@ func resourceDropRuleCreate(ctx context.Context, d *schema.ResourceData, m inter
 		Name:      ruleName,
 		Telemetry: d.Get("telemetry").(string),
 		Filters:   expandRoutingFilters(d.Get("filters").([]interface{})),
-		Action:    expandRoutingAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
+		Action:    expandDropAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
 	}
+
+	// Lock to prevent race conditions - drop rules are stored as a single list
+	dropRuleMutex.Lock()
+	defer dropRuleMutex.Unlock()
 
 	// Get existing rules
 	existing, err := apiClient.GetDropRules(region)
@@ -198,7 +200,7 @@ func resourceDropRuleRead(ctx context.Context, d *schema.ResourceData, m interfa
 	d.Set("name", foundRule.Name)
 	d.Set("telemetry", foundRule.Telemetry)
 	d.Set("filters", flattenRoutingFilters(foundRule.Filters))
-	d.Set("action", flattenRoutingAction(foundRule.Action))
+	d.Set("action", flattenDropAction(foundRule.Action))
 
 	return nil
 }
@@ -208,6 +210,10 @@ func resourceDropRuleUpdate(ctx context.Context, d *schema.ResourceData, m inter
 	region := d.Get("region").(string)
 	clusterID := d.Get("cluster_id").(string)
 	ruleName := d.Get("name").(string)
+
+	// Lock to prevent race conditions - drop rules are stored as a single list
+	dropRuleMutex.Lock()
+	defer dropRuleMutex.Unlock()
 
 	// Get existing rules
 	existing, err := apiClient.GetDropRules(region)
@@ -220,7 +226,7 @@ func resourceDropRuleUpdate(ctx context.Context, d *schema.ResourceData, m inter
 		Name:      ruleName,
 		Telemetry: d.Get("telemetry").(string),
 		Filters:   expandRoutingFilters(d.Get("filters").([]interface{})),
-		Action:    expandRoutingAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
+		Action:    expandDropAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
 	}
 
 	// Update the rule in the list
@@ -269,6 +275,10 @@ func resourceDropRuleDelete(ctx context.Context, d *schema.ResourceData, m inter
 	region := parts[0]
 	clusterID := parts[1]
 	ruleName := parts[2]
+
+	// Lock to prevent race conditions - drop rules are stored as a single list
+	dropRuleMutex.Lock()
+	defer dropRuleMutex.Unlock()
 
 	// Get existing rules
 	existing, err := apiClient.GetDropRules(region)
@@ -331,30 +341,16 @@ func flattenRoutingFilters(filters []client.RoutingFilter) []interface{} {
 	return result
 }
 
-func expandRoutingAction(actionMap map[string]interface{}) client.RoutingAction {
-	action := client.RoutingAction{
-		Name:        actionMap["name"].(string),
-		Destination: actionMap["destination"].(string),
-		Properties:  make(map[string]string),
+func expandDropAction(actionMap map[string]interface{}) client.RoutingAction {
+	return client.RoutingAction{
+		Name: actionMap["name"].(string),
 	}
-	if props, ok := actionMap["properties"].(map[string]interface{}); ok {
-		for k, v := range props {
-			action.Properties[k] = v.(string)
-		}
-	}
-	return action
 }
 
-func flattenRoutingAction(action client.RoutingAction) []interface{} {
-	props := make(map[string]interface{})
-	for k, v := range action.Properties {
-		props[k] = v
-	}
+func flattenDropAction(action client.RoutingAction) []interface{} {
 	return []interface{}{
 		map[string]interface{}{
-			"name":        action.Name,
-			"destination": action.Destination,
-			"properties":  props,
+			"name": action.Name,
 		},
 	}
 }

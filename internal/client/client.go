@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -245,15 +247,25 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	}
 
 	var reqBody io.Reader
+	var jsonBodyBytes []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		jsonBodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewBuffer(jsonBody)
+		reqBody = bytes.NewBuffer(jsonBodyBytes)
 	}
 
 	reqURL := fmt.Sprintf("%s/api/v4/organizations/%s%s", c.config.BaseURL, c.config.Org, path)
+
+	// Debug logging when TF_LOG is set
+	if os.Getenv("TF_LOG") != "" {
+		log.Printf("[DEBUG] Last9 API Request: %s %s", method, reqURL)
+		if jsonBodyBytes != nil {
+			log.Printf("[DEBUG] Last9 API Request Body: %s", string(jsonBodyBytes))
+		}
+	}
+
 	req, err := http.NewRequest(method, reqURL, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -271,6 +283,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		if os.Getenv("TF_LOG") != "" {
+			log.Printf("[DEBUG] Last9 API Response Error: %s - %s", resp.Status, string(bodyBytes))
+		}
 		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(bodyBytes))
 	}
 
