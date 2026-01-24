@@ -1,0 +1,86 @@
+# ====================================================================
+# LAST9 PROVIDER CONFIGURATION
+# ====================================================================
+
+# REQUIRED: Last9 Organization
+last9_org = "your-org-name"
+
+# REQUIRED: Authentication (choose one method)
+# Method 1: Refresh Token (Recommended)
+last9_refresh_token = "your-refresh-token-here"
+
+# Method 2: API Token (Legacy)
+# last9_api_token = "your-api-token-here"
+
+# Optional: Custom API URL (defaults to https://api.last9.io)
+# last9_api_base_url = "https://api.last9.io"
+
+# ====================================================================
+# ENVIRONMENT CONFIGURATION
+# ====================================================================
+
+# Environment name for this integration test
+environment = "integration-test"
+
+# AWS region or deployment region
+region = "us-west-2"
+
+# Service being monitored
+service_name = "api-service"
+
+# Team responsible for the service
+team_name = "platform"
+
+# REQUIRED: Last9 cluster ID (get this from your Last9 console)
+cluster_id = "cluster-abc123"
+
+# Entity name to monitor (will be looked up via data source)
+entity_name = "production-api"
+
+# ====================================================================
+# ALERT THRESHOLDS
+# ====================================================================
+
+# Error rate threshold (percentage)
+error_rate_threshold = 5.0
+
+# Availability threshold (percentage - alerts when below this)
+availability_threshold = 99.5
+
+# P95 response time threshold (milliseconds)
+response_time_threshold = 500
+
+# Alert timing configuration
+alert_bad_minutes = 5    # Minutes condition must be bad
+alert_total_minutes = 10 # Total evaluation window
+
+# ====================================================================
+# EXTERNAL INTEGRATIONS (Optional)
+# ====================================================================
+
+# Base URL for runbook documentation
+runbook_base_url = "https://wiki.yourcompany.com/runbooks"
+
+# External log forwarding destinations
+external_log_destination = "https://external-logs.yourcompany.com/webhook"
+security_log_destination = "https://security-logs.yourcompany.com/webhook"
+trace_destination = "https://traces.yourcompany.com/webhook"
+
+# ====================================================================
+# FEATURE TOGGLES
+# ====================================================================
+
+# Enable/disable various features
+enable_log_forwarding = true
+enable_debug_log_dropping = true
+enable_advanced_alerts = true
+
+# ====================================================================
+# TAGGING
+# ====================================================================
+
+# Additional tags for resources
+additional_tags = ["integration-test", "automated"]
+
+# Cost center for billing
+cost_center = "engineering"
