@@ -8,6 +8,7 @@ terraform {
 
 provider "last9" {
   api_token    = var.last9_api_token
+  delete_token = var.last9_delete_token
   org          = var.last9_org
   api_base_url = var.last9_api_base_url
 }
@@ -27,6 +28,13 @@ variable "last9_api_base_url" {
   type        = string
   description = "Last9 API base URL"
   default     = "https://app.last9.io"
+}
+
+variable "last9_delete_token" {
+  type        = string
+  description = "Last9 API token with delete scope"
+  sensitive   = true
+  default     = ""
 }
 
 # Data source to lookup notification destinations

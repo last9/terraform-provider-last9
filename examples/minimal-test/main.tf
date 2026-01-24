@@ -13,6 +13,7 @@ terraform {
 # Provider Configuration
 provider "last9" {
   api_token    = var.last9_api_token
+  delete_token = var.last9_delete_token
   org          = var.last9_org
   api_base_url = var.last9_api_base_url
 }
@@ -76,6 +77,13 @@ variable "last9_api_token" {
   description = "Last9 API access token"
   type        = string
   sensitive   = true
+}
+
+variable "last9_delete_token" {
+  description = "Last9 API token with delete scope"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "last9_org" {

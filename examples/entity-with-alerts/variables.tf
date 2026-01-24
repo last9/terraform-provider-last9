@@ -4,6 +4,13 @@ variable "last9_api_token" {
   sensitive   = true
 }
 
+variable "last9_delete_token" {
+  type        = string
+  description = "Last9 API token with delete scope"
+  sensitive   = true
+  default     = ""
+}
+
 variable "last9_org" {
   type        = string
   description = "Last9 organization slug"

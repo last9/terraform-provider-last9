@@ -19,6 +19,13 @@ variable "last9_api_base_url" {
   default     = "https://app.last9.io"
 }
 
+variable "last9_delete_token" {
+  description = "Last9 API token with delete scope"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ====================================================================
 # ENVIRONMENT CONFIGURATION
 # ====================================================================
