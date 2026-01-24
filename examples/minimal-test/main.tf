@@ -60,15 +60,13 @@ resource "last9_drop_rule" "minimal_test" {
   telemetry = "logs"
 
   filters {
-    key         = "attributes[\"test\"]"
-    value       = "minimal"
-    operator    = "equals"
-    conjunction = "and"
+    key      = "attributes[\"test\"]"
+    value    = "minimal"
+    operator = "equals"
   }
 
   action {
-    name        = "drop"
-    destination = "null"
+    name = "drop-matching"
   }
 }
 
@@ -100,7 +98,7 @@ variable "last9_api_base_url" {
 variable "region" {
   description = "Region for drop rule"
   type        = string
-  default     = "us-west-2"
+  default     = "ap-south-1"
 }
 
 # Outputs

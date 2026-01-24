@@ -4,8 +4,7 @@
 terraform {
   required_providers {
     last9 = {
-      source  = "last9/last9"
-      version = "~> 1.0"
+      source = "hashicorp.com/edu/last9"
     }
   }
 }
@@ -27,15 +26,9 @@ resource "last9_entity" "production_api" {
   # Description
   description = "Production API service monitoring"
 
-  # Data source configuration
-  data_source    = "last9-legacy-cluster - ap-south-1 (system)"
-  data_source_id = "cluster-12345"
-
   # Organization and metadata
   namespace = "production"
   team      = "platform-engineering"
-  tier      = "critical"
-  workspace = "main-workspace"
 
   # Tags for categorization
   tags = [
@@ -59,15 +52,6 @@ resource "last9_entity" "production_api" {
 
   # Prevent UI edits to avoid IaC drift
   ui_readonly = true
-
-  # Adhoc filter - Common PromQL label filters applied across all indicators
-  adhoc_filter {
-    data_source = "last9-legacy-cluster - ap-south-1 (system)"
-    labels = {
-      cluster = "production"
-      job     = "api-server"
-    }
-  }
 
   # Define indicators (metrics) for this entity
   indicators {
