@@ -70,8 +70,8 @@ func resourceForwardRule() *schema.Resource {
 						"operator": {
 							Type:         schema.TypeString,
 							Required:     true,
-							Description:  "Filter operator (equals, not_equals)",
-							ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals"}, false),
+							Description:  "Filter operator: equals, not_equals, or like (regex match)",
+							ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals", "like"}, false),
 						},
 						"conjunction": {
 							Type:        schema.TypeString,

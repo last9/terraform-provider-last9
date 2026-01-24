@@ -44,3 +44,4 @@ coverage.html
 # Debug logs
 debug.log
 *.log
+.claude/
