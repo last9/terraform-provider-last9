@@ -1,11 +1,20 @@
 # ====================================================================
 # PROVIDER CONFIGURATION
 # ====================================================================
+# Authentication: Use EITHER api_token OR refresh_token (refresh_token recommended)
 
 variable "last9_api_token" {
-  description = "Last9 API access token"
+  description = "Last9 API access token (legacy - use refresh_token instead)"
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "last9_refresh_token" {
+  description = "Last9 refresh token for automatic access token management (recommended)"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "last9_org" {
@@ -20,7 +29,14 @@ variable "last9_api_base_url" {
 }
 
 variable "last9_delete_token" {
-  description = "Last9 API token with delete scope"
+  description = "Last9 API token with delete scope (legacy - use delete_refresh_token instead)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "last9_delete_refresh_token" {
+  description = "Last9 refresh token for delete operations (recommended)"
   type        = string
   sensitive   = true
   default     = ""

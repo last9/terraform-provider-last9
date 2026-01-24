@@ -55,12 +55,20 @@ OPTIONS:
     -h, --help          Show this help message
 
 ENVIRONMENT VARIABLES:
-    LAST9_ORG              Required: Your Last9 organization slug
-    LAST9_API_TOKEN        Required: Your Last9 API access token
-    LAST9_DELETE_TOKEN     Optional: Your Last9 delete token (for destroy)
-    LAST9_REGION           Optional: Region for control plane rules (default: ap-south-1)
+    LAST9_ORG                  Required: Your Last9 organization slug
+    LAST9_REFRESH_TOKEN        Auth: Refresh token (recommended)
+    LAST9_API_TOKEN            Auth: API access token (legacy, use if no refresh token)
+    LAST9_DELETE_REFRESH_TOKEN Optional: Refresh token for delete operations
+    LAST9_DELETE_TOKEN         Optional: Delete token (legacy)
+    LAST9_REGION               Optional: Region for control plane rules (default: ap-south-1)
 
-EXAMPLE:
+EXAMPLE (using refresh token - recommended):
+    export LAST9_ORG="my-org"
+    export LAST9_REFRESH_TOKEN="your-refresh-token"
+    export LAST9_DELETE_REFRESH_TOKEN="your-delete-refresh-token"
+    $0 --verbose
+
+EXAMPLE (using API token - legacy):
     export LAST9_ORG="my-org"
     export LAST9_API_TOKEN="your-access-token"
     export LAST9_DELETE_TOKEN="your-delete-token"
@@ -94,9 +102,16 @@ check_prerequisites() {
         exit 1
     fi
 
-    if [[ -z "${LAST9_API_TOKEN:-}" ]]; then
-        log_error "LAST9_API_TOKEN environment variable is required"
+    # Check authentication - require either refresh_token or api_token
+    if [[ -z "${LAST9_REFRESH_TOKEN:-}" && -z "${LAST9_API_TOKEN:-}" ]]; then
+        log_error "Either LAST9_REFRESH_TOKEN or LAST9_API_TOKEN environment variable is required"
         exit 1
+    fi
+
+    if [[ -n "${LAST9_REFRESH_TOKEN:-}" ]]; then
+        log_info "Using refresh token authentication (recommended)"
+    else
+        log_info "Using API token authentication (legacy)"
     fi
 
     log_success "Prerequisites check passed"
@@ -150,9 +165,13 @@ setup_terraform_config() {
         cat > terraform.tfvars << EOF
 # Generated terraform.tfvars for integration test
 last9_org          = "${LAST9_ORG}"
-last9_api_token    = "${LAST9_API_TOKEN}"
-last9_delete_token = "${LAST9_DELETE_TOKEN:-}"
 last9_api_base_url = "https://app.last9.io"
+
+# Authentication (refresh_token recommended, api_token legacy)
+last9_refresh_token        = "${LAST9_REFRESH_TOKEN:-}"
+last9_api_token            = "${LAST9_API_TOKEN:-}"
+last9_delete_refresh_token = "${LAST9_DELETE_REFRESH_TOKEN:-}"
+last9_delete_token         = "${LAST9_DELETE_TOKEN:-}"
 
 # Integration test configuration
 environment = "integration-test-$(date +%s)"
