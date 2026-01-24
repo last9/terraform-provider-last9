@@ -42,12 +42,6 @@ variable "region" {
   default     = "us-west-2"
 }
 
-variable "cluster_id" {
-  description = "Cluster ID for macros"
-  type        = string
-  default     = "test-cluster"
-}
-
 # ====================================================================
 # ALERT THRESHOLDS
 # ====================================================================

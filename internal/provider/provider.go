@@ -59,7 +59,6 @@ func New() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
-			"last9_macro":                  resourceMacro(),
 			"last9_drop_rule":              resourceDropRule(),
 			"last9_forward_rule":           resourceForwardRule(),
 			"last9_scheduled_search_alert": resourceScheduledSearchAlert(),

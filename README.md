@@ -8,7 +8,6 @@ A Terraform provider for managing Last9 resources including alerts, log manageme
 - **Notification Channels**: Manage alert destinations (Slack, PagerDuty, webhooks, email, etc.)
 - **Drop Rules**: Filter and drop logs for cost optimization
 - **Forward Rules**: Forward logs to external destinations
-- **Macros**: Cluster-level query templating
 
 ## Installation
 
@@ -101,21 +100,6 @@ resource "last9_alert" "high_error_rate" {
 }
 ```
 
-### Macro
-
-```hcl
-resource "last9_macro" "example" {
-  cluster_id = "cluster-123"
-  
-  body = jsonencode({
-    macros = {
-      "service_name" = "$service"
-      "environment"  = "$env"
-    }
-  })
-}
-```
-
 ### Drop Rule
 
 ```hcl
@@ -162,7 +146,6 @@ resource "last9_forward_rule" "external_logs" {
 
 - `last9_entity` - Create alert groups for organizing metric-based alerts
 - `last9_alert` - Configure metric-based alert rules
-- `last9_macro` - Manage cluster macros
 - `last9_drop_rule` - Configure log drop rules for filtering
 - `last9_forward_rule` - Set up log forwarding to external destinations
 - `last9_scheduled_search_alert` - Create log-based scheduled search alerts

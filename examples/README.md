@@ -6,9 +6,9 @@ This directory contains example Terraform configurations demonstrating how to us
 
 - **entity-with-alerts/** - Entity with alert configuration
 - **alerts/** - Alert configuration examples
-- **macros/** - Macro configuration examples
-- **policies/** - Policy configuration examples
 - **scheduled-search-alerts/** - Log-based scheduled search alert examples
+- **minimal-test/** - Minimal example for testing provider functionality
+- **integration-test/** - Comprehensive integration test
 
 ## Usage
 

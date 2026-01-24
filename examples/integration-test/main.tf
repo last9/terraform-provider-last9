@@ -94,21 +94,6 @@ resource "last9_alert" "low_availability" {
 }
 
 # ====================================================================
-# MACRO: Reusable PromQL queries
-# ====================================================================
-resource "last9_macro" "integration_test" {
-  cluster_id = var.cluster_id
-
-  body = jsonencode({
-    macros = {
-      "${var.environment}_error_rate"   = "100 * sum(rate(http_requests_total{status=~\"5..\",env=\"${var.environment}\"}[$$window])) / sum(rate(http_requests_total{env=\"${var.environment}\"}[$$window]))"
-      "${var.environment}_request_rate" = "sum(rate(http_requests_total{env=\"${var.environment}\"}[$$window])) * 60"
-      "${var.environment}_latency_p95"  = "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{env=\"${var.environment}\"}[$$window])) by (le)) * 1000"
-    }
-  })
-}
-
-# ====================================================================
 # DROP RULE: Filter out debug logs
 # ====================================================================
 resource "last9_drop_rule" "drop_debug_logs" {

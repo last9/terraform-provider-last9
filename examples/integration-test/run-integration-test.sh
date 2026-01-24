@@ -55,16 +55,14 @@ OPTIONS:
     -h, --help          Show this help message
 
 ENVIRONMENT VARIABLES:
-    LAST9_ORG                Required: Your Last9 organization
-    LAST9_REFRESH_TOKEN     Required: Your Last9 refresh token
-    LAST9_CLUSTER_ID        Required: Your Last9 cluster ID
-    LAST9_ENTITY_NAME       Required: Entity name to monitor
+    LAST9_ORG              Required: Your Last9 organization slug
+    LAST9_API_TOKEN        Required: Your Last9 API access token
+    LAST9_DELETE_TOKEN     Optional: Your Last9 delete token (for destroy)
 
 EXAMPLE:
     export LAST9_ORG="my-org"
-    export LAST9_REFRESH_TOKEN="your-token"
-    export LAST9_CLUSTER_ID="cluster-123"
-    export LAST9_ENTITY_NAME="production-api"
+    export LAST9_API_TOKEN="your-access-token"
+    export LAST9_DELETE_TOKEN="your-delete-token"
     $0 --verbose
 
 EOF
@@ -95,18 +93,8 @@ check_prerequisites() {
         exit 1
     fi
 
-    if [[ -z "${LAST9_REFRESH_TOKEN:-}" ]]; then
-        log_error "LAST9_REFRESH_TOKEN environment variable is required"
-        exit 1
-    fi
-
-    if [[ -z "${LAST9_CLUSTER_ID:-}" ]]; then
-        log_error "LAST9_CLUSTER_ID environment variable is required"
-        exit 1
-    fi
-
-    if [[ -z "${LAST9_ENTITY_NAME:-}" ]]; then
-        log_error "LAST9_ENTITY_NAME environment variable is required"
+    if [[ -z "${LAST9_API_TOKEN:-}" ]]; then
+        log_error "LAST9_API_TOKEN environment variable is required"
         exit 1
     fi
 
@@ -140,15 +128,14 @@ setup_terraform_config() {
 
     cd "$TEST_DIR"
 
-    # Use local provider configuration for testing
+    # Backup main.tf and replace provider source for local testing
     if [[ -f "main.tf" ]]; then
-        mv main.tf main.tf.published
-    fi
-
-    if [[ -f "versions.tf" ]]; then
-        cp versions.tf main.tf
+        cp main.tf main.tf.published
+        # Replace "last9/last9" with "hashicorp.com/edu/last9" for local dev
+        sed -i.bak 's|source *= *"last9/last9"|source = "hashicorp.com/edu/last9"|g' main.tf
+        rm -f main.tf.bak
     else
-        log_error "versions.tf not found for local provider configuration"
+        log_error "main.tf not found"
         exit 1
     fi
 
@@ -158,29 +145,18 @@ setup_terraform_config() {
 
         cat > terraform.tfvars << EOF
 # Generated terraform.tfvars for integration test
-last9_org = "${LAST9_ORG}"
-last9_refresh_token = "${LAST9_REFRESH_TOKEN}"
-cluster_id = "${LAST9_CLUSTER_ID}"
-entity_name = "${LAST9_ENTITY_NAME}"
+last9_org          = "${LAST9_ORG}"
+last9_api_token    = "${LAST9_API_TOKEN}"
+last9_delete_token = "${LAST9_DELETE_TOKEN:-}"
+last9_api_base_url = "https://app.last9.io"
 
 # Integration test configuration
 environment = "integration-test-$(date +%s)"
-region = "us-west-2"
-service_name = "integration-test-service"
-team_name = "integration-test"
+region      = "us-west-2"
 
 # Alert thresholds for testing
-error_rate_threshold = 10.0
+error_rate_threshold   = 10.0
 availability_threshold = 99.0
-response_time_threshold = 1000
-
-# Enable all features for comprehensive testing
-enable_log_forwarding = true
-enable_debug_log_dropping = true
-enable_advanced_alerts = true
-
-# Test-specific tags
-additional_tags = ["integration-test", "automated", "$(date +%Y%m%d)"]
 EOF
         log_success "Created terraform.tfvars"
     else

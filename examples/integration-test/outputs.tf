@@ -25,15 +25,6 @@ output "alert_ids" {
 }
 
 # ====================================================================
-# MACRO OUTPUTS
-# ====================================================================
-
-output "macro_cluster_id" {
-  description = "Cluster ID where macros were created"
-  value       = last9_macro.integration_test.cluster_id
-}
-
-# ====================================================================
 # DROP RULE OUTPUTS
 # ====================================================================
 
@@ -64,7 +55,6 @@ output "integration_test_summary" {
     resources_created = {
       entities      = 1
       alerts        = 2
-      macros        = 1
       drop_rules    = 1
       forward_rules = var.external_log_destination != "" ? 1 : 0
     }
