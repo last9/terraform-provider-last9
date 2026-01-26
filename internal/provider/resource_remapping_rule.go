@@ -136,6 +136,10 @@ func validateRemappingRule(ctx context.Context, d *schema.ResourceDiff, m interf
 		if targetAttributes != "log_attributes" && targetAttributes != "resource_attributes" {
 			return fmt.Errorf("target_attributes must be 'log_attributes' or 'resource_attributes' for logs_extract type")
 		}
+		// API only supports one precondition
+		if len(preconditions) > 1 {
+			return fmt.Errorf("only one precondition is supported per remapping rule")
+		}
 	} else {
 		// For non-extract types, these fields should not be set
 		if extractType != "" {
