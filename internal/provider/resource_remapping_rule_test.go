@@ -180,6 +180,84 @@ func TestAccRemappingRule_validationInvalidTargetForLogsMap(t *testing.T) {
 	})
 }
 
+func TestAccRemappingRule_validationMultiplePreconditions(t *testing.T) {
+	region := getTestRegion()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccRemappingRuleConfig_invalidMultiplePreconditions(region),
+				ExpectError: regexp.MustCompile(`only one precondition is supported per remapping rule`),
+			},
+		},
+	})
+}
+
+func TestAccRemappingRule_withPreconditionEquals(t *testing.T) {
+	resourceName := "last9_remapping_rule.test"
+	region := getTestRegion()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckRemappingRuleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRemappingRuleConfig_withPreconditionEquals(region),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRemappingRuleExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "type", "logs_extract"),
+					resource.TestCheckResourceAttr(resourceName, "preconditions.0.operator", "equals"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccRemappingRule_withPreconditionNotEquals(t *testing.T) {
+	resourceName := "last9_remapping_rule.test"
+	region := getTestRegion()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckRemappingRuleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRemappingRuleConfig_withPreconditionNotEquals(region),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRemappingRuleExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "type", "logs_extract"),
+					resource.TestCheckResourceAttr(resourceName, "preconditions.0.operator", "not_equals"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccRemappingRule_withPreconditionLike(t *testing.T) {
+	resourceName := "last9_remapping_rule.test"
+	region := getTestRegion()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckRemappingRuleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRemappingRuleConfig_withPreconditionLike(region),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRemappingRuleExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "type", "logs_extract"),
+					resource.TestCheckResourceAttr(resourceName, "preconditions.0.operator", "like"),
+				),
+			},
+		},
+	})
+}
+
 // Helper functions
 
 func getTestRegion() string {
@@ -351,6 +429,92 @@ resource "last9_remapping_rule" "test" {
   remap_keys        = ["attributes[\"app.name\"]"]
   target_attributes = "log_attributes"
   action            = "upsert"
+}
+`, region)
+}
+
+func testAccRemappingRuleConfig_invalidMultiplePreconditions(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_remapping_rule" "test" {
+  region            = "%s"
+  type              = "logs_extract"
+  name              = "tf-test-multiple-precond"
+  remap_keys        = ["(?P<error_code>ERR-[0-9]+)"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "attributes[\"level\"]"
+    value    = "error"
+    operator = "equals"
+  }
+
+  preconditions {
+    key      = "attributes[\"component\"]"
+    value    = "api"
+    operator = "equals"
+  }
+}
+`, region)
+}
+
+func testAccRemappingRuleConfig_withPreconditionEquals(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_remapping_rule" "test" {
+  region            = "%s"
+  type              = "logs_extract"
+  name              = "tf-test-precond-equals"
+  remap_keys        = ["(?P<error_code>ERR-[0-9]+)"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "attributes[\"level\"]"
+    value    = "error"
+    operator = "equals"
+  }
+}
+`, region)
+}
+
+func testAccRemappingRuleConfig_withPreconditionNotEquals(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_remapping_rule" "test" {
+  region            = "%s"
+  type              = "logs_extract"
+  name              = "tf-test-precond-not-equals"
+  remap_keys        = ["(?P<trace_id>[a-f0-9]{32})"]
+  target_attributes = "log_attributes"
+  action            = "insert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "attributes[\"level\"]"
+    value    = "debug"
+    operator = "not_equals"
+  }
+}
+`, region)
+}
+
+func testAccRemappingRuleConfig_withPreconditionLike(region string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_remapping_rule" "test" {
+  region            = "%s"
+  type              = "logs_extract"
+  name              = "tf-test-precond-like"
+  remap_keys        = ["(?P<txn_id>TXN-[A-Z0-9]+)"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "resource.attributes[\"service.name\"]"
+    value    = "payment-.*"
+    operator = "like"
+  }
 }
 `, region)
 }
