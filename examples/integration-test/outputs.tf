@@ -65,6 +65,21 @@ output "forward_rule_id" {
 }
 
 # ====================================================================
+# REMAPPING RULE OUTPUTS
+# ====================================================================
+
+output "remapping_rule_ids" {
+  description = "IDs of created remapping rules"
+  value = {
+    logs_extract_pattern = last9_remapping_rule.extract_request_id.id
+    logs_extract_json    = last9_remapping_rule.extract_json_metadata.id
+    logs_map_service     = last9_remapping_rule.map_service_name.id
+    logs_map_severity    = last9_remapping_rule.map_severity.id
+    traces_map_service   = last9_remapping_rule.map_trace_service.id
+  }
+}
+
+# ====================================================================
 # SCHEDULED SEARCH ALERT OUTPUTS
 # ====================================================================
 
@@ -89,6 +104,7 @@ output "integration_test_summary" {
       drop_rules              = 3  # logs, traces, metrics
       notification_channels   = 4  # webhook, slack, pagerduty, email
       forward_rules           = 1
+      remapping_rules         = 5  # 2 logs_extract, 2 logs_map, 1 traces_map
       scheduled_search_alerts = 1
     }
 

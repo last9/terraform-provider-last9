@@ -229,6 +229,63 @@ resource "last9_forward_rule" "forward_critical_errors" {
 }
 
 # ====================================================================
+# REMAPPING RULES: Transform telemetry attributes
+# ====================================================================
+
+# Logs Extract - Pattern (regex-based extraction)
+resource "last9_remapping_rule" "extract_request_id" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-request-id"
+  remap_keys        = ["(?P<request_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+}
+
+# Logs Extract - JSON (parse JSON from log body)
+resource "last9_remapping_rule" "extract_json_metadata" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-json"
+  remap_keys        = ["body"]
+  target_attributes = "log_attributes"
+  action            = "insert"
+  extract_type      = "json"
+  prefix            = "parsed_"
+}
+
+# Logs Map - Service name mapping
+resource "last9_remapping_rule" "map_service_name" {
+  region            = var.region
+  type              = "logs_map"
+  name              = "${var.environment}-map-service"
+  remap_keys        = ["attributes[\"app.name\"]", "attributes[\"service.name\"]"]
+  target_attributes = "service"
+  action            = "upsert"
+}
+
+# Logs Map - Severity mapping
+resource "last9_remapping_rule" "map_severity" {
+  region            = var.region
+  type              = "logs_map"
+  name              = "${var.environment}-map-severity"
+  remap_keys        = ["attributes[\"log.level\"]", "attributes[\"level\"]"]
+  target_attributes = "severity"
+  action            = "upsert"
+}
+
+# Traces Map - Service name from k8s deployment
+resource "last9_remapping_rule" "map_trace_service" {
+  region            = var.region
+  type              = "traces_map"
+  name              = "${var.environment}-map-trace-service"
+  remap_keys        = ["resource.attributes[\"k8s.deployment.name\"]"]
+  target_attributes = "service"
+  action            = "upsert"
+}
+
+# ====================================================================
 # SCHEDULED SEARCH ALERT: Log-based alerting
 # ====================================================================
 resource "last9_scheduled_search_alert" "high_error_count" {
