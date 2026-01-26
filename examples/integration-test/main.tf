@@ -180,6 +180,20 @@ resource "last9_notification_channel" "webhook" {
   send_resolved = true
 }
 
+# Generic Webhook with Custom Headers
+resource "last9_notification_channel" "webhook_with_headers" {
+  name          = "${var.environment}-webhook-auth"
+  type          = "generic_webhook"
+  destination   = local.webhook_url
+  send_resolved = true
+
+  headers = {
+    "Authorization"      = "Bearer ${var.webhook_auth_token}"
+    "X-Custom-Header"    = "integration-test"
+    "X-Environment"      = var.environment
+  }
+}
+
 # Slack
 resource "last9_notification_channel" "slack" {
   name          = "${var.environment}-slack"

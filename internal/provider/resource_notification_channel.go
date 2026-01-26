@@ -53,6 +53,14 @@ func resourceNotificationChannel() *schema.Resource {
 				Default:     true,
 				Description: "Whether to send resolved notifications",
 			},
+			"headers": {
+				Type:        schema.TypeMap,
+				Optional:    true,
+				Description: "Custom HTTP headers to send with webhook requests. Only applicable for generic_webhook type.",
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+			},
 			// Computed fields
 			"global": {
 				Type:        schema.TypeBool,
@@ -80,6 +88,41 @@ func resourceNotificationChannel() *schema.Resource {
 				Description: "Last update timestamp",
 			},
 		},
+		CustomizeDiff: validateWebhookHeaders,
+	}
+}
+
+// validateWebhookHeaders ensures headers are only set for generic_webhook type
+func validateWebhookHeaders(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	channelType := d.Get("type").(string)
+	headers := d.Get("headers").(map[string]interface{})
+
+	if len(headers) > 0 && channelType != "generic_webhook" {
+		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
+	}
+
+	return nil
+}
+
+// buildWebhookProperty creates the Property struct if headers are provided for webhook channels
+func buildWebhookProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
+	channelType := d.Get("type").(string)
+	if channelType != "generic_webhook" {
+		return nil
+	}
+
+	headersRaw := d.Get("headers").(map[string]interface{})
+	if len(headersRaw) == 0 {
+		return nil
+	}
+
+	headers := make(map[string]string)
+	for k, v := range headersRaw {
+		headers[k] = v.(string)
+	}
+
+	return &client.NotificationSettingProperty{
+		WebhookHeaders: headers,
 	}
 }
 
@@ -91,6 +134,7 @@ func resourceNotificationChannelCreate(ctx context.Context, d *schema.ResourceDa
 		Type:         d.Get("type").(string),
 		Destination:  d.Get("destination").(string),
 		SendResolved: d.Get("send_resolved").(bool),
+		Property:     buildWebhookProperty(d),
 	}
 
 	channel, err := apiClient.CreateNotificationDestination(req)
@@ -131,6 +175,23 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 	d.Set("created_at", channel.CreatedAt)
 	d.Set("updated_at", channel.UpdatedAt)
 
+	// Extract webhook headers from property if this is a webhook channel
+	if channel.Type == "generic_webhook" && channel.Property != nil {
+		if webhookHeaders, ok := channel.Property["webhook_headers"]; ok {
+			if headersMap, ok := webhookHeaders.(map[string]interface{}); ok {
+				headers := make(map[string]string)
+				for k, v := range headersMap {
+					if strVal, ok := v.(string); ok {
+						headers[k] = strVal
+					}
+				}
+				if len(headers) > 0 {
+					d.Set("headers", headers)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -147,6 +208,7 @@ func resourceNotificationChannelUpdate(ctx context.Context, d *schema.ResourceDa
 		Type:         d.Get("type").(string),
 		Destination:  d.Get("destination").(string),
 		SendResolved: d.Get("send_resolved").(bool),
+		Property:     buildWebhookProperty(d),
 	}
 
 	_, err = apiClient.UpdateNotificationDestination(id, req)
