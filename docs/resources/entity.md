@@ -20,6 +20,7 @@ Creates an alert group for organizing related metric-based alerts. Each `last9_a
 resource "last9_entity" "api_alerts" {
   name         = "api-service"
   type         = "service"
+  entity_class = "alert-manager"
   external_ref = "api-service-prod"
   description  = "Alerts for Production API Service"
   ui_readonly  = true  # Manage via Terraform only
@@ -48,6 +49,7 @@ resource "last9_alert" "high_error_rate" {
 resource "last9_entity" "api_alerts" {
   name         = "api-service"
   type         = "service"
+  entity_class = "alert-manager"
   external_ref = "api-service-prod"
   ui_readonly  = true
 
@@ -62,10 +64,10 @@ resource "last9_entity" "api_alerts" {
 
 - `name` (String) Alert group name.
 - `type` (String) Type (e.g., `service`, `component`).
+- `entity_class` (String) Entity classification. Must be set to `"alert-manager"` for alert groups to ensure visibility in Alert Studio UI.
 - `external_ref` (String) Unique identifier slug for this alert group.
 
 ### Optional
-
 - `description` (String) Description of the alert group.
 - `data_source` (String) Metrics data source name.
 - `data_source_id` (String) Metrics data source ID.

@@ -22,6 +22,7 @@ For more information about alerting concepts, see the [Alerting Overview](https:
 resource "last9_entity" "api_alerts" {
   name         = "api-service"
   type         = "service"
+  entity_class = "alert-manager"
   external_ref = "api-service-prod"
   ui_readonly  = true
 }
