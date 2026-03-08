@@ -236,14 +236,18 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	alert, err := apiClient.CreateAlert(entityID, req)
 	if err != nil {
 		// Clean up the KPI if alert creation fails
-		apiClient.DeleteKPI(entityID, kpi.ID)
+		if cleanupErr := apiClient.DeleteKPI(entityID, kpi.ID); cleanupErr != nil {
+			return diag.FromErr(fmt.Errorf("failed to create alert: %w (also failed to cleanup KPI: %v)", err, cleanupErr))
+		}
 		return diag.FromErr(fmt.Errorf("failed to create alert: %w", err))
 	}
 
 	// Validate that we got a valid alert ID back from the API
 	if alert.ID == "" {
 		// Clean up the KPI since alert creation didn't return a valid ID
-		apiClient.DeleteKPI(entityID, kpi.ID)
+		if cleanupErr := apiClient.DeleteKPI(entityID, kpi.ID); cleanupErr != nil {
+			return diag.FromErr(fmt.Errorf("alert creation succeeded but API returned empty alert ID - alert may not have been created (also failed to cleanup KPI: %v)", cleanupErr))
+		}
 		return diag.FromErr(fmt.Errorf("alert creation succeeded but API returned empty alert ID - alert may not have been created"))
 	}
 
@@ -421,7 +425,9 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	if err != nil {
 		// If we created a new KPI but alert update failed, clean it up
 		if newKPI != nil {
-			apiClient.DeleteKPI(entityID, newKPI.ID)
+			if cleanupErr := apiClient.DeleteKPI(entityID, newKPI.ID); cleanupErr != nil {
+				return diag.FromErr(fmt.Errorf("failed to update alert: %w (also failed to cleanup KPI: %v)", err, cleanupErr))
+			}
 		}
 		return diag.FromErr(fmt.Errorf("failed to update alert: %w", err))
 	}
@@ -430,7 +436,9 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	if updatedAlert.ID == "" {
 		// If we created a new KPI but got no alert ID, clean it up
 		if newKPI != nil {
-			apiClient.DeleteKPI(entityID, newKPI.ID)
+			if cleanupErr := apiClient.DeleteKPI(entityID, newKPI.ID); cleanupErr != nil {
+				return diag.FromErr(fmt.Errorf("alert update succeeded but API returned empty alert ID - alert may not have been updated (also failed to cleanup KPI: %v)", cleanupErr))
+			}
 		}
 		return diag.FromErr(fmt.Errorf("alert update succeeded but API returned empty alert ID - alert may not have been updated"))
 	}

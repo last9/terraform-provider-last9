@@ -68,6 +68,7 @@ resource "last9_entity" "api_alerts" {
 - `external_ref` (String) Unique identifier slug for this alert group.
 
 ### Optional
+
 - `description` (String) Description of the alert group.
 - `data_source` (String) Metrics data source name.
 - `data_source_id` (String) Metrics data source ID.
