@@ -310,7 +310,21 @@ func (c *Client) Post(path string, body interface{}, result interface{}) error {
 	defer resp.Body.Close()
 
 	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
+		// Read the response body for debugging
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		// Debug logging when TF_LOG is set
+		if os.Getenv("TF_LOG") != "" {
+			log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+		}
+
+		// Decode the response
+		if err := json.Unmarshal(bodyBytes, result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
 	}
 	return nil
 }
@@ -323,7 +337,21 @@ func (c *Client) Put(path string, body interface{}, result interface{}) error {
 	defer resp.Body.Close()
 
 	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
+		// Read the response body for debugging
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		// Debug logging when TF_LOG is set
+		if os.Getenv("TF_LOG") != "" {
+			log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+		}
+
+		// Decode the response
+		if err := json.Unmarshal(bodyBytes, result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
 	}
 	return nil
 }
@@ -336,7 +364,21 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 	defer resp.Body.Close()
 
 	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
+		// Read the response body for debugging
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		// Debug logging when TF_LOG is set
+		if os.Getenv("TF_LOG") != "" {
+			log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+		}
+
+		// Decode the response
+		if err := json.Unmarshal(bodyBytes, result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
 	}
 	return nil
 }
