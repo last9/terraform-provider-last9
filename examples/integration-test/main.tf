@@ -229,6 +229,120 @@ resource "last9_forward_rule" "forward_critical_errors" {
 }
 
 # ====================================================================
+# REMAPPING RULES: Transform telemetry attributes
+# ====================================================================
+
+# Logs Extract - Pattern (regex-based extraction)
+resource "last9_remapping_rule" "extract_request_id" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-request-id"
+  remap_keys        = ["(?P<request_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+}
+
+# Logs Extract - JSON (parse JSON from log body)
+resource "last9_remapping_rule" "extract_json_metadata" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-json"
+  remap_keys        = ["body"]
+  target_attributes = "log_attributes"
+  action            = "insert"
+  extract_type      = "json"
+  prefix            = "parsed_"
+}
+
+# Logs Map - Service name mapping
+resource "last9_remapping_rule" "map_service_name" {
+  region            = var.region
+  type              = "logs_map"
+  name              = "${var.environment}-map-service"
+  remap_keys        = ["attributes[\"app.name\"]", "attributes[\"service.name\"]"]
+  target_attributes = "service"
+  action            = "upsert"
+}
+
+# Logs Map - Severity mapping
+resource "last9_remapping_rule" "map_severity" {
+  region            = var.region
+  type              = "logs_map"
+  name              = "${var.environment}-map-severity"
+  remap_keys        = ["attributes[\"log.level\"]", "attributes[\"level\"]"]
+  target_attributes = "severity"
+  action            = "upsert"
+}
+
+# Traces Map - Service name from k8s deployment
+resource "last9_remapping_rule" "map_trace_service" {
+  region            = var.region
+  type              = "traces_map"
+  name              = "${var.environment}-map-trace-service"
+  remap_keys        = ["resource.attributes[\"k8s.deployment.name\"]"]
+  target_attributes = "service"
+  action            = "upsert"
+}
+
+# ====================================================================
+# REMAPPING RULES WITH PRECONDITIONS (Conditional Extraction)
+# ====================================================================
+
+# Logs Extract with EQUALS precondition - only apply to error logs
+resource "last9_remapping_rule" "extract_error_context" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-error-context"
+  remap_keys        = ["(?P<error_code>ERR-[0-9]+)"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "attributes[\"level\"]"
+    value    = "error"
+    operator = "equals"
+  }
+}
+
+# Logs Extract with NOT_EQUALS precondition - apply to all except debug logs
+resource "last9_remapping_rule" "extract_trace_id_non_debug" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-trace-non-debug"
+  remap_keys        = ["(?P<trace_id>[a-f0-9]{32})"]
+  target_attributes = "log_attributes"
+  action            = "insert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "attributes[\"level\"]"
+    value    = "debug"
+    operator = "not_equals"
+  }
+}
+
+# Logs Extract with LIKE precondition (regex) - apply to payment service logs
+resource "last9_remapping_rule" "extract_payment_details" {
+  region            = var.region
+  type              = "logs_extract"
+  name              = "${var.environment}-extract-payment"
+  remap_keys        = ["(?P<transaction_id>TXN-[A-Z0-9]+)"]
+  target_attributes = "log_attributes"
+  action            = "upsert"
+  extract_type      = "pattern"
+
+  preconditions {
+    key      = "resource.attributes[\"service.name\"]"
+    value    = "payment-.*"
+    operator = "like"
+  }
+}
+
+# Note: The API only supports ONE precondition per remapping rule
+
+# ====================================================================
 # SCHEDULED SEARCH ALERT: Log-based alerting
 # ====================================================================
 resource "last9_scheduled_search_alert" "high_error_count" {

@@ -61,6 +61,7 @@ func New() *schema.Provider {
 			"last9_alert":                  resourceAlert(),
 			"last9_drop_rule":              resourceDropRule(),
 			"last9_forward_rule":           resourceForwardRule(),
+			"last9_remapping_rule":         resourceRemappingRule(),
 			"last9_scheduled_search_alert": resourceScheduledSearchAlert(),
 			"last9_notification_channel":   resourceNotificationChannel(),
 			// Note: notification_channel_attachment is not registered because the API

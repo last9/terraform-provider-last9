@@ -1178,3 +1178,85 @@ func (c *Client) UpdateKPI(entityID, kpiID string, req *KPIUpdateRequest) (*KPI,
 func (c *Client) DeleteKPI(entityID, kpiID string) error {
 	return c.Delete(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID))
 }
+
+// Remapping Rule types and methods
+
+// RemapPrecondition defines a conditional rule for remapping (logs_extract only)
+type RemapPrecondition struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Operator string `json:"operator"` // equals, not_equals, like
+}
+
+// RemapProperty defines an individual remapping rule
+type RemapProperty struct {
+	Name             *string              `json:"name,omitempty"`              // Required for logs_extract
+	Type             *string              `json:"type,omitempty"`              // pattern or json (logs_extract only)
+	Preconditions    []*RemapPrecondition `json:"preconditions,omitempty"`     // Optional conditions (logs_extract only)
+	RemapKeys        []string             `json:"remap_keys"`                  // Source field(s) to remap
+	TargetAttributes string               `json:"target_attribute"`            // Target attribute
+	Action           *string              `json:"action,omitempty"`            // insert or upsert
+	Prefix           *string              `json:"prefix,omitempty"`            // Optional prefix for extracted values
+	CreatedAt        int64                `json:"created_at,omitempty"`
+	CreatedBy        string               `json:"created_by,omitempty"`
+}
+
+// RemappingRuleRequest is the request payload for creating/updating remapping rules
+type RemappingRuleRequest struct {
+	Region     string         `json:"region"`
+	Properties []RemapProperty `json:"properties"`
+}
+
+// RemappingRuleResponse is the response from the remapping API
+type RemappingRuleResponse struct {
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	OrgSlug    string          `json:"org_slug"`
+	Region     string          `json:"region"`
+	OrgID      string          `json:"org_id"`
+	Properties []RemapProperty `json:"properties"`
+	CreatedAt  int64           `json:"created_at"`
+	UpdatedAt  int64           `json:"updated_at"`
+	CreatedBy  string          `json:"created_by"`
+}
+
+// RemappingRulesGetResponse contains all remapping types for a region
+type RemappingRulesGetResponse struct {
+	RemappingLogsExtract  *RemappingRuleResponse `json:"remapping_logs_extract,omitempty"`
+	RemappingLogsMap      *RemappingRuleResponse `json:"remapping_logs_map,omitempty"`
+	RemappingTracesMap    *RemappingRuleResponse `json:"remapping_traces_map,omitempty"`
+}
+
+// UpsertRemappingRule creates or updates a remapping rule
+// ruleType should be one of: logs_extract, logs_map, traces_map
+func (c *Client) UpsertRemappingRule(region, ruleType string, req *RemappingRuleRequest) (*RemappingRuleResponse, error) {
+	var result RemappingRuleResponse
+	err := c.Post(fmt.Sprintf("/logs_settings/remapping/%s", ruleType), req, &result)
+	return &result, err
+}
+
+// GetRemappingRules fetches all remapping rules for a region
+func (c *Client) GetRemappingRules(region string) (*RemappingRulesGetResponse, error) {
+	var result RemappingRulesGetResponse
+	err := c.Get(fmt.Sprintf("/logs_settings/remapping?region=%s", region), &result)
+	return &result, err
+}
+
+// GetRemappingRuleByType fetches a specific remapping rule type for a region
+func (c *Client) GetRemappingRuleByType(region, ruleType string) (*RemappingRuleResponse, error) {
+	allRules, err := c.GetRemappingRules(region)
+	if err != nil {
+		return nil, err
+	}
+
+	switch ruleType {
+	case "logs_extract":
+		return allRules.RemappingLogsExtract, nil
+	case "logs_map":
+		return allRules.RemappingLogsMap, nil
+	case "traces_map":
+		return allRules.RemappingTracesMap, nil
+	default:
+		return nil, fmt.Errorf("unknown remapping rule type: %s", ruleType)
+	}
+}
