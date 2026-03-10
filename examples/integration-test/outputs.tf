@@ -48,10 +48,11 @@ output "drop_rule_ids" {
 output "notification_channel_ids" {
   description = "IDs of created notification channels"
   value = {
-    webhook   = last9_notification_channel.webhook.id
-    slack     = last9_notification_channel.slack.id
-    pagerduty = last9_notification_channel.pagerduty.id
-    email     = last9_notification_channel.email.id
+    webhook              = last9_notification_channel.webhook.id
+    webhook_with_headers = last9_notification_channel.webhook_with_headers.id
+    slack                = last9_notification_channel.slack.id
+    pagerduty            = last9_notification_channel.pagerduty.id
+    email                = last9_notification_channel.email.id
   }
 }
 
@@ -87,7 +88,7 @@ output "integration_test_summary" {
       entities                = 1
       alerts                  = 2
       drop_rules              = 3  # logs, traces, metrics
-      notification_channels   = 4  # webhook, slack, pagerduty, email
+      notification_channels   = 5  # webhook, webhook_with_headers, slack, pagerduty, email
       forward_rules           = 1
       scheduled_search_alerts = 1
     }

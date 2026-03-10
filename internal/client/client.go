@@ -1070,12 +1070,19 @@ type KPIUpdateRequest struct {
 
 // NotificationChannel CRUD methods
 
+// NotificationSettingProperty contains optional properties for notification channels
+type NotificationSettingProperty struct {
+	// WebhookHeaders holds custom headers to be sent with webhook requests (only for generic_webhook type)
+	WebhookHeaders map[string]string `json:"webhook_headers,omitempty"`
+}
+
 // NotificationChannelRequest represents the request body for creating/updating a notification channel
 type NotificationChannelRequest struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Destination  string `json:"destination"`
-	SendResolved bool   `json:"send_resolved"`
+	Name         string                       `json:"name"`
+	Type         string                       `json:"type"`
+	Destination  string                       `json:"destination"`
+	SendResolved bool                         `json:"send_resolved"`
+	Property     *NotificationSettingProperty `json:"property,omitempty"`
 }
 
 // CreateNotificationDestination creates a new notification channel (master channel)

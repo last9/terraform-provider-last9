@@ -103,6 +103,13 @@ variable "webhook_url" {
   default     = ""  # Will be generated with unique timestamp
 }
 
+variable "webhook_auth_token" {
+  description = "Authentication token for webhook with headers test"
+  type        = string
+  sensitive   = true
+  default     = "test-auth-token"
+}
+
 variable "slack_webhook_url" {
   description = "Slack webhook URL for notification channel test"
   type        = string

@@ -57,6 +57,22 @@ resource "last9_notification_channel" "webhook" {
 }
 ```
 
+### Generic Webhook with Custom Headers
+
+```terraform
+resource "last9_notification_channel" "webhook_with_auth" {
+  name          = "Authenticated Webhook"
+  type          = "generic_webhook"
+  destination   = "https://api.example.com/alerts"
+  send_resolved = true
+
+  headers = {
+    "Authorization" = "Bearer ${var.webhook_token}"
+    "X-Custom-Header" = "my-value"
+  }
+}
+```
+
 ## Schema
 
 ### Required
@@ -68,10 +84,16 @@ resource "last9_notification_channel" "webhook" {
 ### Optional
 
 - `send_resolved` (Boolean) Whether to send notifications when alerts are resolved. Default: `true`.
+- `headers` (Map of String) Custom HTTP headers to send with webhook requests. Only applicable for `generic_webhook` type. Useful for authentication tokens or custom metadata.
 
 ### Read-Only
 
 - `id` (Number) The ID of the notification channel.
+- `global` (Boolean) Whether this is a global (master) channel.
+- `in_use` (Boolean) Whether the channel has any attachments.
+- `organization_id` (String) Organization ID.
+- `created_at` (String) Creation timestamp.
+- `updated_at` (String) Last update timestamp.
 
 ## Webhook Payload Structure
 
@@ -114,6 +136,8 @@ When using `generic_webhook`, Last9 sends the following JSON payload:
 | `payload.timestamp` | ISO 8601 format |
 
 -> **Note** The `send_resolved` option controls whether `resolve` events are sent when alerts clear.
+
+-> **Note** When `headers` are configured, they are included in every HTTP request to the webhook endpoint.
 
 ## Import
 

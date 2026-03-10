@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -128,6 +129,76 @@ func TestAccNotificationChannel_genericWebhook(t *testing.T) {
 	})
 }
 
+func TestAccNotificationChannel_webhookWithHeaders(t *testing.T) {
+	resourceName := "last9_notification_channel.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckNotificationChannelDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNotificationChannelConfig_webhookWithHeaders(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNotificationChannelExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "name", "TF Test Webhook With Headers"),
+					resource.TestCheckResourceAttr(resourceName, "type", "generic_webhook"),
+					resource.TestCheckResourceAttr(resourceName, "headers.Authorization", "Bearer test-token"),
+					resource.TestCheckResourceAttr(resourceName, "headers.X-Custom-Header", "custom-value"),
+				),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"destination"}, // Sensitive field
+			},
+		},
+	})
+}
+
+func TestAccNotificationChannel_webhookHeadersUpdate(t *testing.T) {
+	resourceName := "last9_notification_channel.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckNotificationChannelDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNotificationChannelConfig_webhookWithHeaders(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNotificationChannelExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "headers.Authorization", "Bearer test-token"),
+					resource.TestCheckResourceAttr(resourceName, "headers.X-Custom-Header", "custom-value"),
+				),
+			},
+			{
+				Config: testAccNotificationChannelConfig_webhookWithHeadersUpdated(),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNotificationChannelExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "headers.Authorization", "Bearer updated-token"),
+					resource.TestCheckResourceAttr(resourceName, "headers.X-New-Header", "new-value"),
+					resource.TestCheckNoResourceAttr(resourceName, "headers.X-Custom-Header"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccNotificationChannel_headersOnlyForWebhook(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccNotificationChannelConfig_slackWithHeaders(),
+				ExpectError: regexp.MustCompile(`headers can only be specified for generic_webhook type`),
+			},
+		},
+	})
+}
+
 // Helper functions
 
 func testAccCheckNotificationChannelExists(resourceName string) resource.TestCheckFunc {
@@ -227,6 +298,53 @@ resource "last9_notification_channel" "test" {
   type          = "generic_webhook"
   destination   = "https://example.com/webhook"
   send_resolved = true
+}
+`
+}
+
+func testAccNotificationChannelConfig_webhookWithHeaders() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Webhook With Headers"
+  type          = "generic_webhook"
+  destination   = "https://example.com/webhook"
+  send_resolved = true
+
+  headers = {
+    "Authorization"   = "Bearer test-token"
+    "X-Custom-Header" = "custom-value"
+  }
+}
+`
+}
+
+func testAccNotificationChannelConfig_webhookWithHeadersUpdated() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Webhook With Headers"
+  type          = "generic_webhook"
+  destination   = "https://example.com/webhook"
+  send_resolved = true
+
+  headers = {
+    "Authorization" = "Bearer updated-token"
+    "X-New-Header"  = "new-value"
+  }
+}
+`
+}
+
+func testAccNotificationChannelConfig_slackWithHeaders() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Slack With Headers"
+  type          = "slack"
+  destination   = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+  send_resolved = true
+
+  headers = {
+    "X-Custom-Header" = "should-fail"
+  }
 }
 `
 }
