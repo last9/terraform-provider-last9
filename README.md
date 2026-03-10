@@ -20,7 +20,7 @@ terraform {
   required_providers {
     last9 = {
       source  = "last9/last9"
-      version = "~> 1.0"
+      version = "~> 0.2"
     }
   }
 }
@@ -35,8 +35,8 @@ go build -o terraform-provider-last9
 ```
 
 Place the binary in your Terraform plugins directory:
-- Linux/Mac: `~/.terraform.d/plugins/registry.terraform.io/last9/last9/1.0.0/linux_amd64/`
-- Windows: `%APPDATA%\terraform.d\plugins\registry.terraform.io\last9\last9\1.0.0\windows_amd64\`
+- Linux/Mac: `~/.terraform.d/plugins/registry.terraform.io/last9/last9/0.2.1/linux_amd64/`
+- Windows: `%APPDATA%\terraform.d\plugins\registry.terraform.io\last9\last9\0.2.1\windows_amd64\`
 
 ## Configuration
 
