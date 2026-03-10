@@ -292,6 +292,32 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	return resp, nil
 }
 
+// decodeResponse reads and decodes the response body with debug logging support.
+// It reads the entire body for debugging, logs it if TF_LOG is set, and then unmarshals it.
+func (c *Client) decodeResponse(resp *http.Response, result interface{}) error {
+	if result == nil {
+		return nil
+	}
+
+	// Read the response body for debugging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Debug logging when TF_LOG is set
+	if os.Getenv("TF_LOG") != "" {
+		log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+	}
+
+	// Decode the response
+	if err := json.Unmarshal(bodyBytes, result); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return nil
+}
+
 func (c *Client) Get(path string, result interface{}) error {
 	resp, err := c.doRequest("GET", path, nil)
 	if err != nil {
@@ -299,7 +325,7 @@ func (c *Client) Get(path string, result interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	return json.NewDecoder(resp.Body).Decode(result)
+	return c.decodeResponse(resp, result)
 }
 
 func (c *Client) Post(path string, body interface{}, result interface{}) error {
@@ -309,10 +335,7 @@ func (c *Client) Post(path string, body interface{}, result interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
-	}
-	return nil
+	return c.decodeResponse(resp, result)
 }
 
 func (c *Client) Put(path string, body interface{}, result interface{}) error {
@@ -322,10 +345,7 @@ func (c *Client) Put(path string, body interface{}, result interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
-	}
-	return nil
+	return c.decodeResponse(resp, result)
 }
 
 func (c *Client) Patch(path string, body interface{}, result interface{}) error {
@@ -335,10 +355,7 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 	}
 	defer resp.Body.Close()
 
-	if result != nil {
-		return json.NewDecoder(resp.Body).Decode(result)
-	}
-	return nil
+	return c.decodeResponse(resp, result)
 }
 
 func (c *Client) Delete(path string) error {
