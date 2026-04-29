@@ -51,7 +51,7 @@ func resourceRemappingRule() *schema.Resource {
 			"target_attributes": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Target attribute to map to",
+				Description: "Target attribute: 'log_attributes' or 'resource_attributes' for logs_extract; 'service', 'severity', or 'resource_deployment.environment' for logs_map; 'service' for traces_map",
 			},
 			// logs_extract only
 			"extract_type": {
@@ -133,6 +133,10 @@ func validateRemappingRule(ctx context.Context, d *schema.ResourceDiff, m interf
 		if extractType == "" {
 			return fmt.Errorf("extract_type is required for logs_extract type")
 		}
+		target := d.Get("target_attributes").(string)
+		if target != "" && target != "log_attributes" && target != "resource_attributes" {
+			return fmt.Errorf("target_attributes must be 'log_attributes' or 'resource_attributes' for logs_extract type")
+		}
 	case "logs_map", "traces_map":
 		if extractType != "" {
 			return fmt.Errorf("extract_type is only valid for logs_extract type")
@@ -145,8 +149,8 @@ func validateRemappingRule(ctx context.Context, d *schema.ResourceDiff, m interf
 	if ruleType == "logs_map" {
 		target := d.Get("target_attributes").(string)
 		validTargets := map[string]bool{
-			"service":                       true,
-			"severity":                      true,
+			"service":                         true,
+			"severity":                        true,
 			"resource_deployment.environment": true,
 		}
 		if target != "" && !validTargets[target] {
