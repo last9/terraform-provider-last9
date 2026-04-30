@@ -1185,3 +1185,126 @@ func (c *Client) UpdateKPI(entityID, kpiID string, req *KPIUpdateRequest) (*KPI,
 func (c *Client) DeleteKPI(entityID, kpiID string) error {
 	return c.Delete(fmt.Sprintf("/entities/%s/kpis/%s", entityID, kpiID))
 }
+
+// Remapping Rule types
+
+type RemappingLogsExtractPrecondition struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Operator string `json:"operator"` // equals, not_equals, like
+}
+
+type RemappingLogsExtractProperties struct {
+	Type             *string                             `json:"type"`
+	Preconditions    []*RemappingLogsExtractPrecondition `json:"preconditions,omitempty"`
+	RemapKeys        []string                            `json:"remap_keys"`
+	TargetAttributes string                              `json:"target_attribute"`
+	Action           *string                             `json:"action"`
+	Prefix           *string                             `json:"prefix,omitempty"`
+}
+
+type RemappingLogsExtractRequest struct {
+	Name       string                          `json:"name"`
+	Properties RemappingLogsExtractProperties  `json:"properties"`
+}
+
+type RemappingLogsExtractResponse struct {
+	ID         string                          `json:"id"`
+	Name       string                          `json:"name"`
+	Properties RemappingLogsExtractProperties  `json:"properties"`
+	CreatedAt  int64                           `json:"created_at"`
+	CreatedBy  string                          `json:"created_by"`
+	UpdatedAt  *int64                          `json:"updated_at,omitempty"`
+	Status     string                          `json:"status"`
+}
+
+type RemappingMapProperties struct {
+	RemapKeys        []string `json:"remap_keys"`
+	TargetAttributes string   `json:"target_attribute"`
+}
+
+type RemappingLogsMapRequest struct {
+	Name       string                 `json:"name"`
+	Properties RemappingMapProperties `json:"properties"`
+}
+
+type RemappingLogsMapResponse struct {
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	Properties RemappingMapProperties `json:"properties"`
+	CreatedAt  int64                  `json:"created_at"`
+	CreatedBy  string                 `json:"created_by"`
+	UpdatedAt  *int64                 `json:"updated_at,omitempty"`
+	Status     string                 `json:"status"`
+}
+
+type RemappingTracesMapRequest = RemappingLogsMapRequest
+type RemappingTracesMapResponse = RemappingLogsMapResponse
+
+// Remapping Rule methods
+
+func (c *Client) CreateRemappingLogsExtract(region string, req *RemappingLogsExtractRequest) (*RemappingLogsExtractResponse, error) {
+	var result RemappingLogsExtractResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/remapping/logs_extract?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetRemappingLogsExtract(id, region string) (*RemappingLogsExtractResponse, error) {
+	var result RemappingLogsExtractResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/remapping/logs_extract/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateRemappingLogsExtract(id, region string, req *RemappingLogsExtractRequest) (*RemappingLogsExtractResponse, error) {
+	var result RemappingLogsExtractResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/remapping/logs_extract/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteRemappingLogsExtract(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/remapping/logs_extract/%s?region=%s", id, region))
+}
+
+func (c *Client) CreateRemappingLogsMap(region string, req *RemappingLogsMapRequest) (*RemappingLogsMapResponse, error) {
+	var result RemappingLogsMapResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/remapping/logs_map?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetRemappingLogsMap(id, region string) (*RemappingLogsMapResponse, error) {
+	var result RemappingLogsMapResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/remapping/logs_map/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateRemappingLogsMap(id, region string, req *RemappingLogsMapRequest) (*RemappingLogsMapResponse, error) {
+	var result RemappingLogsMapResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/remapping/logs_map/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteRemappingLogsMap(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/remapping/logs_map/%s?region=%s", id, region))
+}
+
+func (c *Client) CreateRemappingTracesMap(region string, req *RemappingTracesMapRequest) (*RemappingTracesMapResponse, error) {
+	var result RemappingTracesMapResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/remapping/traces_map?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetRemappingTracesMap(id, region string) (*RemappingTracesMapResponse, error) {
+	var result RemappingTracesMapResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/remapping/traces_map/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateRemappingTracesMap(id, region string, req *RemappingTracesMapRequest) (*RemappingTracesMapResponse, error) {
+	var result RemappingTracesMapResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/remapping/traces_map/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteRemappingTracesMap(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/remapping/traces_map/%s?region=%s", id, region))
+}
