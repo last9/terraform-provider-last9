@@ -64,6 +64,7 @@ func New() *schema.Provider {
 			"last9_scheduled_search_alert": resourceScheduledSearchAlert(),
 			"last9_notification_channel":   resourceNotificationChannel(),
 			"last9_remapping_rule":         resourceRemappingRule(),
+			"last9_dashboard":              resourceDashboard(),
 			// Note: notification_channel_attachment is not registered because the API
 			// doesn't support reading child channels after creation. Attachments should
 			// be managed via the entity's notification_channels field instead.

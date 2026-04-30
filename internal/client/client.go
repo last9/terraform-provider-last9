@@ -1308,3 +1308,140 @@ func (c *Client) UpdateRemappingTracesMap(id, region string, req *RemappingTrace
 func (c *Client) DeleteRemappingTracesMap(id, region string) error {
 	return c.Delete(fmt.Sprintf("/otel_settings/remapping/traces_map/%s?region=%s", id, region))
 }
+
+// Dashboard types and methods
+
+type Dashboard struct {
+	Panels    []*DashboardPanel    `json:"panels"`
+	Variables []*DashboardVariable `json:"variables"`
+	Time      *DashboardTime       `json:"time,omitempty"`
+	ID        string               `json:"id,omitempty"`
+	Name      string               `json:"name"`
+	CreatedBy string               `json:"created_by,omitempty"`
+	CreatedAt int64                `json:"created_at,omitempty"`
+	UpdatedAt int64                `json:"updated_at,omitempty"`
+	Readonly  bool                 `json:"readonly,omitempty"`
+}
+
+type DashboardTime struct {
+	From         *int64 `json:"from,omitempty"`
+	To           *int64 `json:"to,omitempty"`
+	RelativeTime *int64 `json:"relative_time,omitempty"`
+}
+
+type DashboardPanel struct {
+	Visualization    *DashboardPanelVisualization  `json:"visualization"`
+	PopulatedQueries []*DashboardPanelQueryDetails `json:"queries"`
+	Layout           map[string]any                `json:"layout"`
+	Version          int                           `json:"version,omitempty"`
+	Name             string                        `json:"name"`
+	DatasourceID     string                        `json:"datasource_id"`
+	Telemetry        string                        `json:"telemetry,omitempty"`
+	ID               string                        `json:"id,omitempty"`
+	Unit             string                        `json:"unit,omitempty"`
+	CreatedAt        int64                         `json:"created_at,omitempty"`
+	UpdatedAt        int64                         `json:"updated_at,omitempty"`
+}
+
+type DashboardPanelVisualization struct {
+	Type                string                       `json:"type"`
+	FullWidth           bool                         `json:"full_width"`
+	TableConfig         *DashboardTableConfig        `json:"table_config,omitempty"`
+	TimeseriesConfig    *DashboardTimeseriesConfig   `json:"timeseries_config,omitempty"`
+	BarConfig           *DashboardBarConfig          `json:"bar_config,omitempty"`
+	StatConfig          *DashboardStatConfig         `json:"stat_config,omitempty"`
+}
+
+type DashboardTableConfig struct {
+	ColumnConfig     []map[string]any         `json:"columnConfig"`
+	Density          string                   `json:"density,omitempty"`
+	ShowColumnFilter bool                     `json:"showColumnFilter"`
+	ShowSummary      bool                     `json:"showSummary"`
+	SummaryType      string                   `json:"summaryType,omitempty"`
+	Thresholds       []DashboardStatThreshold `json:"thresholds"`
+	Transpose        bool                     `json:"transpose"`
+}
+
+type DashboardTimeseriesConfig struct {
+	DisplayType string `json:"display_type"`
+}
+
+type DashboardBarConfig struct {
+	Orientation string `json:"orientation"`
+	Stacked     *bool  `json:"stacked,omitempty"`
+}
+
+type DashboardStatConfig struct {
+	Thresholds []DashboardStatThreshold `json:"thresholds,omitempty"`
+}
+
+type DashboardStatThreshold struct {
+	Value float64 `json:"value"`
+	Color string  `json:"color"`
+}
+
+type DashboardPanelQueryDetails struct {
+	Expr            string                `json:"expr,omitempty"`
+	Unit            string                `json:"unit,omitempty"`
+	Type            string                `json:"type"`
+	Name            string                `json:"name"`
+	Telemetry       string                `json:"telemetry,omitempty"`
+	QueryType       string                `json:"query_type,omitempty"`
+	Legend          DashboardPanelLegend  `json:"legend"`
+	LegendPlacement string                `json:"legend_placement,omitempty"`
+}
+
+type DashboardPanelLegend struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type DashboardVariable struct {
+	Values        []interface{} `json:"values"`
+	Matches       []string      `json:"matches,omitempty"`
+	DisplayName   string        `json:"display_name"`
+	Target        string        `json:"target"`
+	Type          string        `json:"type"`
+	Source        string        `json:"source,omitempty"`
+	Multiple      bool          `json:"multiple"`
+	Internal      bool          `json:"internal"`
+	CurrentValues []any         `json:"current_values"`
+}
+
+type DashboardMetadata struct {
+	Category string   `json:"_category"`
+	Type     string   `json:"_type"`
+	Tags     []string `json:"tags"`
+}
+
+type DashboardRequest struct {
+	Dashboard *Dashboard         `json:"dashboard"`
+	Metadata  *DashboardMetadata `json:"metadata"`
+}
+
+type DashboardResponse struct {
+	Dashboard *Dashboard         `json:"dashboard"`
+	Metadata  *DashboardMetadata `json:"metadata"`
+}
+
+func (c *Client) CreateDashboard(req *DashboardRequest) (*DashboardResponse, error) {
+	var result DashboardResponse
+	err := c.Post("/dashboards/", req, &result)
+	return &result, err
+}
+
+func (c *Client) GetDashboard(id, region string) (*DashboardResponse, error) {
+	var result DashboardResponse
+	err := c.Get(fmt.Sprintf("/dashboards/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateDashboard(id string, req *DashboardRequest) (*DashboardResponse, error) {
+	var result DashboardResponse
+	err := c.Put(fmt.Sprintf("/dashboards/%s", id), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteDashboard(id string) error {
+	return c.Delete(fmt.Sprintf("/dashboards/%s", id))
+}
