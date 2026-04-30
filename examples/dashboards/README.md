@@ -79,6 +79,13 @@ The composite import ID is `region:dashboard_id` — region is required because 
 - Panel `id` is `Computed` — set by the API, round-tripped on update so panel-level URLs remain stable.
 - `legend` is flattened: `legend_type`, `legend_value`, `legend_placement` instead of a nested block. `legend_sort_field` and `legend_sort_direction` are also flat.
 - `expr` is an opaque string. For `query_type = "promql"` it's PromQL; for `log_json`/`trace_json` it's a serialized JSON pipeline (filter → aggregate stages).
+- `region` is the query-time scope used to look up active integrations for query rendering. It's not stored with the dashboard, so changing it doesn't recreate the resource — Terraform just refreshes against the new region next plan.
+- Time range is exposed as either `relative_time` (minutes) or `absolute_from` + `absolute_to` (Unix millis). The two are mutually exclusive; absolute requires both bounds.
+- `variable.current_values` is `Optional + Computed`. Set an initial selection in HCL; subsequent UI changes won't drift back to your default.
+
+### Panel reorder caveat
+
+Panels are matched by index across reads. If you reorder `panel { ... }` blocks in HCL, panel UUIDs swap with their neighbors — the panel at index 0 keeps its UUID, gains panel 2's content. External references to panel UUIDs (embed URLs, drill-down links) will then point at the wrong panel. If you need to reorder panels visually, change the `layout.y` coordinate instead of moving the HCL block.
 
 ### Opaque blob fields
 

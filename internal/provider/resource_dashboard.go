@@ -61,8 +61,7 @@ func resourceDashboard() *schema.Resource {
 			"region": {
 				Type:        schema.TypeString,
 				Required:    true,
-				ForceNew:    true,
-				Description: "Region for the dashboard (used for GET API call)",
+				Description: "Region used to look up active integrations for query rendering. Not stored with dashboard; safe to change without recreate.",
 			},
 			"name": {
 				Type:        schema.TypeString,
@@ -72,7 +71,20 @@ func resourceDashboard() *schema.Resource {
 			"relative_time": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Description: "Relative time window in minutes (e.g., 60 = last 1 hour)",
+				Computed:    true,
+				Description: "Relative time window in minutes (e.g., 60 = last 1 hour). Mutually exclusive with absolute_from/absolute_to.",
+			},
+			"absolute_from": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "Absolute time range start (Unix millis). Must be set with absolute_to. Mutually exclusive with relative_time.",
+			},
+			"absolute_to": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "Absolute time range end (Unix millis). Must be set with absolute_from. Mutually exclusive with relative_time.",
 			},
 			"metadata": {
 				Type:     schema.TypeList,
@@ -123,9 +135,11 @@ func resourceDashboard() *schema.Resource {
 						"multiple": {Type: schema.TypeBool, Optional: true, Default: false},
 						"internal": {Type: schema.TypeBool, Optional: true, Default: false},
 						"current_values": {
-							Type:     schema.TypeList,
-							Optional: true,
-							Elem:     &schema.Schema{Type: schema.TypeString},
+							Type:        schema.TypeList,
+							Optional:    true,
+							Computed:    true,
+							Elem:        &schema.Schema{Type: schema.TypeString},
+							Description: "Selected variable values. Initial value honored on create; UI selections won't drift after.",
 						},
 						"values": {
 							Type:        schema.TypeList,
@@ -373,6 +387,16 @@ func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{
 		}
 	}
 
+	rel := d.Get("relative_time").(int)
+	from := d.Get("absolute_from").(int)
+	to := d.Get("absolute_to").(int)
+	if rel > 0 && (from > 0 || to > 0) {
+		return fmt.Errorf("relative_time cannot be combined with absolute_from/absolute_to")
+	}
+	if (from > 0) != (to > 0) {
+		return fmt.Errorf("absolute_from and absolute_to must be set together")
+	}
+
 	return nil
 }
 
@@ -415,8 +439,16 @@ func resourceDashboardRead(ctx context.Context, d *schema.ResourceData, m interf
 	d.Set("created_by", dash.CreatedBy)
 	d.Set("readonly", dash.Readonly)
 
-	if dash.Time != nil && dash.Time.RelativeTime != nil {
-		d.Set("relative_time", *dash.Time.RelativeTime)
+	if dash.Time != nil {
+		if dash.Time.RelativeTime != nil {
+			d.Set("relative_time", *dash.Time.RelativeTime)
+		}
+		if dash.Time.From != nil {
+			d.Set("absolute_from", *dash.Time.From)
+		}
+		if dash.Time.To != nil {
+			d.Set("absolute_to", *dash.Time.To)
+		}
 	}
 
 	d.Set("panel", flattenPanels(dash.Panels))
@@ -467,9 +499,13 @@ func buildDashboardRequest(d *schema.ResourceData) *client.DashboardRequest {
 		Panels:    expandPanels(d.Get("panel").([]interface{})),
 		Variables: expandVariables(d.Get("variable").([]interface{})),
 	}
-	if v, ok := d.GetOk("relative_time"); ok {
+	if v, ok := d.GetOk("relative_time"); ok && v.(int) > 0 {
 		rt := int64(v.(int))
 		dash.Time = &client.DashboardTime{RelativeTime: &rt}
+	} else if from, _ := d.GetOk("absolute_from"); from != nil && from.(int) > 0 {
+		f := int64(from.(int))
+		t := int64(d.Get("absolute_to").(int))
+		dash.Time = &client.DashboardTime{From: &f, To: &t}
 	}
 
 	req := &client.DashboardRequest{Dashboard: dash}

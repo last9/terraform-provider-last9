@@ -445,6 +445,39 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 	}
 }
 
+func TestDashboard_BuildRequest_SetsAbsoluteTime(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region":        "ap-south-1",
+		"name":          "test",
+		"absolute_from": 1700000000000,
+		"absolute_to":   1700003600000,
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "p",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{map[string]interface{}{"name": "A", "expr": "1", "telemetry": "metrics", "query_type": "promql"}},
+			},
+		},
+	})
+
+	req := buildDashboardRequest(d)
+	if req.Dashboard.Time == nil {
+		t.Fatal("time not set")
+	}
+	if req.Dashboard.Time.From == nil || *req.Dashboard.Time.From != 1700000000000 {
+		t.Errorf("from wrong: %v", req.Dashboard.Time.From)
+	}
+	if req.Dashboard.Time.To == nil || *req.Dashboard.Time.To != 1700003600000 {
+		t.Errorf("to wrong: %v", req.Dashboard.Time.To)
+	}
+	if req.Dashboard.Time.RelativeTime != nil {
+		t.Errorf("relative_time should be nil when absolute set, got %v", *req.Dashboard.Time.RelativeTime)
+	}
+}
+
 func TestDashboard_BuildRequest_SetsRelativeTime(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
 		"region":        "ap-south-1",
