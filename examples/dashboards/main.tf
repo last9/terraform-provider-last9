@@ -196,7 +196,7 @@ resource "last9_dashboard" "aws_cost_explorer" {
 # and traces/logs/metrics combined.
 resource "last9_dashboard" "mixed_telemetry" {
   region        = var.region
-  name          = "TF Example - Mixed Telemetry UPDATED"
+  name          = "TF Example - Mixed Telemetry"
   relative_time = 60 # last 1 hour
 
   metadata {
@@ -287,12 +287,15 @@ resource "last9_dashboard" "mixed_telemetry" {
     visualization {
       type = "table"
 
-      table_config {
-        density            = "compact"
-        show_column_filter = true
-        show_summary       = false
-        transpose          = false
-      }
+      # table_config is opaque JSON. Backend stores as untyped blob.
+      # Use jsonencode so the HCL stays readable. Any field set in the UI
+      # (column widths, thresholds, etc.) round-trips verbatim.
+      table_config_json = jsonencode({
+        density          = "compact"
+        showColumnFilter = true
+        showSummary      = false
+        transpose        = false
+      })
     }
 
     query {

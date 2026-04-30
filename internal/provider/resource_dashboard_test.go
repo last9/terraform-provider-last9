@@ -348,6 +348,103 @@ func TestDashboard_FlattenLayout_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestDashboard_TableConfigJSON_OpaqueRoundTrip(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "tbl",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type":              "table",
+						"table_config_json": `{"density":"compact","columnConfig":[{"key":"svc","width":200}],"thresholds":[{"value":100,"color":"red"}]}`,
+					},
+				},
+				"query": []interface{}{
+					map[string]interface{}{"name": "A", "expr": "1", "telemetry": "metrics", "query_type": "promql"},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	if panels[0].Visualization.TableConfig == nil {
+		t.Fatal("table_config not parsed")
+	}
+	blob := panels[0].Visualization.TableConfig.(map[string]interface{})
+	if blob["density"] != "compact" {
+		t.Errorf("density mismatch: %v", blob["density"])
+	}
+	cc := blob["columnConfig"].([]interface{})
+	if len(cc) != 1 {
+		t.Errorf("columnConfig not preserved: %v", cc)
+	}
+	first := cc[0].(map[string]interface{})
+	if first["key"] != "svc" {
+		t.Errorf("columnConfig.key wrong: %v", first)
+	}
+}
+
+func TestDashboard_LegendSortAndMatrix_RoundTrip(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "p",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{
+						"name":                  "A",
+						"expr":                  "1",
+						"telemetry":             "metrics",
+						"query_type":            "promql",
+						"legend_sort_field":     "value",
+						"legend_sort_direction": "desc",
+						"matrix_json":           `{"transform":"transpose"}`,
+					},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	q := panels[0].PopulatedQueries[0]
+	if q.LegendSort == nil || q.LegendSort.Field != "value" || q.LegendSort.Direction != "desc" {
+		t.Errorf("legend_sort wrong: %+v", q.LegendSort)
+	}
+	if q.Matrix == nil {
+		t.Fatal("matrix not parsed")
+	}
+	m := q.Matrix.(map[string]interface{})
+	if m["transform"] != "transpose" {
+		t.Errorf("matrix transform wrong: %v", m)
+	}
+}
+
+func TestDashboard_JSONStringsEqual(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{`{"a":1,"b":2}`, `{"b":2,"a":1}`, true},
+		{`{"a":1}`, `{"a":2}`, false},
+		{`{}`, `{}`, true},
+		{"", "", true},
+		{`{"a":1}`, `not json`, false},
+	}
+	for _, c := range cases {
+		if got := jsonStringsEqual(c.a, c.b); got != c.want {
+			t.Errorf("jsonStringsEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestDashboard_BuildRequest_SetsRelativeTime(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
 		"region":        "ap-south-1",

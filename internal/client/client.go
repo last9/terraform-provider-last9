@@ -1344,22 +1344,12 @@ type DashboardPanel struct {
 }
 
 type DashboardPanelVisualization struct {
-	Type                string                       `json:"type"`
-	FullWidth           bool                         `json:"full_width"`
-	TableConfig         *DashboardTableConfig        `json:"table_config,omitempty"`
-	TimeseriesConfig    *DashboardTimeseriesConfig   `json:"timeseries_config,omitempty"`
-	BarConfig           *DashboardBarConfig          `json:"bar_config,omitempty"`
-	StatConfig          *DashboardStatConfig         `json:"stat_config,omitempty"`
-}
-
-type DashboardTableConfig struct {
-	ColumnConfig     []map[string]any         `json:"columnConfig"`
-	Density          string                   `json:"density,omitempty"`
-	ShowColumnFilter bool                     `json:"showColumnFilter"`
-	ShowSummary      bool                     `json:"showSummary"`
-	SummaryType      string                   `json:"summaryType,omitempty"`
-	Thresholds       []DashboardStatThreshold `json:"thresholds"`
-	Transpose        bool                     `json:"transpose"`
+	Type             string                     `json:"type"`
+	FullWidth        bool                       `json:"full_width"`
+	TableConfig      interface{}                `json:"table_config,omitempty"`
+	TimeseriesConfig *DashboardTimeseriesConfig `json:"timeseries_config,omitempty"`
+	BarConfig        *DashboardBarConfig        `json:"bar_config,omitempty"`
+	StatConfig       *DashboardStatConfig       `json:"stat_config,omitempty"`
 }
 
 type DashboardTimeseriesConfig struct {
@@ -1381,19 +1371,26 @@ type DashboardStatThreshold struct {
 }
 
 type DashboardPanelQueryDetails struct {
-	Expr            string                `json:"expr,omitempty"`
-	Unit            string                `json:"unit,omitempty"`
-	Type            string                `json:"type"`
-	Name            string                `json:"name"`
-	Telemetry       string                `json:"telemetry,omitempty"`
-	QueryType       string                `json:"query_type,omitempty"`
-	Legend          DashboardPanelLegend  `json:"legend"`
-	LegendPlacement string                `json:"legend_placement,omitempty"`
+	Expr            string                    `json:"expr,omitempty"`
+	Unit            string                    `json:"unit,omitempty"`
+	Type            string                    `json:"type"`
+	Name            string                    `json:"name"`
+	Telemetry       string                    `json:"telemetry,omitempty"`
+	QueryType       string                    `json:"query_type,omitempty"`
+	Legend          DashboardPanelLegend      `json:"legend"`
+	LegendPlacement string                    `json:"legend_placement,omitempty"`
+	LegendSort      *DashboardPanelLegendSort `json:"legend_sort,omitempty"`
+	Matrix          interface{}               `json:"matrix,omitempty"`
 }
 
 type DashboardPanelLegend struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
+}
+
+type DashboardPanelLegendSort struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction"`
 }
 
 type DashboardVariable struct {

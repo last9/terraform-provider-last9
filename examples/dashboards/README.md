@@ -77,5 +77,14 @@ The composite import ID is `region:dashboard_id` — region is required because 
 
 - `panel` is a `TypeList` (ordered) — section dividers and panels interleave at the position you write them in.
 - Panel `id` is `Computed` — set by the API, round-tripped on update so panel-level URLs remain stable.
-- `legend` is flattened: `legend_type`, `legend_value`, `legend_placement` instead of a nested block.
+- `legend` is flattened: `legend_type`, `legend_value`, `legend_placement` instead of a nested block. `legend_sort_field` and `legend_sort_direction` are also flat.
 - `expr` is an opaque string. For `query_type = "promql"` it's PromQL; for `log_json`/`trace_json` it's a serialized JSON pipeline (filter → aggregate stages).
+
+### Opaque blob fields
+
+The Last9 API stores some fields as untyped JSON blobs. To prevent silent data loss when users edit these in the UI, we expose them as opaque JSON strings rather than typed blocks:
+
+- `visualization.table_config_json` — table panel config (column widths, thresholds, density, etc.)
+- `query.matrix_json` — query result transformation rules
+
+Use `jsonencode({...})` so the HCL stays readable. Whatever you put here round-trips verbatim through the API. If you don't manage these in HCL, Terraform won't fight UI edits — but won't restore them either.

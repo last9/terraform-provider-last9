@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -10,6 +12,25 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+func jsonStringsEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	var av, bv interface{}
+	if err := json.Unmarshal([]byte(a), &av); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(b), &bv); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
+}
 
 var (
 	supportedVisualizationTypes = []string{"timeseries", "stat", "bar", "table", "section"}
@@ -209,18 +230,13 @@ func resourceDashboard() *schema.Resource {
 											},
 										},
 									},
-									"table_config": {
-										Type:     schema.TypeList,
-										Optional: true,
-										MaxItems: 1,
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"density":            {Type: schema.TypeString, Optional: true},
-												"show_column_filter": {Type: schema.TypeBool, Optional: true, Default: false},
-												"show_summary":       {Type: schema.TypeBool, Optional: true, Default: false},
-												"summary_type":       {Type: schema.TypeString, Optional: true},
-												"transpose":          {Type: schema.TypeBool, Optional: true, Default: false},
-											},
+									"table_config_json": {
+										Type:        schema.TypeString,
+										Optional:    true,
+										Computed:    true,
+										Description: "Raw table_config JSON. Server treats this as opaque blob (columnConfig, density, thresholds, etc). Use jsonencode({...}).",
+										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+											return jsonStringsEqual(old, new)
 										},
 									},
 								},
@@ -257,6 +273,27 @@ func resourceDashboard() *schema.Resource {
 										Optional:     true,
 										Default:      "bottom",
 										ValidateFunc: validation.StringInSlice(supportedLegendPlacements, false),
+									},
+									"legend_sort_field": {
+										Type:        schema.TypeString,
+										Optional:    true,
+										Computed:    true,
+										Description: "Field to sort legend entries by",
+									},
+									"legend_sort_direction": {
+										Type:         schema.TypeString,
+										Optional:     true,
+										Computed:     true,
+										ValidateFunc: validation.StringInSlice([]string{"asc", "desc", ""}, false),
+									},
+									"matrix_json": {
+										Type:        schema.TypeString,
+										Optional:    true,
+										Computed:    true,
+										Description: "Raw matrix JSON for query result transformation. Opaque blob.",
+										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+											return jsonStringsEqual(old, new)
+										},
 									},
 								},
 							},
@@ -498,16 +535,10 @@ func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisuali
 			Thresholds: expandStatThresholds(c["threshold"].([]interface{})),
 		}
 	}
-	if l := m["table_config"].([]interface{}); len(l) > 0 {
-		c := l[0].(map[string]interface{})
-		viz.TableConfig = &client.DashboardTableConfig{
-			ColumnConfig:     []map[string]any{},
-			Density:          c["density"].(string),
-			ShowColumnFilter: c["show_column_filter"].(bool),
-			ShowSummary:      c["show_summary"].(bool),
-			SummaryType:      c["summary_type"].(string),
-			Thresholds:       []client.DashboardStatThreshold{},
-			Transpose:        c["transpose"].(bool),
+	if s := strings.TrimSpace(m["table_config_json"].(string)); s != "" {
+		var blob interface{}
+		if err := json.Unmarshal([]byte(s), &blob); err == nil {
+			viz.TableConfig = blob
 		}
 	}
 	return viz
@@ -529,7 +560,7 @@ func expandQueries(input []interface{}) []*client.DashboardPanelQueryDetails {
 	out := make([]*client.DashboardPanelQueryDetails, 0, len(input))
 	for _, q := range input {
 		qm := q.(map[string]interface{})
-		out = append(out, &client.DashboardPanelQueryDetails{
+		qd := &client.DashboardPanelQueryDetails{
 			Name:            qm["name"].(string),
 			Expr:            qm["expr"].(string),
 			Type:            qm["type"].(string),
@@ -541,7 +572,19 @@ func expandQueries(input []interface{}) []*client.DashboardPanelQueryDetails {
 				Type:  qm["legend_type"].(string),
 				Value: qm["legend_value"].(string),
 			},
-		})
+		}
+		sortField, _ := qm["legend_sort_field"].(string)
+		sortDir, _ := qm["legend_sort_direction"].(string)
+		if sortField != "" || sortDir != "" {
+			qd.LegendSort = &client.DashboardPanelLegendSort{Field: sortField, Direction: sortDir}
+		}
+		if mj, _ := qm["matrix_json"].(string); strings.TrimSpace(mj) != "" {
+			var blob interface{}
+			if err := json.Unmarshal([]byte(mj), &blob); err == nil {
+				qd.Matrix = blob
+			}
+		}
+		out = append(out, qd)
 	}
 	return out
 }
@@ -673,14 +716,8 @@ func flattenVisualization(viz *client.DashboardPanelVisualization) []interface{}
 		m["stat_config"] = []interface{}{map[string]interface{}{"threshold": thresholds}}
 	}
 	if viz.TableConfig != nil {
-		m["table_config"] = []interface{}{
-			map[string]interface{}{
-				"density":            viz.TableConfig.Density,
-				"show_column_filter": viz.TableConfig.ShowColumnFilter,
-				"show_summary":       viz.TableConfig.ShowSummary,
-				"summary_type":       viz.TableConfig.SummaryType,
-				"transpose":          viz.TableConfig.Transpose,
-			},
+		if b, err := json.Marshal(viz.TableConfig); err == nil {
+			m["table_config_json"] = string(b)
 		}
 	}
 	return []interface{}{m}
@@ -692,7 +729,7 @@ func flattenQueries(queries []*client.DashboardPanelQueryDetails) []interface{} 
 		if q == nil {
 			continue
 		}
-		out = append(out, map[string]interface{}{
+		qm := map[string]interface{}{
 			"name":             q.Name,
 			"expr":             q.Expr,
 			"type":             q.Type,
@@ -702,7 +739,17 @@ func flattenQueries(queries []*client.DashboardPanelQueryDetails) []interface{} 
 			"legend_type":      q.Legend.Type,
 			"legend_value":     q.Legend.Value,
 			"legend_placement": q.LegendPlacement,
-		})
+		}
+		if q.LegendSort != nil {
+			qm["legend_sort_field"] = q.LegendSort.Field
+			qm["legend_sort_direction"] = q.LegendSort.Direction
+		}
+		if q.Matrix != nil {
+			if b, err := json.Marshal(q.Matrix); err == nil {
+				qm["matrix_json"] = string(b)
+			}
+		}
+		out = append(out, qm)
 	}
 	return out
 }
