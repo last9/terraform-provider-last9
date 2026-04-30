@@ -76,7 +76,7 @@ The composite import ID is `region:dashboard_id` — region is required because 
 ## Schema Notes
 
 - `panel` is a `TypeList` (ordered) — section dividers and panels interleave at the position you write them in.
-- Panel `id` is `Computed` — set by the API, round-tripped on update so panel-level URLs remain stable.
+- Panel `id` is `Computed` — set by the API. Round-tripped by HCL position, so editing a panel's name or queries keeps its UUID. **Reordering** HCL `panel { ... }` blocks swaps UUIDs across panels — see Panel reorder caveat below.
 - `legend` is flattened: `legend_type`, `legend_value`, `legend_placement` instead of a nested block. `legend_sort_field` and `legend_sort_direction` are also flat.
 - `expr` is an opaque string. For `query_type = "promql"` it's PromQL; for `log_json`/`trace_json` it's a serialized JSON pipeline (filter → aggregate stages).
 - `region` is the query-time scope used to look up active integrations for query rendering. It's not stored with the dashboard, so changing it doesn't recreate the resource — Terraform just refreshes against the new region next plan.

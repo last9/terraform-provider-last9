@@ -62,8 +62,8 @@ variable "region" {
 }
 
 # Example 1: AWS Cost Explorer-style dashboard
-# Demonstrates: sections, multiple stat panels, bar with bar_config, label variables,
-# relative_time, and metadata.
+# Demonstrates: sections, stat panel with thresholds, bar with bar_config, label
+# variables, relative_time, and metadata.
 resource "last9_dashboard" "aws_cost_explorer" {
   region        = var.region
   name          = "TF Example - AWS Cost Explorer"

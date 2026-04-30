@@ -7,11 +7,29 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+func validateOptionalJSONString(v interface{}, p cty.Path) diag.Diagnostics {
+	s, ok := v.(string)
+	if !ok || strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var blob interface{}
+	if err := json.Unmarshal([]byte(s), &blob); err != nil {
+		return diag.Diagnostics{{
+			Severity:      diag.Error,
+			Summary:       "invalid JSON",
+			Detail:        fmt.Sprintf("expected valid JSON, got error: %v", err),
+			AttributePath: p,
+		}}
+	}
+	return nil
+}
 
 func jsonStringsEqual(a, b string) bool {
 	if a == b {
@@ -139,7 +157,7 @@ func resourceDashboard() *schema.Resource {
 							Optional:    true,
 							Computed:    true,
 							Elem:        &schema.Schema{Type: schema.TypeString},
-							Description: "Selected variable values. Initial value honored on create; UI selections won't drift after.",
+							Description: "Selected variable values. Initial values honored on create. Field is Computed: server-side selections (e.g., made via UI dropdown) are read back into state on every refresh, so plan won't show drift on UI changes — but if you keep a value in HCL, the next apply will revert UI selections to your HCL value. Omit from HCL to let the UI own selection state.",
 						},
 						"values": {
 							Type:        schema.TypeList,
@@ -170,7 +188,12 @@ func resourceDashboard() *schema.Resource {
 							ValidateFunc: validation.StringInSlice(supportedTelemetries, false),
 						},
 						"unit":    {Type: schema.TypeString, Optional: true, Computed: true},
-						"version": {Type: schema.TypeInt, Optional: true, Default: 1},
+						"version": {
+							Type:        schema.TypeInt,
+							Optional:    true,
+							Default:     1,
+							Description: "Panel schema version. Defaults to 1. The API only persists query.telemetry and query.query_type when version >= 1; if you set this to 0, those fields will be silently dropped server-side. Leave as default unless you have a specific reason.",
+						},
 						"layout": {
 							Type:     schema.TypeList,
 							Optional: true,
@@ -181,6 +204,16 @@ func resourceDashboard() *schema.Resource {
 									"y": {Type: schema.TypeInt, Required: true},
 									"w": {Type: schema.TypeInt, Required: true},
 									"h": {Type: schema.TypeInt, Required: true},
+									"extra_json": {
+										Type:        schema.TypeString,
+										Optional:    true,
+										Computed:    true,
+										Description: "Reserved for layout fields the API may add (e.g. minH, static, i). Round-tripped verbatim. Use jsonencode() if you need to set keys beyond x/y/w/h.",
+										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+											return jsonStringsEqual(old, new)
+										},
+										ValidateDiagFunc: validateOptionalJSONString,
+									},
 								},
 							},
 						},
@@ -248,10 +281,11 @@ func resourceDashboard() *schema.Resource {
 										Type:        schema.TypeString,
 										Optional:    true,
 										Computed:    true,
-										Description: "Raw table_config JSON. Server treats this as opaque blob (columnConfig, density, thresholds, etc). Use jsonencode({...}).",
+										Description: "Raw table_config JSON. Server treats this as opaque blob (columnConfig, density, thresholds, etc). Use jsonencode({...}). Invalid JSON fails at plan time.",
 										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
 											return jsonStringsEqual(old, new)
 										},
+										ValidateDiagFunc: validateOptionalJSONString,
 									},
 								},
 							},
@@ -292,22 +326,24 @@ func resourceDashboard() *schema.Resource {
 										Type:        schema.TypeString,
 										Optional:    true,
 										Computed:    true,
-										Description: "Field to sort legend entries by",
+										Description: "Field to sort legend entries by. Pairs with legend_sort_direction.",
 									},
 									"legend_sort_direction": {
 										Type:         schema.TypeString,
 										Optional:     true,
 										Computed:     true,
+										Description:  "Sort direction (asc|desc) for legend entries. Pairs with legend_sort_field.",
 										ValidateFunc: validation.StringInSlice([]string{"asc", "desc", ""}, false),
 									},
 									"matrix_json": {
 										Type:        schema.TypeString,
 										Optional:    true,
 										Computed:    true,
-										Description: "Raw matrix JSON for query result transformation. Opaque blob.",
+										Description: "Raw matrix JSON for query result transformation. Opaque blob. Invalid JSON fails at plan time.",
 										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
 											return jsonStringsEqual(old, new)
 										},
+										ValidateDiagFunc: validateOptionalJSONString,
 									},
 								},
 							},
@@ -325,7 +361,15 @@ func resourceDashboard() *schema.Resource {
 	}
 }
 
+type dashboardGetter interface {
+	Get(key string) interface{}
+}
+
 func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	return validateDashboardData(d)
+}
+
+func validateDashboardData(d dashboardGetter) error {
 	panels := d.Get("panel").([]interface{})
 	for i, p := range panels {
 		pm := p.(map[string]interface{})
@@ -534,12 +578,23 @@ func expandPanels(input []interface{}) []*client.DashboardPanel {
 
 		if layoutList := pm["layout"].([]interface{}); len(layoutList) > 0 {
 			lm := layoutList[0].(map[string]interface{})
-			panel.Layout = map[string]any{
+			layout := map[string]any{
 				"x": lm["x"].(int),
 				"y": lm["y"].(int),
 				"w": lm["w"].(int),
 				"h": lm["h"].(int),
 			}
+			if extra, _ := lm["extra_json"].(string); strings.TrimSpace(extra) != "" {
+				var blob map[string]any
+				if err := json.Unmarshal([]byte(extra), &blob); err == nil {
+					for k, v := range blob {
+						if _, reserved := layout[k]; !reserved {
+							layout[k] = v
+						}
+					}
+				}
+			}
+			panel.Layout = layout
 		}
 
 		panel.PopulatedQueries = expandQueries(pm["query"].([]interface{}))
@@ -659,6 +714,22 @@ func expandMetadata(input []interface{}) *client.DashboardMetadata {
 	}
 }
 
+func coerceToStringSlice(in []interface{}) []string {
+	out := make([]string, 0, len(in))
+	for _, x := range in {
+		if x == nil {
+			continue
+		}
+		switch v := x.(type) {
+		case string:
+			out = append(out, v)
+		default:
+			out = append(out, fmt.Sprint(v))
+		}
+	}
+	return out
+}
+
 func toAnySlice(in []string) []any {
 	out := make([]any, 0, len(in))
 	for _, s := range in {
@@ -693,14 +764,25 @@ func flattenLayout(layout map[string]any) []interface{} {
 	if layout == nil {
 		return []interface{}{}
 	}
-	return []interface{}{
-		map[string]interface{}{
-			"x": toInt(layout["x"]),
-			"y": toInt(layout["y"]),
-			"w": toInt(layout["w"]),
-			"h": toInt(layout["h"]),
-		},
+	out := map[string]interface{}{
+		"x": toInt(layout["x"]),
+		"y": toInt(layout["y"]),
+		"w": toInt(layout["w"]),
+		"h": toInt(layout["h"]),
 	}
+	extra := map[string]any{}
+	for k, v := range layout {
+		if k == "x" || k == "y" || k == "w" || k == "h" {
+			continue
+		}
+		extra[k] = v
+	}
+	if len(extra) > 0 {
+		if b, err := json.Marshal(extra); err == nil {
+			out["extra_json"] = string(b)
+		}
+	}
+	return []interface{}{out}
 }
 
 func toInt(v interface{}) int {
@@ -796,18 +878,8 @@ func flattenVariables(variables []*client.DashboardVariable) []interface{} {
 		if v == nil {
 			continue
 		}
-		values := make([]string, 0, len(v.Values))
-		for _, x := range v.Values {
-			if s, ok := x.(string); ok {
-				values = append(values, s)
-			}
-		}
-		current := make([]string, 0, len(v.CurrentValues))
-		for _, x := range v.CurrentValues {
-			if s, ok := x.(string); ok {
-				current = append(current, s)
-			}
-		}
+		values := coerceToStringSlice(v.Values)
+		current := coerceToStringSlice(v.CurrentValues)
 		out = append(out, map[string]interface{}{
 			"display_name":   v.DisplayName,
 			"target":         v.Target,

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -442,6 +443,170 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 		if got := jsonStringsEqual(c.a, c.b); got != c.want {
 			t.Errorf("jsonStringsEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestDashboard_Validate_TimeXOR(t *testing.T) {
+	cases := []struct {
+		name    string
+		rel     int
+		from    int
+		to      int
+		wantErr string
+	}{
+		{"both_set", 60, 1700000000000, 1700003600000, "cannot be combined"},
+		{"only_from", 0, 1700000000000, 0, "must be set together"},
+		{"only_to", 0, 0, 1700003600000, "must be set together"},
+		{"neither", 0, 0, 0, ""},
+		{"only_relative", 60, 0, 0, ""},
+		{"only_absolute_pair", 0, 1700000000000, 1700003600000, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := map[string]interface{}{
+				"region":        "ap-south-1",
+				"name":          "x",
+				"relative_time": tc.rel,
+				"absolute_from": tc.from,
+				"absolute_to":   tc.to,
+				"panel": []interface{}{
+					map[string]interface{}{
+						"name":   "p",
+						"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+						"visualization": []interface{}{
+							map[string]interface{}{"type": "stat"},
+						},
+						"query": []interface{}{map[string]interface{}{"name": "A", "expr": "1", "telemetry": "metrics", "query_type": "promql"}},
+					},
+				},
+			}
+			d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, raw)
+			err := validateDashboardData(d)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDashboard_Validate_VersionRequiresTelemetry(t *testing.T) {
+	cases := []struct {
+		name      string
+		version   int
+		telemetry string
+		queryType string
+		wantErr   string
+	}{
+		{"v1_missing_telemetry", 1, "", "promql", "telemetry is required"},
+		{"v1_missing_query_type", 1, "metrics", "", "query_type is required"},
+		{"v1_mismatch", 1, "metrics", "log_ql", "is not valid for telemetry"},
+		{"v1_match", 1, "metrics", "promql", ""},
+		{"v0_unset_ok", 0, "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := map[string]interface{}{
+				"region": "ap-south-1",
+				"name":   "x",
+				"panel": []interface{}{
+					map[string]interface{}{
+						"name":    "p",
+						"version": tc.version,
+						"layout":  []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+						"visualization": []interface{}{
+							map[string]interface{}{"type": "stat"},
+						},
+						"query": []interface{}{
+							map[string]interface{}{
+								"name":       "A",
+								"expr":       "1",
+								"telemetry":  tc.telemetry,
+								"query_type": tc.queryType,
+							},
+						},
+					},
+				},
+			}
+			d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, raw)
+			err := validateDashboardData(d)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDashboard_FlattenVariables_NonStringValuesCoerced(t *testing.T) {
+	vars := []*client.DashboardVariable{
+		{
+			DisplayName:   "Threshold",
+			Target:        "t",
+			Type:          "static",
+			Values:        []interface{}{float64(42), true, "ok"},
+			CurrentValues: []any{float64(1.5)},
+		},
+	}
+	out := flattenVariables(vars)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 var, got %d", len(out))
+	}
+	m := out[0].(map[string]interface{})
+	values := m["values"].([]string)
+	if len(values) != 3 {
+		t.Fatalf("expected 3 values (none dropped), got %d: %v", len(values), values)
+	}
+	if values[0] != "42" || values[1] != "true" || values[2] != "ok" {
+		t.Errorf("coerced values wrong: %v", values)
+	}
+	current := m["current_values"].([]string)
+	if len(current) != 1 || current[0] != "1.5" {
+		t.Errorf("current_values coerce wrong: %v", current)
+	}
+}
+
+func TestDashboard_FlattenLayout_PreservesExtraKeys(t *testing.T) {
+	in := map[string]any{
+		"x":     float64(1),
+		"y":     float64(2),
+		"w":     float64(3),
+		"h":     float64(4),
+		"minH":  float64(2),
+		"i":     "panel-id",
+		"static": true,
+	}
+	out := flattenLayout(in)
+	m := out[0].(map[string]interface{})
+	extra, ok := m["extra_json"].(string)
+	if !ok || extra == "" {
+		t.Fatalf("extra_json not preserved: %v", m)
+	}
+	var blob map[string]interface{}
+	if err := json.Unmarshal([]byte(extra), &blob); err != nil {
+		t.Fatalf("extra_json invalid: %v", err)
+	}
+	if _, ok := blob["minH"]; !ok {
+		t.Error("minH lost")
+	}
+	if _, ok := blob["i"]; !ok {
+		t.Error("i lost")
 	}
 }
 
