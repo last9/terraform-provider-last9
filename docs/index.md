@@ -21,6 +21,8 @@ The Last9 provider enables Terraform to manage [Last9](https://last9.io) resourc
 - **Notification Channels**: Manage alert destinations (Slack, PagerDuty, email, webhooks)
 - **Drop Rules**: Filter and drop logs for cost optimization at Last9 Control Plane
 - **Forward Rules**: Forward logs to external destinations such as S3 bucket
+- **Remapping Rules**: Extract fields from logs and map attributes to standard fields (logs and traces)
+- **Dashboards**: Define custom dashboards with panels, queries, variables, and layout grid
 - **Macros**: PromQL query templates
 
 ## Alerting Lifecycle
