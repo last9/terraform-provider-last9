@@ -5,6 +5,34 @@ All notable changes to the Last9 Terraform Provider will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-06
+
+### Added
+
+#### Resources
+- **last9_dashboard** - Manage Last9 dashboards as code (ENG-1013)
+- **last9_remapping_rule** - Configure OpenTelemetry remapping rules via the `otel_settings` API
+
+## [0.2.2] - 2026-04-17
+
+### Changed
+- Re-release of v0.2.1 (same source commit) to refresh registry artifacts
+
+## [0.2.1] - 2026-03-10
+
+### Added
+- Webhook headers support for `generic_webhook` notification channels (#8)
+- Debug logging and response validation in the HTTP client
+
+### Changed
+- Examples updated to reference the published `last9/last9` provider (v0.2)
+- README version references aligned with the v0.2.1 release (#12)
+- Dependency bump: `github.com/cloudflare/circl` 1.6.1 → 1.6.3 (#10)
+- Dependency bump: `google.golang.org/grpc` to 1.79.3 (#13)
+
+### Documentation
+- Documented `entity_class` requirement for alert groups (#11)
+
 ## [0.2.0] - 2026-01-23
 
 ### Changed

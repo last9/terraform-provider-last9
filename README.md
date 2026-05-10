@@ -1,6 +1,6 @@
 # Terraform Provider for Last9
 
-Manage Last9 alerts, notification channels, log pipelines, and remapping rules as code. Stop clicking through dashboards to configure observability infrastructure.
+Manage Last9 alerts, notification channels, log pipelines, remapping rules, and dashboards as code. Stop clicking through dashboards to configure observability infrastructure.
 
 ## Quick Start
 
@@ -43,6 +43,9 @@ export LAST9_API_BASE_URL=https://app.last9.io
 - `last9_drop_rule` — Drop logs before they're stored (cuts costs)
 - `last9_forward_rule` — Route logs to external destinations
 - `last9_remapping_rule` — Extract fields and map attributes from logs and traces
+
+**Dashboards**
+- `last9_dashboard` — Build dashboards across metrics, logs, and traces
 
 **Data Sources**
 - `last9_entity` — Query existing alert groups
@@ -118,6 +121,34 @@ resource "last9_remapping_rule" "service_name" {
 Valid targets for `logs_map`: `service`, `severity`, `resource_deployment.environment`.  
 Valid target for `traces_map`: `service`.
 
+### Build a dashboard with templated variables
+
+```hcl
+resource "last9_dashboard" "aws_cost" {
+  region        = "ap-south-1"
+  name          = "AWS Cost Explorer"
+  relative_time = 10080 # last 7 days, in minutes
+
+  metadata {
+    category = "custom"
+    type     = "metrics"
+    tags     = ["aws", "cost"]
+  }
+
+  variable {
+    display_name   = "Account"
+    target         = "account"
+    type           = "label"
+    source         = "aws_account_id"
+    matches        = ["aws_cost_unblended_USD{cost_date!=\"\"}"]
+    multiple       = true
+    current_values = [".*"]
+  }
+}
+```
+
+See [examples/dashboards](./examples/dashboards) for full examples covering metric, log, and trace panels.
+
 ### Forward critical logs to an external system
 
 ```hcl
@@ -163,6 +194,9 @@ terraform import last9_remapping_rule.example region:type:id
 
 # Drop rule
 terraform import last9_drop_rule.example region:id
+
+# Dashboard
+terraform import last9_dashboard.example region:dashboard_id
 ```
 
 ## Building from Source
