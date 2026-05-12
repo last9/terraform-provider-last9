@@ -110,10 +110,10 @@ variable "webhook_auth_token" {
   default     = "test-auth-token"
 }
 
-variable "slack_webhook_url" {
-  description = "Slack webhook URL for notification channel test"
+variable "slack_channel_id" {
+  description = "Slack channel ID (e.g. C0123456789) for the Slack App notification channel test. Requires the Last9 Slack App to be installed in the workspace."
   type        = string
-  default     = ""  # Will be generated with unique timestamp
+  default     = ""
 }
 
 variable "pagerduty_integration_key" {

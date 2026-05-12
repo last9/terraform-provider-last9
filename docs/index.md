@@ -81,12 +81,14 @@ resource "last9_entity" "api_alerts" {
   ui_readonly  = true  # Prevent UI edits, manage via Terraform only
 }
 
-# Create a notification channel
+# Create a notification channel (Slack App)
+# Install the Last9 Slack App once from the dashboard, then reference the channel by its Slack channel ID.
 resource "last9_notification_channel" "slack_alerts" {
-  name         = "platform-alerts"
-  type         = "slack"
-  destination  = "https://hooks.slack.com/services/xxx/yyy/zzz"
-  send_resolved = true
+  name           = "platform-alerts"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = "C0123456789" # Slack channel ID
+  send_resolved  = true
 }
 
 # Create an alert in the group

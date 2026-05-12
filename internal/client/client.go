@@ -1074,6 +1074,9 @@ type KPIUpdateRequest struct {
 type NotificationSettingProperty struct {
 	// WebhookHeaders holds custom headers to be sent with webhook requests (only for generic_webhook type)
 	WebhookHeaders map[string]string `json:"webhook_headers,omitempty"`
+	// SlackAppMode marks a Slack channel as delivered via the Slack App (bot token + chat.postMessage)
+	// instead of incoming webhooks. When true, destination must be a Slack channel ID (e.g. C0123456789).
+	SlackAppMode bool `json:"slack_app_mode,omitempty"`
 }
 
 // NotificationChannelRequest represents the request body for creating/updating a notification channel

@@ -33,7 +33,7 @@ provider "last9" {
 locals {
   # Generate unique destinations using environment name (contains timestamp)
   webhook_url           = var.webhook_url != "" ? var.webhook_url : "https://webhook.site/${var.environment}"
-  slack_webhook_url     = var.slack_webhook_url != "" ? var.slack_webhook_url : "https://hooks.slack.com/services/T00000000/B00000000/${var.environment}"
+  slack_channel_id      = var.slack_channel_id != "" ? var.slack_channel_id : "C0000000000"
   pagerduty_key         = var.pagerduty_integration_key != "" ? var.pagerduty_integration_key : "pd-key-${var.environment}"
   alert_email           = var.alert_email != "" ? var.alert_email : "${var.environment}@last9.io"
 }
@@ -194,12 +194,14 @@ resource "last9_notification_channel" "webhook_with_headers" {
   }
 }
 
-# Slack
+# Slack (Slack App mode — Last9 API no longer accepts new webhook Slack channels)
+# Requires the Last9 Slack App to be installed in the target workspace.
 resource "last9_notification_channel" "slack" {
-  name          = "${var.environment}-slack"
-  type          = "slack"
-  destination   = local.slack_webhook_url
-  send_resolved = true
+  name           = "${var.environment}-slack"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = local.slack_channel_id
+  send_resolved  = true
 }
 
 # PagerDuty
