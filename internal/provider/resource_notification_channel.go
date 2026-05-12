@@ -61,6 +61,12 @@ func resourceNotificationChannel() *schema.Resource {
 					Type: schema.TypeString,
 				},
 			},
+			"slack_app_mode": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "When true, deliver via the Last9 Slack App (bot token + chat.postMessage) and treat destination as a Slack channel ID (e.g. C0123456789). When false or unset, destination must be a https://hooks.slack.com/ webhook URL. Mode cannot be changed after the channel is created. Only applicable for slack type. New Slack webhook channels are no longer accepted by the API; new Slack channels must set slack_app_mode = true.",
+			},
 			// Computed fields
 			"global": {
 				Type:        schema.TypeBool,
@@ -88,42 +94,69 @@ func resourceNotificationChannel() *schema.Resource {
 				Description: "Last update timestamp",
 			},
 		},
-		CustomizeDiff: validateWebhookHeaders,
+		CustomizeDiff: validateNotificationChannel,
 	}
 }
 
-// validateWebhookHeaders ensures headers are only set for generic_webhook type
-func validateWebhookHeaders(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+// validateNotificationChannel enforces type-specific destination/option constraints.
+func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
 	channelType := d.Get("type").(string)
 	headers := d.Get("headers").(map[string]interface{})
+	slackAppMode := d.Get("slack_app_mode").(bool)
+	destination := d.Get("destination").(string)
 
 	if len(headers) > 0 && channelType != "generic_webhook" {
 		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
 	}
 
+	if slackAppMode && channelType != "slack" {
+		return fmt.Errorf("slack_app_mode can only be set for slack type, got type: %s", channelType)
+	}
+
+	if channelType == "slack" && destination != "" {
+		if slackAppMode {
+			if strings.HasPrefix(destination, "http") {
+				return fmt.Errorf("slack_app_mode requires a Slack channel ID as destination (e.g. C0123456789), not a webhook URL")
+			}
+		} else {
+			if !strings.HasPrefix(destination, "https://hooks.slack.com/") {
+				return fmt.Errorf("slack webhook destination must be a valid https://hooks.slack.com/ URL; set slack_app_mode = true to use a Slack App channel ID instead")
+			}
+		}
+	}
+
 	return nil
 }
 
-// buildWebhookProperty creates the Property struct if headers are provided for webhook channels
-func buildWebhookProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
+// buildProperty creates the Property struct for channel-specific options.
+// Returns nil when there are no options to send so the API payload stays minimal.
+func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 	channelType := d.Get("type").(string)
-	if channelType != "generic_webhook" {
+
+	prop := &client.NotificationSettingProperty{}
+	hasValue := false
+
+	if channelType == "generic_webhook" {
+		headersRaw := d.Get("headers").(map[string]interface{})
+		if len(headersRaw) > 0 {
+			headers := make(map[string]string, len(headersRaw))
+			for k, v := range headersRaw {
+				headers[k] = v.(string)
+			}
+			prop.WebhookHeaders = headers
+			hasValue = true
+		}
+	}
+
+	if channelType == "slack" && d.Get("slack_app_mode").(bool) {
+		prop.SlackAppMode = true
+		hasValue = true
+	}
+
+	if !hasValue {
 		return nil
 	}
-
-	headersRaw := d.Get("headers").(map[string]interface{})
-	if len(headersRaw) == 0 {
-		return nil
-	}
-
-	headers := make(map[string]string)
-	for k, v := range headersRaw {
-		headers[k] = v.(string)
-	}
-
-	return &client.NotificationSettingProperty{
-		WebhookHeaders: headers,
-	}
+	return prop
 }
 
 func resourceNotificationChannelCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
@@ -134,7 +167,7 @@ func resourceNotificationChannelCreate(ctx context.Context, d *schema.ResourceDa
 		Type:         d.Get("type").(string),
 		Destination:  d.Get("destination").(string),
 		SendResolved: d.Get("send_resolved").(bool),
-		Property:     buildWebhookProperty(d),
+		Property:     buildProperty(d),
 	}
 
 	channel, err := apiClient.CreateNotificationDestination(req)
@@ -192,6 +225,13 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 		}
 	}
 
+	// Extract slack_app_mode flag for slack channels
+	if channel.Type == "slack" && channel.Property != nil {
+		if appMode, ok := channel.Property["slack_app_mode"].(bool); ok {
+			d.Set("slack_app_mode", appMode)
+		}
+	}
+
 	return nil
 }
 
@@ -208,7 +248,7 @@ func resourceNotificationChannelUpdate(ctx context.Context, d *schema.ResourceDa
 		Type:         d.Get("type").(string),
 		Destination:  d.Get("destination").(string),
 		SendResolved: d.Get("send_resolved").(bool),
-		Property:     buildWebhookProperty(d),
+		Property:     buildProperty(d),
 	}
 
 	_, err = apiClient.UpdateNotificationDestination(id, req)

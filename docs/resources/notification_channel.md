@@ -15,20 +15,39 @@ For more information about setting up notification channels, see the [Notificati
 
 | Type | Description | Destination Format |
 |------|-------------|-------------------|
-| `slack` | Slack incoming webhook | Webhook URL |
+| `slack` (Slack App) | Last9 Slack App, `chat.postMessage` via bot token | Slack channel ID (e.g. `C0123456789`) |
+| `slack` (webhook, legacy) | Slack incoming webhook | `https://hooks.slack.com/...` URL |
 | `pagerduty` | PagerDuty Events API v2 | Integration key |
 | `email` | Email notifications | Email address |
 | `generic_webhook` | Custom webhook | Endpoint URL |
 
 ~> **Note** Email channels are not supported for SLO alerts. Use Slack, PagerDuty, or webhooks for SLO alerting.
 
+!> **Important** Creating **new** Slack webhook channels is no longer supported by the Last9 API. New Slack channels must use the Slack App (set `slack_app_mode = true`). Existing webhook channels continue to work and can be updated, but mode cannot be switched after creation. To install the Last9 Slack App and obtain a channel ID, visit **Settings → Notifications → Integrations** in the Last9 dashboard.
+
 ## Example Usage
 
-### Slack Channel
+### Slack Channel (Slack App)
+
+The Slack App delivers messages via `chat.postMessage` using an OAuth-installed bot token. It unlocks interactive messages, in-place message updates, and multi-channel delivery from a single workspace install. Install the Slack App once per Last9 org from the dashboard, then reference the target channel by its Slack channel ID.
 
 ```terraform
 resource "last9_notification_channel" "slack_alerts" {
-  name          = "Platform Alerts Slack"
+  name           = "Platform Alerts Slack"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = "C0123456789" # Slack channel ID
+  send_resolved  = true
+}
+```
+
+### Slack Channel (Webhook, Legacy)
+
+~> **Note** The Last9 API rejects creation of new Slack webhook channels. Use the Slack App example above for new channels. This example is shown only for reference when managing existing webhook channels in state.
+
+```terraform
+resource "last9_notification_channel" "slack_alerts_legacy" {
+  name          = "Platform Alerts Slack (legacy)"
   type          = "slack"
   destination   = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXX"
   send_resolved = true
@@ -85,6 +104,7 @@ resource "last9_notification_channel" "webhook_with_auth" {
 
 - `send_resolved` (Boolean) Whether to send notifications when alerts are resolved. Default: `true`.
 - `headers` (Map of String) Custom HTTP headers to send with webhook requests. Only applicable for `generic_webhook` type. Useful for authentication tokens or custom metadata.
+- `slack_app_mode` (Boolean) Only valid for `type = "slack"`. When `true`, deliver via the Last9 Slack App (`chat.postMessage` via OAuth bot token) and treat `destination` as a Slack channel ID. When `false` or unset, deliver via Slack incoming webhook and treat `destination` as a `https://hooks.slack.com/` URL. **Force-new**: mode cannot be changed after the channel is created. New Slack channels must set this to `true`; the API no longer accepts new webhook Slack channels.
 
 ### Read-Only
 

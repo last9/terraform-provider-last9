@@ -25,6 +25,7 @@ func TestAccNotificationChannel_slack(t *testing.T) {
 					testAccCheckNotificationChannelExists(resourceName),
 					resource.TestCheckResourceAttr(resourceName, "name", "TF Test Slack Channel"),
 					resource.TestCheckResourceAttr(resourceName, "type", "slack"),
+					resource.TestCheckResourceAttr(resourceName, "slack_app_mode", "true"),
 					resource.TestCheckResourceAttr(resourceName, "send_resolved", "true"),
 					resource.TestCheckResourceAttr(resourceName, "global", "true"),
 					resource.TestCheckResourceAttrSet(resourceName, "organization_id"),
@@ -35,6 +36,45 @@ func TestAccNotificationChannel_slack(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"destination"}, // Sensitive field
+			},
+		},
+	})
+}
+
+func TestAccNotificationChannel_slackAppModeRequiresChannelID(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccNotificationChannelConfig_slackAppModeWithWebhookURL(),
+				ExpectError: regexp.MustCompile(`slack_app_mode requires a Slack channel ID`),
+			},
+		},
+	})
+}
+
+func TestAccNotificationChannel_slackWebhookRejectsNonHooksURL(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccNotificationChannelConfig_slackWebhookBadURL(),
+				ExpectError: regexp.MustCompile(`must be a valid https://hooks\.slack\.com/ URL`),
+			},
+		},
+	})
+}
+
+func TestAccNotificationChannel_slackAppModeOnlyForSlack(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccNotificationChannelConfig_slackAppModeOnNonSlack(),
+				ExpectError: regexp.MustCompile(`slack_app_mode can only be set for slack type`),
 			},
 		},
 	})
@@ -250,10 +290,11 @@ func testAccCheckNotificationChannelDestroy(s *terraform.State) error {
 func testAccNotificationChannelConfig_slack() string {
 	return testAccProviderConfig() + `
 resource "last9_notification_channel" "test" {
-  name          = "TF Test Slack Channel"
-  type          = "slack"
-  destination   = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
-  send_resolved = true
+  name           = "TF Test Slack Channel"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = "C0123456789"
+  send_resolved  = true
 }
 `
 }
@@ -261,10 +302,46 @@ resource "last9_notification_channel" "test" {
 func testAccNotificationChannelConfig_slackUpdated() string {
 	return testAccProviderConfig() + `
 resource "last9_notification_channel" "test" {
-  name          = "TF Test Slack Channel Updated"
+  name           = "TF Test Slack Channel Updated"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = "C0123456789"
+  send_resolved  = false
+}
+`
+}
+
+func testAccNotificationChannelConfig_slackAppModeWithWebhookURL() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name           = "TF Test Slack App Bad Destination"
+  type           = "slack"
+  slack_app_mode = true
+  destination    = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+  send_resolved  = true
+}
+`
+}
+
+func testAccNotificationChannelConfig_slackWebhookBadURL() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name          = "TF Test Slack Webhook Bad URL"
   type          = "slack"
-  destination   = "https://hooks.slack.com/services/T00000000/B00000000/YYYYYYYYYYYYYYYYYYYYYYYY"
-  send_resolved = false
+  destination   = "https://example.com/not-slack"
+  send_resolved = true
+}
+`
+}
+
+func testAccNotificationChannelConfig_slackAppModeOnNonSlack() string {
+	return testAccProviderConfig() + `
+resource "last9_notification_channel" "test" {
+  name           = "TF Test App Mode On Pagerduty"
+  type           = "pagerduty"
+  slack_app_mode = true
+  destination    = "key-12345"
+  send_resolved  = true
 }
 `
 }
