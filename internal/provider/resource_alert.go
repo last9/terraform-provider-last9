@@ -192,17 +192,22 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 		req.NotificationChannels = channels
 	}
 
-	// Handle static threshold alerts
-	if greaterThan, ok := d.GetOk("greater_than"); ok {
+	// Handle static threshold alerts.
+	// Use GetRawConfig to distinguish explicit 0 from omitted — d.GetOk returns false
+	// for zero-value floats, making "greater_than = 0" indistinguishable from absent.
+	rawCfg := d.GetRawConfig()
+	greaterThanRaw := rawCfg.GetAttr("greater_than")
+	lessThanRaw := rawCfg.GetAttr("less_than")
+	if !greaterThanRaw.IsNull() {
 		badMinutes := d.Get("bad_minutes").(int)
 		totalMinutes := d.Get("total_minutes").(int)
-		req.Condition = fmt.Sprintf("expr > %f", greaterThan.(float64))
+		req.Condition = fmt.Sprintf("expr > %f", d.Get("greater_than").(float64))
 		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
 		req.EvalWindow = totalMinutes
-	} else if lessThan, ok := d.GetOk("less_than"); ok {
+	} else if !lessThanRaw.IsNull() {
 		badMinutes := d.Get("bad_minutes").(int)
 		totalMinutes := d.Get("total_minutes").(int)
-		req.Condition = fmt.Sprintf("expr < %f", lessThan.(float64))
+		req.Condition = fmt.Sprintf("expr < %f", d.Get("less_than").(float64))
 		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
 		req.EvalWindow = totalMinutes
 	}
@@ -390,11 +395,12 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	req.AlertCondition = &alertCondition
 	req.EvalWindow = &totalMinutes
 
-	if greaterThan, ok := d.GetOk("greater_than"); ok {
-		condition := fmt.Sprintf("expr > %f", greaterThan.(float64))
+	rawCfgU := d.GetRawConfig()
+	if !rawCfgU.GetAttr("greater_than").IsNull() {
+		condition := fmt.Sprintf("expr > %f", d.Get("greater_than").(float64))
 		req.Condition = &condition
-	} else if lessThan, ok := d.GetOk("less_than"); ok {
-		condition := fmt.Sprintf("expr < %f", lessThan.(float64))
+	} else if !rawCfgU.GetAttr("less_than").IsNull() {
+		condition := fmt.Sprintf("expr < %f", d.Get("less_than").(float64))
 		req.Condition = &condition
 	}
 
