@@ -5,6 +5,21 @@ All notable changes to the Last9 Terraform Provider will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **last9_dashboard** - `panel.unit` and `query.unit` no longer silently drop `unit = ""` from the API payload (`json:"unit,omitempty"` removed). Previously the Last9 API retained the previously-stored unit, defaulting to `"percent"` on stat panels and `"seconds"` on timeseries with no error.
+- **last9_dashboard** - `panel.unit` schema no longer has `Computed: true`; `terraform plan` now correctly diffs between `""` and any previously-set unit value.
+
+### Changed
+
+- **last9_dashboard** - `panel.unit` and `query.unit` now validate against an allowlist at plan time. **Breaking for configs using unrecognised values.** Migrate Grafana-style IDs before upgrading: `"ms"` → `"milliseconds"`, `"s"` → `"seconds"`, `"percentunit"` → `"percent"` (and multiply the PromQL value by 100). Any other unrecognised string should be removed or replaced with `""`.
+
+### Added
+
+- **last9_dashboard** - `panel.alert.greater_than` / `less_than` thresholds of `0` are now supported. Previously `GetOk` returned `(0.0, false)` for zero-value floats, making `threshold = 0` indistinguishable from an omitted value.
+
 ## [0.2.3] - 2026-05-06
 
 ### Added

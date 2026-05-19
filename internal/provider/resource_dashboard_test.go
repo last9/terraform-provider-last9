@@ -503,13 +503,41 @@ func TestDashboard_UnitSchema_NotComputed(t *testing.T) {
 	// Regression: panel.unit and query.unit must not have Computed: true.
 	// Computed suppresses Terraform diffs — unit="" looks identical to unit="seconds"
 	// in the plan, so a user can never clear a previously-set unit.
+	// Also guards that ValidateFunc is present — its removal would silently re-open
+	// the original finding (Grafana-style IDs accepted, broken at apply time).
 	panelSchema := resourceDashboard().Schema["panel"].Elem.(*schema.Resource).Schema
 	if panelSchema["unit"].Computed {
 		t.Error("panel.unit must not be Computed")
 	}
+	if panelSchema["unit"].ValidateFunc == nil {
+		t.Error("panel.unit must have a ValidateFunc")
+	}
 	querySchema := panelSchema["query"].Elem.(*schema.Resource).Schema
 	if querySchema["unit"].Computed {
 		t.Error("query.unit must not be Computed")
+	}
+	if querySchema["unit"].ValidateFunc == nil {
+		t.Error("query.unit must have a ValidateFunc")
+	}
+}
+
+func TestDashboard_UnitSchema_ValidateFunc(t *testing.T) {
+	// Documents the exact accepted and rejected values for panel.unit.
+	panelSchema := resourceDashboard().Schema["panel"].Elem.(*schema.Resource).Schema
+	fn := panelSchema["unit"].ValidateFunc
+
+	valid := []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
+	for _, v := range valid {
+		if _, errs := fn(v, "unit"); len(errs) != 0 {
+			t.Errorf("unit=%q should be valid, got: %v", v, errs)
+		}
+	}
+
+	invalid := []string{"ms", "s", "short", "binBps", "percentunit", "ops", "bps", "Bps"}
+	for _, v := range invalid {
+		if _, errs := fn(v, "unit"); len(errs) == 0 {
+			t.Errorf("unit=%q should be invalid but ValidateFunc returned no errors", v)
+		}
 	}
 }
 
