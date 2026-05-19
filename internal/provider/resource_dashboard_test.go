@@ -428,6 +428,119 @@ func TestDashboard_LegendSortAndMatrix_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestDashboard_ExpandPanels_EmptyUnitSerializedToJSON(t *testing.T) {
+	// Regression: DashboardPanel.Unit must NOT have omitempty.
+	// If omitempty is present, unit="" is dropped from JSON and the Last9 API
+	// retains the previously-stored unit (defaults to "percent" or "seconds").
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "cost panel",
+				"unit":   "",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{"name": "A", "expr": "1", "telemetry": "metrics", "query_type": "promql"},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	b, err := json.Marshal(panels[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	raw := string(b)
+	if !strings.Contains(raw, `"unit":""`) {
+		t.Errorf("unit field absent or dropped from JSON (omitempty bug); got: %s", raw)
+	}
+}
+
+func TestDashboard_ExpandQueries_EmptyUnitSerializedToJSON(t *testing.T) {
+	// Regression: DashboardPanelQueryDetails.Unit must NOT have omitempty.
+	// Same root cause as the panel-level unit omitempty bug.
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "p",
+				"unit":   "bytes-iec",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{
+						"name":       "A",
+						"expr":       "1",
+						"unit":       "",
+						"telemetry":  "metrics",
+						"query_type": "promql",
+					},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	b, err := json.Marshal(panels[0].PopulatedQueries[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	raw := string(b)
+	if !strings.Contains(raw, `"unit":""`) {
+		t.Errorf("query unit field absent or dropped from JSON (omitempty bug); got: %s", raw)
+	}
+}
+
+func TestDashboard_UnitSchema_NotComputed(t *testing.T) {
+	// Regression: panel.unit and query.unit must not have Computed: true.
+	// Computed suppresses Terraform diffs — unit="" looks identical to unit="seconds"
+	// in the plan, so a user can never clear a previously-set unit.
+	// Also guards that ValidateFunc is present — its removal would silently re-open
+	// the original finding (Grafana-style IDs accepted, broken at apply time).
+	panelSchema := resourceDashboard().Schema["panel"].Elem.(*schema.Resource).Schema
+	if panelSchema["unit"].Computed {
+		t.Error("panel.unit must not be Computed")
+	}
+	if panelSchema["unit"].ValidateFunc == nil {
+		t.Error("panel.unit must have a ValidateFunc")
+	}
+	querySchema := panelSchema["query"].Elem.(*schema.Resource).Schema
+	if querySchema["unit"].Computed {
+		t.Error("query.unit must not be Computed")
+	}
+	if querySchema["unit"].ValidateFunc == nil {
+		t.Error("query.unit must have a ValidateFunc")
+	}
+}
+
+func TestDashboard_UnitSchema_ValidateFunc(t *testing.T) {
+	// Documents the exact accepted and rejected values for panel.unit.
+	panelSchema := resourceDashboard().Schema["panel"].Elem.(*schema.Resource).Schema
+	fn := panelSchema["unit"].ValidateFunc
+
+	valid := []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
+	for _, v := range valid {
+		if _, errs := fn(v, "unit"); len(errs) != 0 {
+			t.Errorf("unit=%q should be valid, got: %v", v, errs)
+		}
+	}
+
+	invalid := []string{"ms", "s", "short", "binBps", "percentunit", "ops", "bps", "Bps"}
+	for _, v := range invalid {
+		if _, errs := fn(v, "unit"); len(errs) == 0 {
+			t.Errorf("unit=%q should be invalid but ValidateFunc returned no errors", v)
+		}
+	}
+}
+
 func TestDashboard_JSONStringsEqual(t *testing.T) {
 	cases := []struct {
 		a, b string

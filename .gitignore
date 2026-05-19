@@ -4,6 +4,7 @@ llmtemp/**
 # Compiled binaries
 terraform-provider-last9
 terraform-provider-last9.exe
+terraform-provider-last9_*
 *.exe
 *.dll
 *.so

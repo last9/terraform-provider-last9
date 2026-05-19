@@ -1341,7 +1341,7 @@ type DashboardPanel struct {
 	DatasourceID     string                        `json:"datasource_id"`
 	Telemetry        string                        `json:"telemetry,omitempty"`
 	ID               string                        `json:"id,omitempty"`
-	Unit             string                        `json:"unit,omitempty"`
+	Unit             string                        `json:"unit"`
 	CreatedAt        int64                         `json:"created_at,omitempty"`
 	UpdatedAt        int64                         `json:"updated_at,omitempty"`
 }
@@ -1375,7 +1375,7 @@ type DashboardStatThreshold struct {
 
 type DashboardPanelQueryDetails struct {
 	Expr            string                    `json:"expr,omitempty"`
-	Unit            string                    `json:"unit,omitempty"`
+	Unit            string                    `json:"unit"`
 	Type            string                    `json:"type"`
 	Name            string                    `json:"name"`
 	Telemetry       string                    `json:"telemetry,omitempty"`
