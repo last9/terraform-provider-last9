@@ -499,6 +499,20 @@ func TestDashboard_ExpandQueries_EmptyUnitSerializedToJSON(t *testing.T) {
 	}
 }
 
+func TestDashboard_UnitSchema_NotComputed(t *testing.T) {
+	// Regression: panel.unit and query.unit must not have Computed: true.
+	// Computed suppresses Terraform diffs — unit="" looks identical to unit="seconds"
+	// in the plan, so a user can never clear a previously-set unit.
+	panelSchema := resourceDashboard().Schema["panel"].Elem.(*schema.Resource).Schema
+	if panelSchema["unit"].Computed {
+		t.Error("panel.unit must not be Computed")
+	}
+	querySchema := panelSchema["query"].Elem.(*schema.Resource).Schema
+	if querySchema["unit"].Computed {
+		t.Error("query.unit must not be Computed")
+	}
+}
+
 func TestDashboard_JSONStringsEqual(t *testing.T) {
 	cases := []struct {
 		a, b string

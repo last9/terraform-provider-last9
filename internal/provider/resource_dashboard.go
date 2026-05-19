@@ -59,6 +59,7 @@ var (
 	supportedBarOrientations    = []string{"vertical", "horizontal"}
 	supportedTimeseriesDisplays = []string{"line", "area", ""}
 	supportedVariableTypes      = []string{"label", "static"}
+	supportedPanelUnits         = []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
 	supportedTelemetryQueryTypes = map[string]map[string]bool{
 		"metrics": {"promql": true},
 		"logs":    {"log_ql": true, "log_json": true},
@@ -188,9 +189,10 @@ func resourceDashboard() *schema.Resource {
 							ValidateFunc: validation.StringInSlice(supportedTelemetries, false),
 						},
 						"unit": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: `Unit displayed on the panel axis. Recognised values: "percent" (0–100 values, shows %), "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si". Use "" for dimensionless counts (lines, commits, etc.). Grafana-style IDs (ms, short, binBps, percentunit, ops, etc.) are NOT recognised and will render as literal text.`,
+							Type:         schema.TypeString,
+							Optional:     true,
+							ValidateFunc: validation.StringInSlice(supportedPanelUnits, false),
+							Description:  `Unit displayed on the panel axis. Recognised values: "percent" (0–100 values, shows %), "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si". Use "" for dimensionless counts (lines, commits, etc.). Grafana-style IDs (ms, short, binBps, percentunit, ops, etc.) are NOT recognised and will render as literal text.`,
 						},
 						"version": {
 							Type:        schema.TypeInt,
@@ -303,9 +305,10 @@ func resourceDashboard() *schema.Resource {
 									"expr": {Type: schema.TypeString, Required: true},
 									"type": {Type: schema.TypeString, Optional: true, Default: "range"},
 									"unit": {
-										Type:        schema.TypeString,
-										Optional:    true,
-										Description: `Unit for this query's series. Same recognised values as panel.unit. Rarely needed — set panel.unit instead unless individual queries in the same panel need different units.`,
+										Type:         schema.TypeString,
+										Optional:     true,
+										ValidateFunc: validation.StringInSlice(supportedPanelUnits, false),
+										Description:  `Unit for this query's series. Same recognised values as panel.unit. Rarely needed — set panel.unit instead unless individual queries in the same panel need different units.`,
 									},
 									"telemetry": {
 										Type:         schema.TypeString,
