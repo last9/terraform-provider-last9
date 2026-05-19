@@ -428,6 +428,77 @@ func TestDashboard_LegendSortAndMatrix_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestDashboard_ExpandPanels_EmptyUnitSerializedToJSON(t *testing.T) {
+	// Regression: DashboardPanel.Unit must NOT have omitempty.
+	// If omitempty is present, unit="" is dropped from JSON and the Last9 API
+	// retains the previously-stored unit (defaults to "percent" or "seconds").
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "cost panel",
+				"unit":   "",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{"name": "A", "expr": "1", "telemetry": "metrics", "query_type": "promql"},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	b, err := json.Marshal(panels[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	raw := string(b)
+	if !strings.Contains(raw, `"unit":""`) {
+		t.Errorf("unit field absent or dropped from JSON (omitempty bug); got: %s", raw)
+	}
+}
+
+func TestDashboard_ExpandQueries_EmptyUnitSerializedToJSON(t *testing.T) {
+	// Regression: DashboardPanelQueryDetails.Unit must NOT have omitempty.
+	// Same root cause as the panel-level unit omitempty bug.
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "p",
+				"unit":   "bytes-iec",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "stat"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{
+						"name":       "A",
+						"expr":       "1",
+						"unit":       "",
+						"telemetry":  "metrics",
+						"query_type": "promql",
+					},
+				},
+			},
+		},
+	})
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	b, err := json.Marshal(panels[0].PopulatedQueries[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	raw := string(b)
+	if !strings.Contains(raw, `"unit":""`) {
+		t.Errorf("query unit field absent or dropped from JSON (omitempty bug); got: %s", raw)
+	}
+}
+
 func TestDashboard_JSONStringsEqual(t *testing.T) {
 	cases := []struct {
 		a, b string
