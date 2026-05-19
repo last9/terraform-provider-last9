@@ -7,24 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-19
+
 ### Fixed
 
 - **last9_dashboard** - `panel.unit` and `query.unit` no longer silently drop `unit = ""` from the API payload (`json:"unit,omitempty"` removed). Previously the Last9 API retained the previously-stored unit, defaulting to `"percent"` on stat panels and `"seconds"` on timeseries with no error.
 - **last9_dashboard** - `panel.unit` schema no longer has `Computed: true`; `terraform plan` now correctly diffs between `""` and any previously-set unit value.
+- **last9_dashboard** - `panel.alert.greater_than` / `less_than` thresholds of `0` are now supported. Previously `GetOk` returned `(0.0, false)` for zero-value floats, making `threshold = 0` indistinguishable from an omitted value.
 
 ### Changed
 
 - **last9_dashboard** - `panel.unit` and `query.unit` now validate against an allowlist at plan time. **Breaking for configs using unrecognised values.** Migrate Grafana-style IDs before upgrading: `"ms"` → `"milliseconds"`, `"s"` → `"seconds"`, `"percentunit"` → `"percent"` (and multiply the PromQL value by 100). Any other unrecognised string should be removed or replaced with `""`.
 
-### Added
-
-- **last9_dashboard** - `panel.alert.greater_than` / `less_than` thresholds of `0` are now supported. Previously `GetOk` returned `(0.0, false)` for zero-value floats, making `threshold = 0` indistinguishable from an omitted value.
-
-## [0.2.3] - 2026-05-06
+## [0.4.0] - 2026-05-15
 
 ### Added
 
-#### Resources
+- **last9_notification_channel** - Slack App mode support (`slack_app` type with `channel_id` and bot token authentication) (ENG-910)
+
+## [0.3.0] - 2026-05-06
+
+### Added
+
 - **last9_dashboard** - Manage Last9 dashboards as code (ENG-1013)
 - **last9_remapping_rule** - Configure OpenTelemetry remapping rules via the `otel_settings` API
 
