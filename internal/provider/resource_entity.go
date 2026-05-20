@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
@@ -164,6 +165,29 @@ func resourceEntity() *schema.Resource {
 				Description: "Notification channel IDs or names assigned to this entity",
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
+			"renotify_enabled": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Description: "When false, only the first firing notification and the resolved notification are sent (notify-once). When true, notifications repeat per renotify_interval_seconds. Omit to inherit the tenant default.",
+			},
+			"renotify_interval_seconds": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Description: "Seconds between repeat notifications while an alert stays firing. Must be a positive integer (> 0). Ignored when renotify_enabled is false. Omit to inherit the tenant default.",
+				ValidateFunc: validation.IntAtLeast(1),
+			},
+			"renotify_occurrences": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Description: "Maximum number of repeat notifications per firing episode. Use -1 for unlimited. Must be -1 or a positive integer (>= 1). Omit to inherit the tenant default.",
+				ValidateFunc: func(v interface{}, k string) (warns []string, errs []error) {
+					val := v.(int)
+					if val != -1 && val < 1 {
+						errs = append(errs, fmt.Errorf("%q must be -1 (unlimited) or >= 1, got: %d", k, val))
+					}
+					return
+				},
+			},
 		},
 	}
 }
@@ -302,6 +326,27 @@ func resourceEntityCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		metadataReq.Team = "default" // Required by API but doesn't count as user-specified metadata
 	}
 
+	// Renotify fields — use GetRawConfig to detect explicit false for the bool field
+	rawCfg := d.GetRawConfig()
+	renotifyEnabledRaw := rawCfg.GetAttr("renotify_enabled")
+	renotifyIntervalRaw := rawCfg.GetAttr("renotify_interval_seconds")
+	renotifyOccurrencesRaw := rawCfg.GetAttr("renotify_occurrences")
+	if !renotifyEnabledRaw.IsNull() {
+		v := d.Get("renotify_enabled").(bool)
+		metadataReq.RenotifyEnabled = &v
+		hasMetadata = true
+	}
+	if !renotifyIntervalRaw.IsNull() {
+		v := d.Get("renotify_interval_seconds").(int)
+		metadataReq.RenotifyIntervalSeconds = &v
+		hasMetadata = true
+	}
+	if !renotifyOccurrencesRaw.IsNull() {
+		v := d.Get("renotify_occurrences").(int)
+		metadataReq.RenotifyOccurrences = &v
+		hasMetadata = true
+	}
+
 	// Tags
 	if v, ok := d.GetOk("tags"); ok {
 		tagsList := v.([]interface{})
@@ -422,6 +467,17 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 			}
 			d.Set("links", links)
 		}
+
+		// Renotify fields — only set when non-nil (nil means "inherit from tenant", stored as zero value)
+		if entity.Metadata.RenotifyEnabled != nil {
+			d.Set("renotify_enabled", *entity.Metadata.RenotifyEnabled)
+		}
+		if entity.Metadata.RenotifyIntervalSeconds != nil {
+			d.Set("renotify_interval_seconds", *entity.Metadata.RenotifyIntervalSeconds)
+		}
+		if entity.Metadata.RenotifyOccurrences != nil {
+			d.Set("renotify_occurrences", *entity.Metadata.RenotifyOccurrences)
+		}
 	} else {
 		// Fallback to top-level fields if metadata is not present
 		d.Set("team", entity.Team)
@@ -519,10 +575,11 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 		}
 	}
 
-	// Check if metadata fields changed (tags, labels, team, links, adhoc_filter)
+	// Check if metadata fields changed (tags, labels, team, links, adhoc_filter, renotify)
 	// These are updated via PUT /entities/{id}/metadata
 	metadataFieldsChanged := d.HasChange("tags") || d.HasChange("labels") || d.HasChange("team") ||
-		d.HasChange("links") || d.HasChange("adhoc_filter")
+		d.HasChange("links") || d.HasChange("adhoc_filter") ||
+		d.HasChange("renotify_enabled") || d.HasChange("renotify_interval_seconds") || d.HasChange("renotify_occurrences")
 
 	if metadataFieldsChanged {
 		// Team is required for metadata update (per OpenAPI spec)
@@ -584,6 +641,34 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 					}
 				}
 				metadataReq.AdhocFilter = adhocFilter
+			}
+		}
+
+		// Renotify fields — detect which are explicitly set in the new config
+		rawCfgU := d.GetRawConfig()
+		renotifyEnabledRawU := rawCfgU.GetAttr("renotify_enabled")
+		renotifyIntervalRawU := rawCfgU.GetAttr("renotify_interval_seconds")
+		renotifyOccurrencesRawU := rawCfgU.GetAttr("renotify_occurrences")
+		hasEnabledU := !renotifyEnabledRawU.IsNull()
+		hasIntervalU := !renotifyIntervalRawU.IsNull()
+		hasOccurrencesU := !renotifyOccurrencesRawU.IsNull()
+
+		renotifyChanged := d.HasChange("renotify_enabled") || d.HasChange("renotify_interval_seconds") || d.HasChange("renotify_occurrences")
+		if !hasEnabledU && !hasIntervalU && !hasOccurrencesU && renotifyChanged {
+			// All renotify fields removed from config — clear the entity-level override
+			metadataReq.RenotifyClearOverride = true
+		} else {
+			if hasEnabledU {
+				v := d.Get("renotify_enabled").(bool)
+				metadataReq.RenotifyEnabled = &v
+			}
+			if hasIntervalU {
+				v := d.Get("renotify_interval_seconds").(int)
+				metadataReq.RenotifyIntervalSeconds = &v
+			}
+			if hasOccurrencesU {
+				v := d.Get("renotify_occurrences").(int)
+				metadataReq.RenotifyOccurrences = &v
 			}
 		}
 

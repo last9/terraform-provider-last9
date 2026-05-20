@@ -184,6 +184,55 @@ func TestAccEntity_withLinks(t *testing.T) {
 	})
 }
 
+func TestAccEntity_renotify(t *testing.T) {
+	var entityID string
+	resourceName := "last9_entity.test"
+	entityName := fmt.Sprintf("test-entity-renotify-%d", time.Now().UnixNano())
+	externalRef := fmt.Sprintf("test-entity-renotify-ref-%d", time.Now().UnixNano())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckEntityDestroy,
+		Steps: []resource.TestStep{
+			// Create with notify-once (renotify_enabled = false)
+			{
+				Config: testAccEntityConfig_renotifyDisabled(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEntityExists(resourceName, &entityID),
+					resource.TestCheckResourceAttr(resourceName, "renotify_enabled", "false"),
+				),
+			},
+			// Update: enable renotify with custom interval and cap
+			{
+				Config: testAccEntityConfig_renotifyEnabled(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "renotify_enabled", "true"),
+					resource.TestCheckResourceAttr(resourceName, "renotify_interval_seconds", "1800"),
+					resource.TestCheckResourceAttr(resourceName, "renotify_occurrences", "3"),
+				),
+			},
+			// Update: unlimited occurrences
+			{
+				Config: testAccEntityConfig_renotifyUnlimited(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "renotify_enabled", "true"),
+					resource.TestCheckResourceAttr(resourceName, "renotify_interval_seconds", "3600"),
+					resource.TestCheckResourceAttr(resourceName, "renotify_occurrences", "-1"),
+				),
+			},
+			// Clear all renotify overrides — fields removed from config
+			{
+				Config: testAccEntityConfig_basic(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckNoResourceAttr(resourceName, "renotify_interval_seconds"),
+					resource.TestCheckNoResourceAttr(resourceName, "renotify_occurrences"),
+				),
+			},
+		},
+	})
+}
+
 // testAccCheckEntityExists verifies an entity exists in state and the API
 func testAccCheckEntityExists(n string, id *string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -286,6 +335,43 @@ resource "last9_entity" "test" {
   description  = %q
 }
 `, name, externalRef, description)
+}
+
+func testAccEntityConfig_renotifyDisabled(name, externalRef string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name             = %q
+  type             = "service"
+  external_ref     = %q
+  renotify_enabled = false
+}
+`, name, externalRef)
+}
+
+func testAccEntityConfig_renotifyEnabled(name, externalRef string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name                      = %q
+  type                      = "service"
+  external_ref              = %q
+  renotify_enabled          = true
+  renotify_interval_seconds = 1800
+  renotify_occurrences      = 3
+}
+`, name, externalRef)
+}
+
+func testAccEntityConfig_renotifyUnlimited(name, externalRef string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name                      = %q
+  type                      = "service"
+  external_ref              = %q
+  renotify_enabled          = true
+  renotify_interval_seconds = 3600
+  renotify_occurrences      = -1
+}
+`, name, externalRef)
 }
 
 func testAccEntityConfig_withLinks(name, externalRef string) string {

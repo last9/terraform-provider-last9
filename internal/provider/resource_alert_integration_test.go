@@ -214,6 +214,54 @@ func TestAccAlertIntegration_lessThanThreshold(t *testing.T) {
 	})
 }
 
+// TestAccAlertIntegration_withRenotify tests entity renotify settings combined with alerts
+func TestAccAlertIntegration_withRenotify(t *testing.T) {
+	var entityID, alertID string
+	entityResourceName := "last9_entity.test"
+	alertResourceName := "last9_alert.test"
+	timestamp := time.Now().UnixNano()
+	entityName := fmt.Sprintf("renotify-entity-%d", timestamp)
+	externalRef := fmt.Sprintf("renotify-ref-%d", timestamp)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckAlertIntegrationDestroy,
+		Steps: []resource.TestStep{
+			// Step 1: Entity with notify-once, alert attached
+			{
+				Config: testAccAlertIntegrationConfig_renotifyDisabled(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEntityExists(entityResourceName, &entityID),
+					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
+					resource.TestCheckResourceAttr(entityResourceName, "renotify_enabled", "false"),
+					resource.TestCheckResourceAttrSet(alertResourceName, "kpi_id"),
+				),
+			},
+			// Step 2: Enable renotify with custom interval and cap — alert stays intact
+			{
+				Config: testAccAlertIntegrationConfig_renotifyEnabled(entityName, externalRef),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(entityResourceName, "renotify_enabled", "true"),
+					resource.TestCheckResourceAttr(entityResourceName, "renotify_interval_seconds", "1800"),
+					resource.TestCheckResourceAttr(entityResourceName, "renotify_occurrences", "5"),
+					// Alert ID should be unchanged — renotify change doesn't recreate alerts
+					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
+				),
+			},
+			// Step 3: Remove all renotify fields — clear override, inherit tenant default
+			{
+				Config: testAccAlertIntegrationConfig_basic(entityName, externalRef, "Renotify Test Alert", "up{job=\"renotify\"}"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckNoResourceAttr(entityResourceName, "renotify_interval_seconds"),
+					resource.TestCheckNoResourceAttr(entityResourceName, "renotify_occurrences"),
+					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
+				),
+			},
+		},
+	})
+}
+
 // testAccCheckAlertIntegrationExists verifies an alert exists in state
 func testAccCheckAlertIntegrationExists(n string, id *string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -353,6 +401,52 @@ resource "last9_alert" "test" {
       team     = "platform"
     }
   }
+}
+`, entityName, externalRef)
+}
+
+func testAccAlertIntegrationConfig_renotifyDisabled(entityName, externalRef string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name             = %q
+  type             = "service"
+  external_ref     = %q
+  renotify_enabled = false
+}
+
+resource "last9_alert" "test" {
+  entity_id     = last9_entity.test.id
+  name          = "Renotify Test Alert"
+  description   = "Alert for renotify integration testing"
+  query         = "up{job=\"renotify\"}"
+  greater_than  = 0
+  bad_minutes   = 5
+  total_minutes = 10
+  severity      = "breach"
+}
+`, entityName, externalRef)
+}
+
+func testAccAlertIntegrationConfig_renotifyEnabled(entityName, externalRef string) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name                      = %q
+  type                      = "service"
+  external_ref              = %q
+  renotify_enabled          = true
+  renotify_interval_seconds = 1800
+  renotify_occurrences      = 5
+}
+
+resource "last9_alert" "test" {
+  entity_id     = last9_entity.test.id
+  name          = "Renotify Test Alert"
+  description   = "Alert for renotify integration testing"
+  query         = "up{job=\"renotify\"}"
+  greater_than  = 0
+  bad_minutes   = 5
+  total_minutes = 10
+  severity      = "breach"
 }
 `, entityName, externalRef)
 }
