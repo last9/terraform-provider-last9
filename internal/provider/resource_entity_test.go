@@ -225,6 +225,7 @@ func TestAccEntity_renotify(t *testing.T) {
 			{
 				Config: testAccEntityConfig_basic(entityName, externalRef),
 				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckNoResourceAttr(resourceName, "renotify_enabled"),
 					resource.TestCheckNoResourceAttr(resourceName, "renotify_interval_seconds"),
 					resource.TestCheckNoResourceAttr(resourceName, "renotify_occurrences"),
 				),

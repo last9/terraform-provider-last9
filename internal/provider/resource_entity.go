@@ -468,15 +468,23 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 			d.Set("links", links)
 		}
 
-		// Renotify fields — only set when non-nil (nil means "inherit from tenant", stored as zero value)
+		// Renotify fields — always set state to avoid perpetual diffs after clear_override.
+		// nil from API = no override (inherit tenant default); zero value in state matches
+		// the Terraform plan zero value when the field is absent from config.
 		if entity.Metadata.RenotifyEnabled != nil {
 			d.Set("renotify_enabled", *entity.Metadata.RenotifyEnabled)
+		} else {
+			d.Set("renotify_enabled", false)
 		}
 		if entity.Metadata.RenotifyIntervalSeconds != nil {
 			d.Set("renotify_interval_seconds", *entity.Metadata.RenotifyIntervalSeconds)
+		} else {
+			d.Set("renotify_interval_seconds", 0)
 		}
 		if entity.Metadata.RenotifyOccurrences != nil {
 			d.Set("renotify_occurrences", *entity.Metadata.RenotifyOccurrences)
+		} else {
+			d.Set("renotify_occurrences", 0)
 		}
 	} else {
 		// Fallback to top-level fields if metadata is not present
@@ -653,9 +661,9 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 		hasIntervalU := !renotifyIntervalRawU.IsNull()
 		hasOccurrencesU := !renotifyOccurrencesRawU.IsNull()
 
-		renotifyChanged := d.HasChange("renotify_enabled") || d.HasChange("renotify_interval_seconds") || d.HasChange("renotify_occurrences")
-		if !hasEnabledU && !hasIntervalU && !hasOccurrencesU && renotifyChanged {
-			// All renotify fields removed from config — clear the entity-level override
+		if !hasEnabledU && !hasIntervalU && !hasOccurrencesU {
+			// No renotify fields in config — send clear_override to restore tenant defaults.
+			// Safe to send unconditionally: nulling already-null columns is a no-op on the backend.
 			metadataReq.RenotifyClearOverride = true
 		} else {
 			if hasEnabledU {

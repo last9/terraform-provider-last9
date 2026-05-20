@@ -253,6 +253,7 @@ func TestAccAlertIntegration_withRenotify(t *testing.T) {
 			{
 				Config: testAccAlertIntegrationConfig_basic(entityName, externalRef, "Renotify Test Alert", "up{job=\"renotify\"}"),
 				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckNoResourceAttr(entityResourceName, "renotify_enabled"),
 					resource.TestCheckNoResourceAttr(entityResourceName, "renotify_interval_seconds"),
 					resource.TestCheckNoResourceAttr(entityResourceName, "renotify_occurrences"),
 					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
