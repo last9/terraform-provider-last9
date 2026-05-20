@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **last9_entity** - `renotify_enabled`, `renotify_interval_seconds`, and `renotify_occurrences` fields for per-alert-group repeat notification control (ENG-899)
+  - `renotify_enabled = false` — notify-once: only the first firing notification and the resolved notification are sent
+  - `renotify_interval_seconds` — seconds between repeat notifications while firing (must be ≥ 1)
+  - `renotify_occurrences` — cap on repeat notifications per firing episode (`-1` = unlimited, or ≥ 1)
+  - Omitting all three fields inherits the tenant default (re-notify every hour)
+  - Removing all three fields from an existing config resets the group to tenant defaults
+
 ## [0.4.1] - 2026-05-19
 
 ### Fixed

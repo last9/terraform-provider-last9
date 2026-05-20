@@ -32,7 +32,7 @@ export LAST9_API_BASE_URL=https://app.last9.io
 ## What You Can Manage
 
 **Alerting**
-- `last9_entity` — Alert groups that organize your metrics
+- `last9_entity` — Alert groups that organize your metrics (supports per-group repeat notification control)
 - `last9_alert` — Metric-based alert rules with thresholds
 - `last9_scheduled_search_alert` — Log-based alerts on search queries
 
@@ -73,6 +73,38 @@ resource "last9_alert" "high_error_rate" {
   }
 }
 ```
+
+### Suppress repeat notifications (notify-once)
+
+By default, Last9 re-notifies every hour while an alert stays firing. Set `renotify_enabled = false` to send only the initial firing notification and the resolved notification — no repeats in between.
+
+```hcl
+resource "last9_entity" "api" {
+  name         = "api-service"
+  type         = "service"
+  entity_class = "alert-manager"
+  external_ref = "api-service-prod"
+
+  renotify_enabled = false  # notify once per firing episode
+}
+```
+
+To re-notify on a custom schedule instead:
+
+```hcl
+resource "last9_entity" "api" {
+  name         = "api-service"
+  type         = "service"
+  entity_class = "alert-manager"
+  external_ref = "api-service-prod"
+
+  renotify_enabled          = true
+  renotify_interval_seconds = 1800  # every 30 minutes
+  renotify_occurrences      = 3     # stop after 3 repeats (-1 = unlimited)
+}
+```
+
+Omit all three `renotify_*` fields to inherit the tenant default (re-notify every hour).
 
 ### Drop debug logs to save money
 
