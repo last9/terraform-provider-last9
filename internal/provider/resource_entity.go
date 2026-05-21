@@ -468,13 +468,13 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 			d.Set("links", links)
 		}
 
-		// Renotify fields — always set state to avoid perpetual diffs after clear_override.
-		// nil from API = no override (inherit tenant default); zero value in state matches
-		// the Terraform plan zero value when the field is absent from config.
+		// Renotify fields — only write to state when the API returns a value.
+		// For the bool field: leave absent (not set) when nil so Terraform can cleanly
+		// compare absent-state against absent-config without a perpetual diff.
+		// For int fields: write 0 when nil so stale non-zero values don't linger in state
+		// after a clear_override; a config with the field absent also evaluates to 0.
 		if entity.Metadata.RenotifyEnabled != nil {
 			d.Set("renotify_enabled", *entity.Metadata.RenotifyEnabled)
-		} else {
-			d.Set("renotify_enabled", false)
 		}
 		if entity.Metadata.RenotifyIntervalSeconds != nil {
 			d.Set("renotify_interval_seconds", *entity.Metadata.RenotifyIntervalSeconds)
@@ -661,9 +661,11 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 		hasIntervalU := !renotifyIntervalRawU.IsNull()
 		hasOccurrencesU := !renotifyOccurrencesRawU.IsNull()
 
-		if !hasEnabledU && !hasIntervalU && !hasOccurrencesU {
-			// No renotify fields in config — send clear_override to restore tenant defaults.
-			// Safe to send unconditionally: nulling already-null columns is a no-op on the backend.
+		renotifyChanged := d.HasChange("renotify_enabled") || d.HasChange("renotify_interval_seconds") || d.HasChange("renotify_occurrences")
+		if !hasEnabledU && !hasIntervalU && !hasOccurrencesU && renotifyChanged {
+			// All three fields removed from config and at least one was previously set —
+			// send clear_override to restore tenant defaults. Scoping to renotifyChanged
+			// prevents clearing overrides on unrelated metadata updates (e.g., tag changes).
 			metadataReq.RenotifyClearOverride = true
 		} else {
 			if hasEnabledU {
