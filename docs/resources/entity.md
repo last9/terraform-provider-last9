@@ -58,6 +58,36 @@ resource "last9_entity" "api_alerts" {
 }
 ```
 
+### Notify-Once (Suppress Repeat Notifications)
+
+```terraform
+resource "last9_entity" "api_alerts" {
+  name         = "api-service"
+  type         = "service"
+  entity_class = "alert-manager"
+  external_ref = "api-service-prod"
+
+  # Send only the first firing notification and the resolved notification.
+  # No re-notifications while the alert stays firing.
+  renotify_enabled = false
+}
+```
+
+### Custom Repeat Interval with Occurrence Cap
+
+```terraform
+resource "last9_entity" "api_alerts" {
+  name         = "api-service"
+  type         = "service"
+  entity_class = "alert-manager"
+  external_ref = "api-service-prod"
+
+  renotify_enabled          = true
+  renotify_interval_seconds = 1800  # re-notify every 30 minutes
+  renotify_occurrences      = 3     # stop after 3 repeats; use -1 for unlimited
+}
+```
+
 ## Schema
 
 ### Required
@@ -79,6 +109,11 @@ resource "last9_entity" "api_alerts" {
 - `labels` (Map of String) Key-value labels for grouping and filtering.
 - `notification_channels` (List of String) Default notification channel IDs/names for alerts in this group.
 - `ui_readonly` (Boolean) When `true`, prevents edits via UI. Recommended for IaC-managed resources. Default: `false`.
+- `renotify_enabled` (Boolean) Controls repeat notifications while an alert stays firing. `false` = notify-once (first + resolved only). `true` = re-notify per `renotify_interval_seconds`. Omit to inherit the tenant default (re-notify enabled, 1 hour interval).
+- `renotify_interval_seconds` (Number) Seconds between repeat notifications while firing. Must be a positive integer (≥ 1). Ignored when `renotify_enabled` is `false`. Omit to inherit the tenant default.
+- `renotify_occurrences` (Number) Maximum number of repeat notifications per firing episode. `-1` = unlimited. Must be `-1` or ≥ 1. Omit to inherit the tenant default.
+
+-> **Note** To reset all renotify overrides back to tenant defaults, remove all three `renotify_*` fields from your config and run `terraform apply`. Removing individual fields without removing all three may not clear the remaining fields from the server.
 
 ### Read-Only
 

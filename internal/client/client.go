@@ -885,13 +885,16 @@ func (c *Client) DeleteScheduledSearchAlert(region, alertID string) error {
 
 // EntityMetadata contains metadata fields returned nested in the API response
 type EntityMetadata struct {
-	ID          string            `json:"id,omitempty"`
-	EntityID    string            `json:"entity_id,omitempty"`
-	Team        string            `json:"team,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Links       []EntityLink      `json:"links,omitempty"`
-	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	ID                      string            `json:"id,omitempty"`
+	EntityID                string            `json:"entity_id,omitempty"`
+	Team                    string            `json:"team,omitempty"`
+	Tags                    []string          `json:"tags,omitempty"`
+	Labels                  map[string]string `json:"labels,omitempty"`
+	Links                   []EntityLink      `json:"links,omitempty"`
+	AdhocFilter             *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	RenotifyEnabled         *bool             `json:"renotify_enabled,omitempty"`
+	RenotifyIntervalSeconds *int              `json:"renotify_interval_seconds,omitempty"`
+	RenotifyOccurrences     *int              `json:"renotify_occurrences,omitempty"`
 }
 
 type Entity struct {
@@ -1026,11 +1029,16 @@ func (c *Client) DeleteEntity(id string) error {
 // EntityMetadataUpdateRequest for updating entity metadata (tags, labels, team, links)
 // This is a separate API endpoint from entity update
 type EntityMetadataUpdateRequest struct {
-	Team        string            `json:"team"`
-	Tags        []string          `json:"tags,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Links       []EntityLink      `json:"links,omitempty"`
-	AdhocFilter *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Team                    string            `json:"team"`
+	Tags                    []string          `json:"tags,omitempty"`
+	Labels                  map[string]string `json:"labels,omitempty"`
+	Links                   []EntityLink      `json:"links,omitempty"`
+	AdhocFilter             *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	RenotifyEnabled         *bool             `json:"renotify_enabled,omitempty"`
+	RenotifyIntervalSeconds *int              `json:"renotify_interval_seconds,omitempty"`
+	RenotifyOccurrences     *int              `json:"renotify_occurrences,omitempty"`
+	// RenotifyClearOverride nulls all three renotify columns, restoring inherited tenant/system defaults.
+	RenotifyClearOverride bool `json:"renotify_clear_override,omitempty"`
 }
 
 func (c *Client) UpdateEntityMetadata(entityID string, metadata *EntityMetadataUpdateRequest) error {
