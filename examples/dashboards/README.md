@@ -6,6 +6,7 @@ End-to-end examples for `last9_dashboard`. Two dashboards covering all v1 visual
 
 **`aws_cost_explorer`** — multi-section dashboard demonstrating:
 - `section` panels (dividers without queries/layout)
+- `markdown` panels with `markdown_config`
 - `stat` panel with `stat_config` thresholds
 - `bar` panel with `bar_config` (vertical, stacked)
 - `label`-type variables wired into queries via `$account`, `$region`
@@ -14,6 +15,7 @@ End-to-end examples for `last9_dashboard`. Two dashboards covering all v1 visual
 
 **`mixed_telemetry`** — different telemetry sources demonstrating:
 - `timeseries` panel with `timeseries_config` (display_type)
+- `doughnut` panel for categorical query results
 - `timeseries` panel with multiple queries (LogQL across services)
 - `table` panel with `table_config` (using JSON-pipeline traces query)
 - All three telemetries: metrics (PromQL), logs (LogQL), traces (JSON pipeline)
