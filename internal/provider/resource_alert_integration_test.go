@@ -214,6 +214,44 @@ func TestAccAlertIntegration_lessThanThreshold(t *testing.T) {
 	})
 }
 
+// TestAccAlertIntegration_equalityThreshold tests alerts with equal_to and not_equal thresholds
+func TestAccAlertIntegration_equalityThreshold(t *testing.T) {
+	var entityID, alertID string
+	entityResourceName := "last9_entity.test"
+	alertResourceName := "last9_alert.test"
+	timestamp := time.Now().UnixNano()
+	entityName := fmt.Sprintf("equality-threshold-entity-%d", timestamp)
+	externalRef := fmt.Sprintf("equality-threshold-ref-%d", timestamp)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckWithDelete(t) },
+		ProviderFactories: testAccProviderFactories(),
+		CheckDestroy:      testAccCheckAlertIntegrationDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAlertIntegrationConfig_equalToThreshold(entityName, externalRef, 12),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEntityExists(entityResourceName, &entityID),
+					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
+					resource.TestCheckResourceAttr(alertResourceName, "name", "Equality Threshold Alert"),
+					resource.TestCheckResourceAttr(alertResourceName, "equal_to", "12"),
+					resource.TestCheckResourceAttr(alertResourceName, "bad_minutes", "4"),
+					resource.TestCheckResourceAttr(alertResourceName, "total_minutes", "20"),
+				),
+			},
+			{
+				Config: testAccAlertIntegrationConfig_notEqualThreshold(entityName, externalRef, 0),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAlertIntegrationExists(alertResourceName, &alertID),
+					resource.TestCheckResourceAttr(alertResourceName, "not_equal", "0"),
+					resource.TestCheckResourceAttr(alertResourceName, "bad_minutes", "2"),
+					resource.TestCheckResourceAttr(alertResourceName, "total_minutes", "10"),
+				),
+			},
+		},
+	})
+}
+
 // TestAccAlertIntegration_withRenotify tests entity renotify settings combined with alerts
 func TestAccAlertIntegration_withRenotify(t *testing.T) {
 	var entityID, alertID string
@@ -473,4 +511,50 @@ resource "last9_alert" "test" {
   severity = "threat"
 }
 `, entityName, externalRef)
+}
+
+func testAccAlertIntegrationConfig_equalToThreshold(entityName, externalRef string, equalTo int) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name         = %q
+  type         = "service"
+  external_ref = %q
+}
+
+resource "last9_alert" "test" {
+  entity_id     = last9_entity.test.id
+  name          = "Equality Threshold Alert"
+  description   = "Alert that fires when value equals threshold"
+  query         = "count(kube_pod_status_phase{phase=\"Running\"})"
+
+  equal_to      = %d
+  bad_minutes   = 4
+  total_minutes = 20
+
+  severity = "breach"
+}
+`, entityName, externalRef, equalTo)
+}
+
+func testAccAlertIntegrationConfig_notEqualThreshold(entityName, externalRef string, notEqual int) string {
+	return testAccProviderConfig() + fmt.Sprintf(`
+resource "last9_entity" "test" {
+  name         = %q
+  type         = "service"
+  external_ref = %q
+}
+
+resource "last9_alert" "test" {
+  entity_id     = last9_entity.test.id
+  name          = "Equality Threshold Alert"
+  description   = "Alert that fires when value differs from threshold"
+  query         = "count(kube_pod_status_phase{phase=\"Running\"})"
+
+  not_equal     = %d
+  bad_minutes   = 2
+  total_minutes = 10
+
+  severity = "breach"
+}
+`, entityName, externalRef, notEqual)
 }

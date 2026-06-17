@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-17
+
 ### Added
 
 - **last9_dashboard** - `markdown` and `doughnut` visualization types for dashboard panels. Markdown panels support `markdown_config.content` and do not require query blocks.

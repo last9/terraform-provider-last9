@@ -355,6 +355,66 @@ func TestDashboard_ValidateMarkdownRequiresConfig(t *testing.T) {
 	}
 }
 
+func TestDashboard_ValidateMarkdownRejectsQuery(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "markdown panel",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type": "markdown",
+						"markdown_config": []interface{}{
+							map[string]interface{}{"content": "notes"},
+						},
+					},
+				},
+				"query": []interface{}{
+					map[string]interface{}{"name": "A", "expr": "1"},
+				},
+			},
+		},
+	})
+
+	err := validateDashboardData(d)
+	if err == nil {
+		t.Fatal("expected markdown panel with query to fail validation")
+	}
+	if !strings.Contains(err.Error(), "markdown panels cannot have query blocks") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestDashboard_ValidateMarkdownRequiresLayout(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name": "markdown panel",
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type": "markdown",
+						"markdown_config": []interface{}{
+							map[string]interface{}{"content": "notes"},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	err := validateDashboardData(d)
+	if err == nil {
+		t.Fatal("expected markdown panel without layout to fail validation")
+	}
+	if !strings.Contains(err.Error(), "markdown panels require a layout block") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestDashboard_ExpandPanels_DoughnutType(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
 		"region": "ap-south-1",
@@ -501,6 +561,17 @@ func TestDashboard_FlattenVisualization_MarkdownConfig(t *testing.T) {
 	config := configs[0].(map[string]interface{})
 	if config["content"] != "### Notes\n\nDetails" {
 		t.Errorf("content mismatch: %q", config["content"])
+	}
+}
+
+func TestDashboard_FlattenVisualization_DoughnutType(t *testing.T) {
+	out := flattenVisualization(&client.DashboardPanelVisualization{Type: "doughnut"})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 visualization, got %d", len(out))
+	}
+	viz := out[0].(map[string]interface{})
+	if viz["type"] != "doughnut" {
+		t.Errorf("type mismatch: %v", viz["type"])
 	}
 }
 
