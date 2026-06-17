@@ -80,6 +80,16 @@ func resourceAlert() *schema.Resource {
 				Optional:    true,
 				Description: "Threshold value for less than condition",
 			},
+			"equal_to": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Description: "Threshold value for equality condition",
+			},
+			"not_equal": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Description: "Threshold value for inequality condition",
+			},
 			"bad_minutes": {
 				Type:        schema.TypeInt,
 				Optional:    true,
@@ -195,19 +205,10 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	// Handle static threshold alerts.
 	// Use GetRawConfig to distinguish explicit 0 from omitted — d.GetOk returns false
 	// for zero-value floats, making "greater_than = 0" indistinguishable from absent.
-	rawCfg := d.GetRawConfig()
-	greaterThanRaw := rawCfg.GetAttr("greater_than")
-	lessThanRaw := rawCfg.GetAttr("less_than")
-	if !greaterThanRaw.IsNull() {
+	if condition := buildStaticThresholdCondition(d); condition != "" {
 		badMinutes := d.Get("bad_minutes").(int)
 		totalMinutes := d.Get("total_minutes").(int)
-		req.Condition = fmt.Sprintf("expr > %f", d.Get("greater_than").(float64))
-		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
-		req.EvalWindow = totalMinutes
-	} else if !lessThanRaw.IsNull() {
-		badMinutes := d.Get("bad_minutes").(int)
-		totalMinutes := d.Get("total_minutes").(int)
-		req.Condition = fmt.Sprintf("expr < %f", d.Get("less_than").(float64))
+		req.Condition = condition
 		req.AlertCondition = fmt.Sprintf("count_true(result) >= %d", badMinutes)
 		req.EvalWindow = totalMinutes
 	}
@@ -395,12 +396,7 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	req.AlertCondition = &alertCondition
 	req.EvalWindow = &totalMinutes
 
-	rawCfgU := d.GetRawConfig()
-	if !rawCfgU.GetAttr("greater_than").IsNull() {
-		condition := fmt.Sprintf("expr > %f", d.Get("greater_than").(float64))
-		req.Condition = &condition
-	} else if !rawCfgU.GetAttr("less_than").IsNull() {
-		condition := fmt.Sprintf("expr < %f", d.Get("less_than").(float64))
+	if condition := buildStaticThresholdCondition(d); condition != "" {
 		req.Condition = &condition
 	}
 
@@ -509,24 +505,32 @@ func resourceAlertImportState(ctx context.Context, d *schema.ResourceData, m int
 }
 
 // parseAndSetCondition parses the alert condition string and sets the appropriate
-// schema fields (greater_than, less_than, bad_minutes, total_minutes)
+// schema fields (greater_than, less_than, equal_to, not_equal, bad_minutes, total_minutes)
 func parseAndSetCondition(d *schema.ResourceData, condition string, evalWindow int, alertCondition string) error {
-	// Parse condition like "expr > 100" or "expr < 50"
+	// Parse condition like "expr > 100", "expr < 50", "expr == 1", or "expr != 0"
 	// Extract operator and threshold value
 	var threshold float64
 
 	if len(condition) > 5 && condition[:5] == "expr " {
 		rest := condition[5:]
-		if len(rest) > 2 && rest[:2] == "> " {
-			if _, err := fmt.Sscanf(rest[2:], "%f", &threshold); err != nil {
+		thresholdFields := []struct {
+			prefix string
+			field  string
+		}{
+			{"> ", "greater_than"},
+			{"< ", "less_than"},
+			{"== ", "equal_to"},
+			{"!= ", "not_equal"},
+		}
+		for _, thresholdField := range thresholdFields {
+			if !strings.HasPrefix(rest, thresholdField.prefix) {
+				continue
+			}
+			if _, err := fmt.Sscanf(strings.TrimPrefix(rest, thresholdField.prefix), "%f", &threshold); err != nil {
 				return fmt.Errorf("failed to parse threshold from condition: %w", err)
 			}
-			d.Set("greater_than", threshold)
-		} else if len(rest) > 2 && rest[:2] == "< " {
-			if _, err := fmt.Sscanf(rest[2:], "%f", &threshold); err != nil {
-				return fmt.Errorf("failed to parse threshold from condition: %w", err)
-			}
-			d.Set("less_than", threshold)
+			d.Set(thresholdField.field, threshold)
+			break
 		}
 	}
 
@@ -544,4 +548,24 @@ func parseAndSetCondition(d *schema.ResourceData, condition string, evalWindow i
 	}
 
 	return nil
+}
+
+func buildStaticThresholdCondition(d *schema.ResourceData) string {
+	rawCfg := d.GetRawConfig()
+	thresholdFields := []struct {
+		field    string
+		operator string
+	}{
+		{"greater_than", ">"},
+		{"less_than", "<"},
+		{"equal_to", "=="},
+		{"not_equal", "!="},
+	}
+
+	for _, thresholdField := range thresholdFields {
+		if !rawCfg.GetAttr(thresholdField.field).IsNull() {
+			return fmt.Sprintf("expr %s %f", thresholdField.operator, d.Get(thresholdField.field).(float64))
+		}
+	}
+	return ""
 }

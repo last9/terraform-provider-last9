@@ -69,6 +69,23 @@ resource "last9_alert" "low_availability" {
 }
 ```
 
+### Threshold Alert (Equal To)
+
+```terraform
+resource "last9_alert" "expected_replica_count" {
+  entity_id   = last9_entity.api_alerts.id
+  name        = "Expected Replica Count"
+  description = "Alert when replica count differs from the expected value"
+  query       = "count(kube_pod_status_phase{phase=\"Running\"})"
+
+  equal_to      = 12
+  bad_minutes   = 5
+  total_minutes = 10
+
+  severity = "breach"
+}
+```
+
 ### Loss of Signal Alert
 
 ```terraform
@@ -100,6 +117,8 @@ resource "last9_alert" "service_down" {
 - `severity` (String) Alert severity: `breach` or `threat`. Default: `breach`.
 - `greater_than` (Number) Fire when query result exceeds this value.
 - `less_than` (Number) Fire when query result drops below this value.
+- `equal_to` (Number) Fire when query result equals this value.
+- `not_equal` (Number) Fire when query result differs from this value.
 - `bad_minutes` (Number) Minutes the condition must be true before firing.
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.

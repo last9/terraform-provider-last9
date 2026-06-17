@@ -16,6 +16,8 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 		alertCondition string
 		wantGreater    float64
 		wantLess       float64
+		wantEqual      float64
+		wantNotEqual   float64
 		wantBadMinutes int
 		wantTotal      int
 		wantErr        bool
@@ -38,6 +40,26 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 			wantLess:       50,
 			wantBadMinutes: 3,
 			wantTotal:      15,
+			wantErr:        false,
+		},
+		{
+			name:           "equal condition",
+			condition:      "expr == 12",
+			evalWindow:     20,
+			alertCondition: "count_true(result) >= 4",
+			wantEqual:      12,
+			wantBadMinutes: 4,
+			wantTotal:      20,
+			wantErr:        false,
+		},
+		{
+			name:           "not equal condition",
+			condition:      "expr != 7",
+			evalWindow:     25,
+			alertCondition: "count_true(result) >= 6",
+			wantNotEqual:   7,
+			wantBadMinutes: 6,
+			wantTotal:      25,
 			wantErr:        false,
 		},
 		{
@@ -76,6 +98,26 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 					}
 				} else {
 					t.Errorf("less_than not set, want %v", tt.wantLess)
+				}
+			}
+
+			if tt.wantEqual > 0 {
+				if got, ok := d.GetOk("equal_to"); ok {
+					if got.(float64) != tt.wantEqual {
+						t.Errorf("equal_to = %v, want %v", got, tt.wantEqual)
+					}
+				} else {
+					t.Errorf("equal_to not set, want %v", tt.wantEqual)
+				}
+			}
+
+			if tt.wantNotEqual > 0 {
+				if got, ok := d.GetOk("not_equal"); ok {
+					if got.(float64) != tt.wantNotEqual {
+						t.Errorf("not_equal = %v, want %v", got, tt.wantNotEqual)
+					}
+				} else {
+					t.Errorf("not_equal not set, want %v", tt.wantNotEqual)
 				}
 			}
 
