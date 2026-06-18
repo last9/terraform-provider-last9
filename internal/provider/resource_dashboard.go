@@ -51,15 +51,15 @@ func jsonStringsEqual(a, b string) bool {
 }
 
 var (
-	supportedVisualizationTypes = []string{"timeseries", "stat", "bar", "table", "section"}
-	supportedTelemetries        = []string{"metrics", "logs", "traces"}
-	supportedQueryTypes         = []string{"promql", "log_ql", "log_json", "trace_ql", "trace_json"}
-	supportedLegendTypes        = []string{"auto", "custom"}
-	supportedLegendPlacements   = []string{"bottom", "left", "right"}
-	supportedBarOrientations    = []string{"vertical", "horizontal"}
-	supportedTimeseriesDisplays = []string{"line", "area", ""}
-	supportedVariableTypes      = []string{"label", "static"}
-	supportedPanelUnits         = []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
+	supportedVisualizationTypes  = []string{"timeseries", "stat", "bar", "table", "section", "markdown", "doughnut"}
+	supportedTelemetries         = []string{"metrics", "logs", "traces"}
+	supportedQueryTypes          = []string{"promql", "log_ql", "log_json", "trace_ql", "trace_json"}
+	supportedLegendTypes         = []string{"auto", "custom"}
+	supportedLegendPlacements    = []string{"bottom", "left", "right"}
+	supportedBarOrientations     = []string{"vertical", "horizontal"}
+	supportedTimeseriesDisplays  = []string{"line", "area", ""}
+	supportedVariableTypes       = []string{"label", "static"}
+	supportedPanelUnits          = []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
 	supportedTelemetryQueryTypes = map[string]map[string]bool{
 		"metrics": {"promql": true},
 		"logs":    {"log_ql": true, "log_json": true},
@@ -283,6 +283,20 @@ func resourceDashboard() *schema.Resource {
 											},
 										},
 									},
+									"markdown_config": {
+										Type:     schema.TypeList,
+										Optional: true,
+										MaxItems: 1,
+										Elem: &schema.Resource{
+											Schema: map[string]*schema.Schema{
+												"content": {
+													Type:        schema.TypeString,
+													Required:    true,
+													Description: "Markdown content rendered by markdown panels.",
+												},
+											},
+										},
+									},
 									"table_config_json": {
 										Type:        schema.TypeString,
 										Optional:    true,
@@ -399,6 +413,16 @@ func validateDashboardData(d dashboardGetter) error {
 			}
 			if len(layout) > 0 {
 				return fmt.Errorf("panel[%d] %q: section panels cannot have layout block", i, pm["name"])
+			}
+		} else if vizType == "markdown" {
+			if markdownConfig := vm["markdown_config"].([]interface{}); len(markdownConfig) == 0 {
+				return fmt.Errorf("panel[%d] %q: markdown panels require markdown_config", i, pm["name"])
+			}
+			if len(queries) > 0 {
+				return fmt.Errorf("panel[%d] %q: markdown panels cannot have query blocks", i, pm["name"])
+			}
+			if len(layout) == 0 {
+				return fmt.Errorf("panel[%d] %q: markdown panels require a layout block", i, pm["name"])
 			}
 		} else {
 			if len(queries) == 0 {
@@ -637,6 +661,10 @@ func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisuali
 			Thresholds: expandStatThresholds(c["threshold"].([]interface{})),
 		}
 	}
+	if l := m["markdown_config"].([]interface{}); len(l) > 0 {
+		c := l[0].(map[string]interface{})
+		viz.MarkdownConfig = &client.DashboardMarkdownConfig{Content: c["content"].(string)}
+	}
 	if s := strings.TrimSpace(m["table_config_json"].(string)); s != "" {
 		var blob interface{}
 		if err := json.Unmarshal([]byte(s), &blob); err == nil {
@@ -843,6 +871,11 @@ func flattenVisualization(viz *client.DashboardPanelVisualization) []interface{}
 			})
 		}
 		m["stat_config"] = []interface{}{map[string]interface{}{"threshold": thresholds}}
+	}
+	if viz.MarkdownConfig != nil {
+		m["markdown_config"] = []interface{}{
+			map[string]interface{}{"content": viz.MarkdownConfig.Content},
+		}
 	}
 	if viz.TableConfig != nil {
 		if b, err := json.Marshal(viz.TableConfig); err == nil {

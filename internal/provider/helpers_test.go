@@ -14,8 +14,12 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 		condition      string
 		evalWindow     int
 		alertCondition string
-		wantGreater    float64
-		wantLess       float64
+		wantGreater      float64
+		wantLess         float64
+		wantEqualSet     bool
+		wantEqual        float64
+		wantNotEqualSet  bool
+		wantNotEqual     float64
 		wantBadMinutes int
 		wantTotal      int
 		wantErr        bool
@@ -38,6 +42,46 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 			wantLess:       50,
 			wantBadMinutes: 3,
 			wantTotal:      15,
+			wantErr:        false,
+		},
+		{
+			name:           "equal condition",
+			condition:      "expr == 12",
+			evalWindow:     20,
+			alertCondition: "count_true(result) >= 4",
+			wantEqualSet:   true,
+			wantEqual:      12,
+			wantBadMinutes: 4,
+			wantTotal:      20,
+			wantErr:        false,
+		},
+		{
+			name:            "not equal condition",
+			condition:       "expr != 7",
+			evalWindow:      25,
+			alertCondition:  "count_true(result) >= 6",
+			wantNotEqualSet: true,
+			wantNotEqual:    7,
+			wantBadMinutes:  6,
+			wantTotal:       25,
+			wantErr:         false,
+		},
+		{
+			name:           "equal condition zero",
+			condition:      "expr == 0",
+			evalWindow:     10,
+			alertCondition: "count_true(result) >= 1",
+			wantBadMinutes: 1,
+			wantTotal:      10,
+			wantErr:        false,
+		},
+		{
+			name:           "not equal condition zero",
+			condition:      "expr != 0",
+			evalWindow:     10,
+			alertCondition: "count_true(result) >= 2",
+			wantBadMinutes: 2,
+			wantTotal:      10,
 			wantErr:        false,
 		},
 		{
@@ -76,6 +120,18 @@ func TestResourceAlert_parseAndSetCondition(t *testing.T) {
 					}
 				} else {
 					t.Errorf("less_than not set, want %v", tt.wantLess)
+				}
+			}
+
+			if tt.wantEqualSet {
+				if got, ok := d.GetOk("equal_to"); !ok || got.(float64) != tt.wantEqual {
+					t.Errorf("equal_to = %v, ok = %v, want %v", got, ok, tt.wantEqual)
+				}
+			}
+
+			if tt.wantNotEqualSet {
+				if got, ok := d.GetOk("not_equal"); !ok || got.(float64) != tt.wantNotEqual {
+					t.Errorf("not_equal = %v, ok = %v, want %v", got, ok, tt.wantNotEqual)
 				}
 			}
 
