@@ -855,6 +855,15 @@ func (c *Client) GetScheduledSearchAlerts(region string) ([]ScheduledSearchAlert
 	return result, err
 }
 
+// GetScheduledSearchRules lists scheduled search rules of a specific rule_type.
+// The list endpoint defaults to rule_type=scheduled_search, so metric-only
+// rules (rule_type=streaming_aggregation) must be requested explicitly.
+func (c *Client) GetScheduledSearchRules(region, ruleType string) ([]ScheduledSearchAlertFull, error) {
+	var result []ScheduledSearchAlertFull
+	err := c.Get(fmt.Sprintf("/logs_settings/scheduled_search?region=%s&rule_type=%s", region, ruleType), &result)
+	return result, err
+}
+
 func (c *Client) CreateScheduledSearchAlert(region string, alert *ScheduledSearchAlert) (*ScheduledSearchAlertFull, error) {
 	// The scheduled search API expects a single alert object, not an array
 	// Each POST creates a new alert
