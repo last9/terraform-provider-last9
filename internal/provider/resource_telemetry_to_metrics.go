@@ -92,12 +92,20 @@ func telemetryToMetricsResource(cfg telemetryToMetricsConfig, description string
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "The full aggregation. For logjson-aggregate / tracejson-aggregate, a JSON pipeline array (filter stage + aggregate stage with groupby and window). For logql-aggregate, a logQL string with an aggregation. The output metric's labels come from the aggregate stage's groupby.",
+				// The server may re-serialize the JSON pipeline (key order, spacing);
+				// suppress diffs that are semantically equal JSON.
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					return jsonStringsEqual(old, new)
+				},
 			},
 			"resultant_query": {
 				Type:        schema.TypeString,
 				Optional:    true,
 				Computed:    true,
 				Description: "The resolved query executed by the rule. Defaults to the value of query; only set this if the executed pipeline must differ from the authored one.",
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					return jsonStringsEqual(old, new)
+				},
 			},
 			"metric_name": {
 				Type:         schema.TypeString,
@@ -133,15 +141,23 @@ func makeTelemetryToMetricsCreate(cfg telemetryToMetricsConfig) schema.CreateCon
 	}
 }
 
+// parseTelemetryToMetricsID splits the composite resource ID into its parts.
+// SplitN with a limit of 3 keeps any ":" embedded in the rule name intact.
+func parseTelemetryToMetricsID(id string) (region, ruleID, name string, err error) {
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf("invalid ID format: %s (expected region:id:name)", id)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
 func telemetryToMetricsRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 
-	idParts := strings.Split(d.Id(), ":")
-	if len(idParts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid ID format: %s (expected region:id:name)", d.Id()))
+	region, ruleID, _, err := parseTelemetryToMetricsID(d.Id())
+	if err != nil {
+		return diag.FromErr(err)
 	}
-	region := idParts[0]
-	ruleName := idParts[2]
 
 	// Metric-only rules are only returned when rule_type is requested explicitly.
 	rules, err := apiClient.GetScheduledSearchRules(region, ruleTypeStreamingAggregation)
@@ -149,9 +165,11 @@ func telemetryToMetricsRead(ctx context.Context, d *schema.ResourceData, m inter
 		return diag.FromErr(fmt.Errorf("failed to read telemetry-to-metrics rules: %w", err))
 	}
 
+	// Match on the unique rule ID, not the name: logs and traces rules share the
+	// streaming_aggregation rule_type, and names are not guaranteed unique.
 	var rule *client.ScheduledSearchAlertFull
 	for i := range rules {
-		if rules[i].RuleName == ruleName {
+		if rules[i].ID == ruleID {
 			rule = &rules[i]
 			break
 		}
@@ -178,12 +196,10 @@ func makeTelemetryToMetricsUpdate(cfg telemetryToMetricsConfig) schema.UpdateCon
 	return func(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 		apiClient := m.(*client.Client)
 
-		idParts := strings.Split(d.Id(), ":")
-		if len(idParts) != 3 {
-			return diag.FromErr(fmt.Errorf("invalid ID format: %s (expected region:id:name)", d.Id()))
+		region, ruleID, _, err := parseTelemetryToMetricsID(d.Id())
+		if err != nil {
+			return diag.FromErr(err)
 		}
-		region := idParts[0]
-		ruleID := idParts[1]
 
 		rule := buildTelemetryToMetricsRule(cfg, d)
 
@@ -201,12 +217,10 @@ func makeTelemetryToMetricsUpdate(cfg telemetryToMetricsConfig) schema.UpdateCon
 func telemetryToMetricsDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	apiClient := m.(*client.Client)
 
-	idParts := strings.Split(d.Id(), ":")
-	if len(idParts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid ID format: %s (expected region:id:name)", d.Id()))
+	region, ruleID, _, err := parseTelemetryToMetricsID(d.Id())
+	if err != nil {
+		return diag.FromErr(err)
 	}
-	region := idParts[0]
-	ruleID := idParts[1]
 
 	if err := apiClient.DeleteScheduledSearchAlert(region, ruleID); err != nil {
 		return diag.FromErr(fmt.Errorf("failed to delete telemetry-to-metrics rule: %w", err))

@@ -849,6 +849,10 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 }
 
 // Scheduled Search methods
+//
+// GetScheduledSearchAlerts lists alerting scheduled searches. It is the
+// rule_type=scheduled_search variant of GetScheduledSearchRules (the list
+// endpoint defaults to that rule_type when none is given).
 func (c *Client) GetScheduledSearchAlerts(region string) ([]ScheduledSearchAlertFull, error) {
 	var result []ScheduledSearchAlertFull
 	err := c.Get(fmt.Sprintf("/logs_settings/scheduled_search?region=%s", region), &result)

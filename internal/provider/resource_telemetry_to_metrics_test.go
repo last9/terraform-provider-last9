@@ -91,6 +91,83 @@ func TestDeriveResultantQueryNonJSON(t *testing.T) {
 	}
 }
 
+func TestDeriveResultantQueryUnchangedCases(t *testing.T) {
+	// Each input must be returned byte-for-byte unchanged.
+	cases := map[string]string{
+		"no aggregate stage":    `[{"type":"filter","query":{"$and":[]}}]`,
+		"empty aggregates":      `[{"type":"aggregate","aggregates":[]}]`,
+		"malformed json array":  `[{"type":"aggregate",`,
+		"json object not array": `{"type":"aggregate","aggregates":[{"as":"x"}]}`,
+		"terminal not object":   `[{"type":"aggregate","aggregates":["notanobject"]}]`,
+	}
+	for name, in := range cases {
+		if got := deriveResultantQuery(in); got != in {
+			t.Errorf("%s: expected unchanged, got %q", name, got)
+		}
+	}
+}
+
+func TestDeriveResultantQueryMultipleAggregatesInStage(t *testing.T) {
+	// Only the terminal aggregate of the last stage is renamed; siblings stay.
+	in := `[{"type":"aggregate","aggregates":[{"as":"keep","function":{"$count":[]}},{"as":"rename","function":{"$avg":["x"]}}]}]`
+	got := deriveResultantQuery(in)
+	if !strings.Contains(got, `"as":"result"`) {
+		t.Errorf("terminal aggregate should become result: %s", got)
+	}
+	if !strings.Contains(got, `"as":"keep"`) {
+		t.Errorf("non-terminal aggregate should be preserved: %s", got)
+	}
+	if strings.Contains(got, `"as":"rename"`) {
+		t.Errorf("terminal aggregate 'rename' should have been replaced: %s", got)
+	}
+}
+
+func TestDeriveResultantQueryIdempotent(t *testing.T) {
+	// A pipeline whose terminal aggregate is already "result" stays "result".
+	in := `[{"type":"aggregate","aggregates":[{"as":"result","function":{"$count":[]}}]}]`
+	got := deriveResultantQuery(in)
+	if !strings.Contains(got, `"as":"result"`) || strings.Count(got, `"result"`) != 1 {
+		t.Errorf("already-result pipeline should remain result: %s", got)
+	}
+}
+
+func TestParseTelemetryToMetricsID(t *testing.T) {
+	region, id, name, err := parseTelemetryToMetricsID("ap-south-1:abc-123:my-rule")
+	if err != nil || region != "ap-south-1" || id != "abc-123" || name != "my-rule" {
+		t.Errorf("normal parse failed: %q %q %q %v", region, id, name, err)
+	}
+
+	// A name containing ':' must be preserved (SplitN with limit 3).
+	_, _, name, err = parseTelemetryToMetricsID("ap-south-1:abc-123:errors:prod")
+	if err != nil || name != "errors:prod" {
+		t.Errorf("colon-in-name not preserved: name=%q err=%v", name, err)
+	}
+
+	if _, _, _, err := parseTelemetryToMetricsID("too:few"); err == nil {
+		t.Error("expected error for malformed ID, got nil")
+	}
+}
+
+func TestQueryTypeAllowlist(t *testing.T) {
+	logs := resourceLogsToMetrics().Schema["query_type"]
+	traces := resourceTracesToMetrics().Schema["query_type"]
+
+	// logs accepts log query types, rejects the traces one.
+	if _, errs := logs.ValidateFunc("logjson-aggregate", "query_type"); len(errs) != 0 {
+		t.Errorf("logs should accept logjson-aggregate: %v", errs)
+	}
+	if _, errs := logs.ValidateFunc("tracejson-aggregate", "query_type"); len(errs) == 0 {
+		t.Error("logs should reject tracejson-aggregate")
+	}
+	// traces accepts the trace query type, rejects a logs one.
+	if _, errs := traces.ValidateFunc("tracejson-aggregate", "query_type"); len(errs) != 0 {
+		t.Errorf("traces should accept tracejson-aggregate: %v", errs)
+	}
+	if _, errs := traces.ValidateFunc("logql-aggregate", "query_type"); len(errs) == 0 {
+		t.Error("traces should reject logql-aggregate")
+	}
+}
+
 func TestTracesToMetricsDefaults(t *testing.T) {
 	r := resourceTracesToMetrics()
 
