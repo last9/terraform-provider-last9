@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-17
+
 ### Added
 
+- **last9_dashboard** - `markdown` and `doughnut` visualization types for dashboard panels. Markdown panels support `markdown_config.content` and do not require query blocks.
+- **last9_alert** - `equal_to` and `not_equal` threshold fields for equality-based metric alerts.
 - **last9_entity** - `renotify_enabled`, `renotify_interval_seconds`, and `renotify_occurrences` fields for per-alert-group repeat notification control (ENG-899)
   - `renotify_enabled = false` — notify-once: only the first firing notification and the resolved notification are sent
   - `renotify_interval_seconds` — seconds between repeat notifications while firing (must be ≥ 1)

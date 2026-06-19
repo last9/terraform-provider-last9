@@ -189,9 +189,9 @@ func TestDashboard_ExpandPanels_BasicStat(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":    "stat panel",
-				"unit":    "bytes-iec",
-				"layout":  []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"name":   "stat panel",
+				"unit":   "bytes-iec",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{
 						"type":       "stat",
@@ -295,6 +295,159 @@ func TestDashboard_ExpandPanels_BarWithConfig(t *testing.T) {
 	}
 }
 
+func TestDashboard_ExpandPanels_MarkdownWithConfigNoQuery(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "markdown panel",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type": "markdown",
+						"markdown_config": []interface{}{
+							map[string]interface{}{
+								"content": "### Notes\n\nMigrated from New Relic.",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := validateDashboardData(d); err != nil {
+		t.Fatalf("markdown panels should not require query blocks: %v", err)
+	}
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	mc := panels[0].Visualization.MarkdownConfig
+	if mc == nil {
+		t.Fatal("markdown_config not expanded")
+	}
+	if mc.Content != "### Notes\n\nMigrated from New Relic." {
+		t.Errorf("markdown content mismatch: %q", mc.Content)
+	}
+}
+
+func TestDashboard_ValidateMarkdownRequiresConfig(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "markdown panel",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "markdown"},
+				},
+			},
+		},
+	})
+
+	err := validateDashboardData(d)
+	if err == nil {
+		t.Fatal("expected markdown panel without markdown_config to fail validation")
+	}
+	if !strings.Contains(err.Error(), "markdown panels require markdown_config") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestDashboard_ValidateMarkdownRejectsQuery(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "markdown panel",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type": "markdown",
+						"markdown_config": []interface{}{
+							map[string]interface{}{"content": "notes"},
+						},
+					},
+				},
+				"query": []interface{}{
+					map[string]interface{}{"name": "A", "expr": "1"},
+				},
+			},
+		},
+	})
+
+	err := validateDashboardData(d)
+	if err == nil {
+		t.Fatal("expected markdown panel with query to fail validation")
+	}
+	if !strings.Contains(err.Error(), "markdown panels cannot have query blocks") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestDashboard_ValidateMarkdownRequiresLayout(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name": "markdown panel",
+				"visualization": []interface{}{
+					map[string]interface{}{
+						"type": "markdown",
+						"markdown_config": []interface{}{
+							map[string]interface{}{"content": "notes"},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	err := validateDashboardData(d)
+	if err == nil {
+		t.Fatal("expected markdown panel without layout to fail validation")
+	}
+	if !strings.Contains(err.Error(), "markdown panels require a layout block") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestDashboard_ExpandPanels_DoughnutType(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
+		"region": "ap-south-1",
+		"name":   "test",
+		"panel": []interface{}{
+			map[string]interface{}{
+				"name":   "doughnut panel",
+				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+				"visualization": []interface{}{
+					map[string]interface{}{"type": "doughnut"},
+				},
+				"query": []interface{}{
+					map[string]interface{}{
+						"name":       "A",
+						"expr":       "sum by (status) (http_requests_total)",
+						"telemetry":  "metrics",
+						"query_type": "promql",
+					},
+				},
+			},
+		},
+	})
+
+	if err := validateDashboardData(d); err != nil {
+		t.Fatalf("doughnut panels should validate with query and layout: %v", err)
+	}
+
+	panels := expandPanels(d.Get("panel").([]interface{}))
+	if panels[0].Visualization.Type != "doughnut" {
+		t.Errorf("visualization type mismatch: %q", panels[0].Visualization.Type)
+	}
+}
+
 func TestDashboard_ExpandVariables_LabelType(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, resourceDashboard().Schema, map[string]interface{}{
 		"region": "ap-south-1",
@@ -385,6 +538,40 @@ func TestDashboard_TableConfigJSON_OpaqueRoundTrip(t *testing.T) {
 	first := cc[0].(map[string]interface{})
 	if first["key"] != "svc" {
 		t.Errorf("columnConfig.key wrong: %v", first)
+	}
+}
+
+func TestDashboard_FlattenVisualization_MarkdownConfig(t *testing.T) {
+	out := flattenVisualization(&client.DashboardPanelVisualization{
+		Type:           "markdown",
+		MarkdownConfig: &client.DashboardMarkdownConfig{Content: "### Notes\n\nDetails"},
+	})
+
+	if len(out) != 1 {
+		t.Fatalf("expected 1 visualization, got %d", len(out))
+	}
+	viz := out[0].(map[string]interface{})
+	if viz["type"] != "markdown" {
+		t.Errorf("type mismatch: %v", viz["type"])
+	}
+	configs := viz["markdown_config"].([]interface{})
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 markdown_config, got %d", len(configs))
+	}
+	config := configs[0].(map[string]interface{})
+	if config["content"] != "### Notes\n\nDetails" {
+		t.Errorf("content mismatch: %q", config["content"])
+	}
+}
+
+func TestDashboard_FlattenVisualization_DoughnutType(t *testing.T) {
+	out := flattenVisualization(&client.DashboardPanelVisualization{Type: "doughnut"})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 visualization, got %d", len(out))
+	}
+	viz := out[0].(map[string]interface{})
+	if viz["type"] != "doughnut" {
+		t.Errorf("type mismatch: %v", viz["type"])
 	}
 }
 
@@ -697,12 +884,12 @@ func TestDashboard_FlattenVariables_NonStringValuesCoerced(t *testing.T) {
 
 func TestDashboard_FlattenLayout_PreservesExtraKeys(t *testing.T) {
 	in := map[string]any{
-		"x":     float64(1),
-		"y":     float64(2),
-		"w":     float64(3),
-		"h":     float64(4),
-		"minH":  float64(2),
-		"i":     "panel-id",
+		"x":      float64(1),
+		"y":      float64(2),
+		"w":      float64(3),
+		"h":      float64(4),
+		"minH":   float64(2),
+		"i":      "panel-id",
 		"static": true,
 	}
 	out := flattenLayout(in)

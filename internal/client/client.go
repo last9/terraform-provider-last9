@@ -1224,18 +1224,18 @@ type RemappingLogsExtractProperties struct {
 }
 
 type RemappingLogsExtractRequest struct {
-	Name       string                          `json:"name"`
-	Properties RemappingLogsExtractProperties  `json:"properties"`
+	Name       string                         `json:"name"`
+	Properties RemappingLogsExtractProperties `json:"properties"`
 }
 
 type RemappingLogsExtractResponse struct {
-	ID         string                          `json:"id"`
-	Name       string                          `json:"name"`
-	Properties RemappingLogsExtractProperties  `json:"properties"`
-	CreatedAt  int64                           `json:"created_at"`
-	CreatedBy  string                          `json:"created_by"`
-	UpdatedAt  *int64                          `json:"updated_at,omitempty"`
-	Status     string                          `json:"status"`
+	ID         string                         `json:"id"`
+	Name       string                         `json:"name"`
+	Properties RemappingLogsExtractProperties `json:"properties"`
+	CreatedAt  int64                          `json:"created_at"`
+	CreatedBy  string                         `json:"created_by"`
+	UpdatedAt  *int64                         `json:"updated_at,omitempty"`
+	Status     string                         `json:"status"`
 }
 
 type RemappingMapProperties struct {
@@ -1370,6 +1370,7 @@ type DashboardPanelVisualization struct {
 	TimeseriesConfig *DashboardTimeseriesConfig `json:"timeseries_config,omitempty"`
 	BarConfig        *DashboardBarConfig        `json:"bar_config,omitempty"`
 	StatConfig       *DashboardStatConfig       `json:"stat_config,omitempty"`
+	MarkdownConfig   *DashboardMarkdownConfig   `json:"markdown_config,omitempty"`
 }
 
 type DashboardTimeseriesConfig struct {
@@ -1388,6 +1389,10 @@ type DashboardStatConfig struct {
 type DashboardStatThreshold struct {
 	Value float64 `json:"value"`
 	Color string  `json:"color"`
+}
+
+type DashboardMarkdownConfig struct {
+	Content string `json:"content"`
 }
 
 type DashboardPanelQueryDetails struct {

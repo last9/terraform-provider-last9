@@ -7,7 +7,7 @@ description: |-
 
 # last9_dashboard (Resource)
 
-Manages a Last9 custom dashboard. Dashboards organize panels (timeseries, stat, bar, table, section) over a time range with optional template variables. Each panel runs queries against metrics (PromQL), logs (LogQL or JSON pipeline), or traces (TraceQL or JSON pipeline) and renders the result with type-specific visualization config.
+Manages a Last9 custom dashboard. Dashboards organize panels (timeseries, stat, bar, table, doughnut, markdown, section) over a time range with optional template variables. Query-backed panels run queries against metrics (PromQL), logs (LogQL or JSON pipeline), or traces (TraceQL or JSON pipeline) and render the result with type-specific visualization config.
 
 ## Example Usage
 
@@ -186,6 +186,39 @@ resource "last9_dashboard" "logs" {
 }
 ```
 
+### Markdown Panel
+
+```terraform
+resource "last9_dashboard" "notes" {
+  region        = "ap-south-1"
+  name          = "Migration Notes"
+  relative_time = 60
+
+  panel {
+    name = "Dashboard Notes"
+
+    layout {
+      x = 0
+      y = 0
+      w = 12
+      h = 4
+    }
+
+    visualization {
+      type = "markdown"
+
+      markdown_config {
+        content = <<-EOT
+        ### Migration Notes
+
+        This dashboard was migrated from New Relic.
+        EOT
+      }
+    }
+  }
+}
+```
+
 ### Traces Table with JSON Pipeline
 
 ```terraform
@@ -301,14 +334,16 @@ The `layout` block supports:
 
 The `visualization` block supports:
 
-- `type` (String, Required) One of `timeseries`, `stat`, `bar`, `table`, `section`.
+- `type` (String, Required) One of `timeseries`, `stat`, `bar`, `table`, `doughnut`, `markdown`, `section`.
 - `full_width` (Boolean) Whether the panel spans full dashboard width.
 - `timeseries_config` (Block List, Max: 1) Optional config for timeseries. Has `display_type` (`line` | `area`).
 - `bar_config` (Block List, Max: 1) Optional config for bar. Has `orientation` (`vertical` | `horizontal`) and `stacked` (Boolean).
 - `stat_config` (Block List, Max: 1) Optional config for stat. Has `threshold` (Block List) entries with `value` (Float) and `color` (String).
+- `markdown_config` (Block List, Max: 1) Required for markdown panels. Has `content` (String), the Markdown body rendered in the panel.
 - `table_config_json` (String) Raw `table_config` JSON. The backend stores this as an untyped blob (`columnConfig`, `density`, `thresholds`, `transpose`, etc.); use `jsonencode({...})` so any field set in the UI round-trips verbatim. Invalid JSON fails at plan time.
 
 Section panels (`type = "section"`) must have no `query` and no `layout` blocks.
+Markdown panels (`type = "markdown"`) must have a `layout` block and no `query` blocks.
 
 #### Query
 

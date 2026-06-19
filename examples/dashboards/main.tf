@@ -105,6 +105,30 @@ resource "last9_dashboard" "aws_cost_explorer" {
     }
   }
 
+  # Markdown panel for dashboard notes
+  panel {
+    name = "Cost Dashboard Notes"
+
+    layout {
+      x = 3
+      y = 0
+      w = 9
+      h = 6
+    }
+
+    visualization {
+      type = "markdown"
+
+      markdown_config {
+        content = <<-EOT
+        ### Cost Dashboard Notes
+
+        Review account and region filters before comparing week-over-week cost.
+        EOT
+      }
+    }
+  }
+
   # Stat with thresholds
   panel {
     name = "Total Spend"
@@ -269,6 +293,33 @@ resource "last9_dashboard" "mixed_telemetry" {
       legend_type      = "custom"
       legend_value     = "{{service}}"
       legend_placement = "right"
+    }
+  }
+
+  # Doughnut panel for categorical PromQL results
+  panel {
+    name      = "HTTP Status Mix"
+    telemetry = "metrics"
+
+    layout {
+      x = 0
+      y = 11
+      w = 6
+      h = 6
+    }
+
+    visualization {
+      type = "doughnut"
+    }
+
+    query {
+      name             = "A"
+      expr             = "sum by (status) (http_requests_total)"
+      telemetry        = "metrics"
+      query_type       = "promql"
+      legend_type      = "custom"
+      legend_value     = "{{status}}"
+      legend_placement = "bottom"
     }
   }
 
