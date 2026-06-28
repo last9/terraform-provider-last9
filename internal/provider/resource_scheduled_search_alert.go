@@ -66,6 +66,26 @@ func resourceScheduledSearchAlert() *schema.Resource {
 					return
 				},
 			},
+			"resultant_query": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "Merged log query pipeline, including the post-processor stage, executed by the scheduled-search runner. The final aggregate stage must use as = \"result\" so the runner can read the metric value.",
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					v := strings.TrimSpace(val.(string))
+					if v == "" {
+						errs = append(errs, fmt.Errorf("%q must not be empty", key))
+						return
+					}
+					var pipeline []interface{}
+					if err := json.Unmarshal([]byte(v), &pipeline); err != nil {
+						errs = append(errs, fmt.Errorf("%q must be valid JSON array: %s", key, err))
+					}
+					if len(pipeline) == 0 {
+						errs = append(errs, fmt.Errorf("%q must contain at least one pipeline stage", key))
+					}
+					return
+				},
+			},
 			"post_processor": {
 				Type:        schema.TypeList,
 				Required:    true,
@@ -221,6 +241,7 @@ func resourceScheduledSearchAlertRead(ctx context.Context, d *schema.ResourceDat
 	d.Set("physical_index", alert.PhysicalIndex)
 	d.Set("telemetry", alert.Properties.Telemetry)
 	d.Set("query", alert.Properties.Query)
+	d.Set("resultant_query", alert.Properties.ResultantQuery)
 	d.Set("search_frequency", alert.Properties.SearchFrequency)
 
 	// Set post_processor
@@ -302,6 +323,7 @@ func buildScheduledSearchAlert(d *schema.ResourceData, apiClient *client.Client)
 	physicalIndex := d.Get("physical_index").(string)
 	telemetry := d.Get("telemetry").(string)
 	query := d.Get("query").(string)
+	resultantQuery := d.Get("resultant_query").(string)
 	searchFrequency := d.Get("search_frequency").(int)
 
 	// Build post-processors
@@ -339,6 +361,7 @@ func buildScheduledSearchAlert(d *schema.ResourceData, apiClient *client.Client)
 		Properties: client.ScheduledSearchProperties{
 			Telemetry:         telemetry,
 			Query:             query,
+			ResultantQuery:    resultantQuery,
 			PostProcessor:     postProcessors,
 			SearchFrequency:   searchFrequency,
 			AlertDestinations: alertDestinations,

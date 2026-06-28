@@ -37,6 +37,28 @@ resource "last9_scheduled_search_alert" "error_count" {
     }
   ])
 
+  # Merged pipeline executed by the scheduled-search runner (query + post-processor)
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
+    }
+  ])
+
   post_processor {
     type = "aggregate"
 
@@ -79,6 +101,27 @@ resource "last9_scheduled_search_alert" "errors_by_service" {
     }
   ])
 
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = { "service" = "$attributes.service" }
+    }
+  ])
+
   post_processor {
     type = "aggregate"
 
@@ -106,6 +149,27 @@ resource "last9_scheduled_search_alert" "errors_by_service" {
 - `region` (String) Region for the alert (e.g., "ap-south-1").
 - `name` (String) Name of the scheduled search alert.
 - `query` (String) JSON-encoded LogJSON query pipeline.
+- `resultant_query` (String) JSON-encoded merged query pipeline executed by the scheduled-search runner, including filter stages from `query` and the aggregate stage from `post_processor`. The final aggregate stage must use `as = "result"` (the runner reads the `result` metric key).
+
+### Resultant Query
+
+`resultant_query` is the pipeline the scheduled-search runner executes. Merge the filter stages from `query` with the aggregate stage from `post_processor`. The aggregate output alias must be `"result"` — `post_processor` may use a different display name, but `resultant_query` must match what the runner expects.
+
+```terraform
+resultant_query = jsonencode([
+  # ... filter stages from query ...
+  {
+    type = "aggregate"
+    aggregates = [
+      {
+        function = { "$count" = [] }
+        as       = "result"
+      }
+    ]
+    groupby = {}
+  }
+])
+```
 - `post_processor` (Block) Post-processor configuration. See [Post Processor](#post-processor) below.
 - `search_frequency` (Number) Search frequency in seconds (60-86400).
 - `threshold` (Block) Threshold configuration. See [Threshold](#threshold) below.

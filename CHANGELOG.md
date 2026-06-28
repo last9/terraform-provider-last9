@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.
+
+### Changed
+
+- **last9_scheduled_search_alert** - `resultant_query` is now required. Existing configurations must supply the merged query pipeline (filter stages plus post-processor aggregate stage) that the scheduled-search runner executes. The final aggregate stage must use `as = "result"`.
+
 ## [0.5.0] - 2026-06-17
 
 ### Added

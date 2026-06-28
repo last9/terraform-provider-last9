@@ -53,6 +53,33 @@ post_processor {
 }
 ```
 
+## Resultant Query
+
+`resultant_query` is required. It is the merged pipeline the scheduled-search runner executes: filter stages from `query` plus the aggregate stage from `post_processor`. The final aggregate stage must use `as = "result"` (the runner reads the `result` metric key).
+
+```hcl
+resultant_query = jsonencode([
+  {
+    type  = "filter"
+    query = {
+      "$and" = [
+        { "$eq" = ["SeverityText", "ERROR"] }
+      ]
+    }
+  },
+  {
+    type = "aggregate"
+    aggregates = [
+      {
+        function = { "$count" = [] }
+        as       = "result"
+      }
+    ]
+    groupby = {}
+  }
+])
+```
+
 ## Threshold Configuration
 
 Define when to trigger an alert:

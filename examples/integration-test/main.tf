@@ -266,6 +266,27 @@ resource "last9_scheduled_search_alert" "high_error_count" {
     }
   ])
 
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
+    }
+  ])
+
   post_processor {
     type = "aggregate"
 

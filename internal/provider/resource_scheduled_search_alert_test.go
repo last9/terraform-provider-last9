@@ -198,6 +198,51 @@ func TestFlattenPostProcessors(t *testing.T) {
 	}
 }
 
+func TestScheduledSearchAlert_ResultantQueryValidation(t *testing.T) {
+	fn := resourceScheduledSearchAlert().Schema["resultant_query"].ValidateFunc
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{
+			name:    "valid merged filter and aggregate pipeline",
+			input:   `[{"type":"filter","query":{"$eq":["ServiceName","api"]}},{"type":"aggregate","aggregates":[{"function":{"$count":[]},"as":"result"}],"groupby":{}}]`,
+			wantErr: false,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "empty array",
+			input:   "[]",
+			wantErr: true,
+		},
+		{
+			name:    "object instead of array",
+			input:   `{"type":"filter"}`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid json",
+			input:   `not-json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, errs := fn(tt.input, "resultant_query")
+			if (len(errs) > 0) != tt.wantErr {
+				t.Fatalf("ValidateFunc returned %d errors, wantErr=%v: %v", len(errs), tt.wantErr, errs)
+			}
+		})
+	}
+}
+
 // Acceptance tests
 
 func TestAccScheduledSearchAlert_basic(t *testing.T) {
@@ -374,6 +419,26 @@ resource "last9_scheduled_search_alert" "test" {
       }
     }
   ])
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
+    }
+  ])
 
   post_processor {
     type = "aggregate"
@@ -424,6 +489,26 @@ resource "last9_scheduled_search_alert" "test" {
       }
     }
   ])
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
+    }
+  ])
 
   post_processor {
     type = "aggregate"
@@ -472,6 +557,29 @@ resource "last9_scheduled_search_alert" "test" {
           { "$eq" = ["SeverityText", "ERROR"] },
           { "$eq" = ["attributes.service", "api-service"] }
         ]
+      }
+    }
+  ])
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] },
+          { "$eq" = ["attributes.service", "api-service"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {
+        "endpoint" = ["attributes.endpoint"]
       }
     }
   ])

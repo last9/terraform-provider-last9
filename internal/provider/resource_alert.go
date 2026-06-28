@@ -75,10 +75,20 @@ func resourceAlert() *schema.Resource {
 				Optional:    true,
 				Description: "Threshold value for greater than condition",
 			},
+			"greater_than_eq": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Description: "Threshold value for greater than or equal condition",
+			},
 			"less_than": {
 				Type:        schema.TypeFloat,
 				Optional:    true,
 				Description: "Threshold value for less than condition",
+			},
+			"less_than_eq": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Description: "Threshold value for less than or equal condition",
 			},
 			"equal_to": {
 				Type:        schema.TypeFloat,
@@ -517,6 +527,8 @@ func parseAndSetCondition(d *schema.ResourceData, condition string, evalWindow i
 			prefix string
 			field  string
 		}{
+			{">= ", "greater_than_eq"},
+			{"<= ", "less_than_eq"},
 			{"> ", "greater_than"},
 			{"< ", "less_than"},
 			{"== ", "equal_to"},
@@ -556,6 +568,8 @@ func buildStaticThresholdCondition(d *schema.ResourceData) string {
 		field    string
 		operator string
 	}{
+		{"greater_than_eq", ">="},
+		{"less_than_eq", "<="},
 		{"greater_than", ">"},
 		{"less_than", "<"},
 		{"equal_to", "=="},
