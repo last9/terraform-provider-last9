@@ -67,6 +67,27 @@ resource "last9_scheduled_search_alert" "high_error_count" {
     }
   ])
 
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "error_count"
+        }
+      ]
+      groupby = {}
+    }
+  ])
+
   # Post-processor: Count errors
   post_processor {
     type = "aggregate"
@@ -112,6 +133,30 @@ resource "last9_scheduled_search_alert" "api_error_spike" {
           { "$eq" = ["SeverityText", "ERROR"] },
           { "$eq" = ["attributes.service", "api-service"] }
         ]
+      }
+    }
+  ])
+
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] },
+          { "$eq" = ["attributes.service", "api-service"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "error_count"
+        }
+      ]
+      groupby = {
+        "endpoint" = ["attributes.endpoint"]
       }
     }
   ])
@@ -165,6 +210,27 @@ resource "last9_scheduled_search_alert" "critical_logs" {
     }
   ])
 
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "CRITICAL"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "critical_count"
+        }
+      ]
+      groupby = {}
+    }
+  ])
+
   # Post-processor: Count critical logs
   post_processor {
     type = "aggregate"
@@ -210,6 +276,28 @@ resource "last9_scheduled_search_alert" "low_activity" {
           { "$eq" = ["attributes.service", "payment-service"] }
         ]
       }
+    }
+  ])
+
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["attributes.environment", "production"] },
+          { "$eq" = ["attributes.service", "payment-service"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "log_count"
+        }
+      ]
+      groupby = {}
     }
   ])
 

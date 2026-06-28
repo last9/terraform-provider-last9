@@ -116,7 +116,9 @@ resource "last9_alert" "service_down" {
 - `description` (String) Alert description.
 - `severity` (String) Alert severity: `breach` or `threat`. Default: `breach`.
 - `greater_than` (Number) Fire when query result exceeds this value.
+- `greater_than_eq` (Number) Fire when query result is greater than or equal to this value.
 - `less_than` (Number) Fire when query result drops below this value.
+- `less_than_eq` (Number) Fire when query result is less than or equal to this value.
 - `equal_to` (Number) Fire when query result equals this value.
 - `not_equal` (Number) Fire when query result differs from this value.
 - `bad_minutes` (Number) Minutes the condition must be true before firing.
