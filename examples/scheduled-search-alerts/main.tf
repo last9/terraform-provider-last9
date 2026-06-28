@@ -81,7 +81,7 @@ resource "last9_scheduled_search_alert" "high_error_count" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "error_count"
+          as       = "result"
         }
       ]
       groupby = {}
@@ -152,7 +152,7 @@ resource "last9_scheduled_search_alert" "api_error_spike" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "error_count"
+          as       = "result"
         }
       ]
       groupby = {
@@ -224,7 +224,7 @@ resource "last9_scheduled_search_alert" "critical_logs" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "critical_count"
+          as       = "result"
         }
       ]
       groupby = {}
@@ -294,7 +294,7 @@ resource "last9_scheduled_search_alert" "low_activity" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "log_count"
+          as       = "result"
         }
       ]
       groupby = {}

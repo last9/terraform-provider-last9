@@ -69,7 +69,7 @@ func resourceScheduledSearchAlert() *schema.Resource {
 			"resultant_query": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Merged log query pipeline, including the post-processor stage, executed by the scheduled-search runner",
+				Description: "Merged log query pipeline, including the post-processor stage, executed by the scheduled-search runner. The final aggregate stage must use as = \"result\" so the runner can read the metric value.",
 				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
 					v := strings.TrimSpace(val.(string))
 					if v == "" {

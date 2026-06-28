@@ -433,7 +433,7 @@ resource "last9_scheduled_search_alert" "test" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "error_count"
+          as       = "result"
         }
       ]
       groupby = {}
@@ -503,7 +503,7 @@ resource "last9_scheduled_search_alert" "test" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "error_count"
+          as       = "result"
         }
       ]
       groupby = {}
@@ -575,7 +575,7 @@ resource "last9_scheduled_search_alert" "test" {
       aggregates = [
         {
           function = { "$count" = [] }
-          as       = "error_count"
+          as       = "result"
         }
       ]
       groupby = {
