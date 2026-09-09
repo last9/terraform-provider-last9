@@ -13,6 +13,31 @@ import (
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
+// reconcileNotificationChannels binds entityID to every channel name in
+// wantChannels, at the given severity. The alert-rules Create/Update API has
+// no notification_channels field of its own — a channel is bound to an
+// entity via a dedicated attach call, so simply including
+// notification_channels in the alert-rule request body is silently ignored
+// server-side and creates no live binding. This function makes the calls
+// that actually create one, resolving each channel name to its numeric ID
+// first via ListNotificationDestinations.
+//
+// This only attaches; it never detaches a channel that's live but no longer
+// listed in config (see resourceAlertRead's docstring for how that gap is
+// surfaced as drift instead).
+func reconcileNotificationChannels(apiClient *client.Client, entityID, severity string, wantChannels []string) error {
+	for _, name := range wantChannels {
+		dest, err := apiClient.FindNotificationDestinationByName(name)
+		if err != nil {
+			return fmt.Errorf("failed to attach notification channel %q: %w", name, err)
+		}
+		if _, err := apiClient.AttachNotificationSettings(dest.ID, entityID, severity); err != nil {
+			return fmt.Errorf("failed to attach notification channel %q (id %d) to entity %s: %w", name, dest.ID, entityID, err)
+		}
+	}
+	return nil
+}
+
 // generateKPIName creates a unique KPI name from the rule name plus a random token
 func generateKPIName(ruleName string) string {
 	token := make([]byte, 4)
@@ -258,6 +283,16 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 
 	d.SetId(alert.ID)
+
+	// The alert-rules API has no notification_channels field of its own (see
+	// reconcileNotificationChannels docstring) — bind each requested channel
+	// via a separate attach call now that the entity/alert exist.
+	if len(req.NotificationChannels) > 0 {
+		if err := reconcileNotificationChannels(apiClient, entityID, req.Severity, req.NotificationChannels); err != nil {
+			return diag.FromErr(err)
+		}
+	}
+
 	return resourceAlertRead(ctx, d, m)
 }
 
@@ -279,7 +314,21 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	// Note: mute and is_disabled fields are intentionally not read from API
 	// The API may return different values than what was sent, causing drift
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
-	d.Set("notification_channels", alert.NotificationChannels)
+
+	// alert.NotificationChannels is never populated by the API — the
+	// alert-rules endpoint has no such field (see reconcileNotificationChannels).
+	// Read the real binding state instead, so a channel that failed to
+	// attach, or was detached outside Terraform, shows up as drift rather
+	// than looking clean.
+	bindings, err := apiClient.GetEntityNotificationBindings(entityID)
+	if err != nil {
+		return diag.FromErr(fmt.Errorf("failed to read notification bindings for entity %s: %w", entityID, err))
+	}
+	liveChannels := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		liveChannels = append(liveChannels, b.Name)
+	}
+	d.Set("notification_channels", liveChannels)
 
 	// Parse condition for static alerts to extract threshold values
 	if alert.Condition != "" && alert.EvalWindow > 0 {
@@ -463,6 +512,16 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 		d.Set("kpi_id", newKPI.ID)
 		d.Set("kpi_name", newKPI.Name)
 		d.Set("indicator", newKPI.Name)
+	}
+
+	// Bindings are keyed on entity_id, which is stable across this update
+	// (only the alert-rule itself is deleted/recreated), so existing
+	// bindings survive untouched. Re-run attach so any channel newly added
+	// to notification_channels gets bound — see reconcileNotificationChannels.
+	if len(req.NotificationChannels) > 0 {
+		if err := reconcileNotificationChannels(apiClient, entityID, *req.Severity, req.NotificationChannels); err != nil {
+			return diag.FromErr(err)
+		}
 	}
 
 	return resourceAlertRead(ctx, d, m)

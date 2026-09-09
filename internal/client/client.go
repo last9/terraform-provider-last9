@@ -848,6 +848,68 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 	return nil, fmt.Errorf("notification destination with ID %d not found", id)
 }
 
+// FindNotificationDestinationByName looks up a channel by its display name.
+// Channel names are not unique keys in the API (multiple per-entity binding
+// rows can share one display name), so this returns the first match; that
+// is sufficient for resolving a name to the channel ID used by attach/detach,
+// since every row sharing a name is a binding of the same underlying channel.
+func (c *Client) FindNotificationDestinationByName(name string) (*NotificationDestination, error) {
+	destinations, err := c.ListNotificationDestinations()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notification destinations: %w", err)
+	}
+
+	for _, dest := range destinations {
+		if dest.Name == name {
+			return &dest, nil
+		}
+	}
+
+	return nil, fmt.Errorf("notification channel %q not found", name)
+}
+
+// AttachNotificationSettingsRequest is the body for binding a channel to an entity.
+// Severity is mandatory when EntityID is set (the API returns 400 otherwise).
+type AttachNotificationSettingsRequest struct {
+	EntityID string `json:"entity_id"`
+	Severity string `json:"severity"`
+}
+
+// AttachNotificationSettings binds an existing notification channel (by its
+// numeric ID) to an entity for the given severity. This is the ONLY thing
+// that creates a live notification binding — setting notification_channels
+// in an alert-rule create/update request body is a no-op server-side; the
+// alert-rules API has no such field, so it's silently dropped.
+func (c *Client) AttachNotificationSettings(channelID int, entityID, severity string) (*NotificationDestination, error) {
+	var result NotificationDestination
+	req := &AttachNotificationSettingsRequest{
+		EntityID: entityID,
+		Severity: severity,
+	}
+	err := c.Post(fmt.Sprintf("/notification_settings/%d/attach", channelID), req, &result)
+	return &result, err
+}
+
+// GetEntityNotificationBindings returns the live notification-settings rows
+// bound to a specific entity, i.e. the ground truth for what will actually
+// notify when this entity's alerts fire — as opposed to what a Terraform
+// alert resource's notification_channels field claims, which the API does
+// not use.
+func (c *Client) GetEntityNotificationBindings(entityID string) ([]NotificationDestination, error) {
+	destinations, err := c.ListNotificationDestinations()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notification destinations: %w", err)
+	}
+
+	bindings := make([]NotificationDestination, 0)
+	for _, dest := range destinations {
+		if dest.ServiceFqid == entityID {
+			bindings = append(bindings, dest)
+		}
+	}
+	return bindings, nil
+}
+
 // Scheduled Search methods
 func (c *Client) GetScheduledSearchAlerts(region string) ([]ScheduledSearchAlertFull, error) {
 	var result []ScheduledSearchAlertFull
