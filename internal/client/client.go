@@ -348,6 +348,25 @@ func (c *Client) Put(path string, body interface{}, result interface{}) error {
 	return c.decodeResponse(resp, result)
 }
 
+// DeleteWithWriteToken issues a DELETE using the regular write access token
+// instead of the delete-scoped token. Most DELETE endpoints in this API
+// (entities, alerts, KPIs, dashboards) require the delete-scoped token by
+// design, but notification_settings/{id}/attach does not — server-side it
+// sits behind the same auth as attach (see ValidateDeleteNotificationSetting
+// in last9/last9, which only checks entity ownership, not token scope).
+// Requiring a delete_refresh_token just to detach a channel from an alert
+// would be a much bigger blast-radius ask than the operation warrants, so
+// this uses doRequest (write token) rather than the existing Delete()
+// helper (delete token).
+func (c *Client) DeleteWithWriteToken(path string) error {
+	resp, err := c.doRequest("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
 func (c *Client) Patch(path string, body interface{}, result interface{}) error {
 	resp, err := c.doRequest("PATCH", path, body)
 	if err != nil {
@@ -888,6 +907,14 @@ func (c *Client) AttachNotificationSettings(channelID int, entityID, severity st
 	}
 	err := c.Post(fmt.Sprintf("/notification_settings/%d/attach", channelID), req, &result)
 	return &result, err
+}
+
+// DetachNotificationSettings removes one binding row (the per-entity child
+// record created by an earlier AttachNotificationSettings call — NOT the
+// master channel definition). rowID is that row's own id, e.g. from
+// GetEntityNotificationBindings, not the channel's master ID used to attach.
+func (c *Client) DetachNotificationSettings(rowID int) error {
+	return c.DeleteWithWriteToken(fmt.Sprintf("/notification_settings/%d/attach", rowID))
 }
 
 // GetEntityNotificationBindings returns the live notification-settings rows

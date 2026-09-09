@@ -104,6 +104,49 @@ func TestAttachNotificationSettings(t *testing.T) {
 	}
 }
 
+// TestDetachNotificationSettings verifies the detach call: DELETE against
+// /notification_settings/{binding_row_id}/attach — the row's own id (as
+// returned by attach or listed via ListNotificationDestinations), NOT the
+// channel's master ID used to attach. Also asserts it uses the regular
+// write token, not the delete-scoped token: unlike DeleteEntity/DeleteAlert,
+// this endpoint sits behind normal write auth server-side (see
+// ValidateDeleteNotificationSetting in last9/last9, which checks entity
+// ownership, not token scope), so requiring a delete_refresh_token here
+// would be an unnecessary blast-radius increase.
+func TestDetachNotificationSettings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/api/v4/organizations/test-org/notification_settings/58742/attach" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		// Configured with a distinct write token and delete token below;
+		// asserting on the write token here is what proves this call does
+		// NOT use the delete-scoped path (c.Delete would send "Bearer
+		// delete-token" instead).
+		if got := r.Header.Get("X-LAST9-API-TOKEN"); got != "Bearer write-token" {
+			t.Fatalf("expected write token (Bearer write-token), got: %s", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c, err := NewClient(&Config{
+		APIToken:    "write-token",
+		DeleteToken: "delete-token",
+		Org:         "test-org",
+		BaseURL:     server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if err := c.DetachNotificationSettings(58742); err != nil {
+		t.Fatalf("DetachNotificationSettings() error = %v", err)
+	}
+}
+
 // TestGetEntityNotificationBindings verifies the Read-side fix: it must
 // return only the rows actually bound to the given entity (service_fqid
 // match), not every channel in the org, and not the alert-rule's own
