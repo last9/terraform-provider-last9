@@ -39,7 +39,9 @@ func TestFindNotificationDestinationByName(t *testing.T) {
 			t.Fatalf("unexpected auth header: %s", r.Header.Get("X-LAST9-API-TOKEN"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(destinations)
+		if err := json.NewEncoder(w).Encode(destinations); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	})
 	defer server.Close()
 
@@ -78,13 +80,15 @@ func TestAttachNotificationSettings(t *testing.T) {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(NotificationDestination{
+		if err := json.NewEncoder(w).Encode(NotificationDestination{
 			ID:          58698,
 			Name:        "CreditPlus - All Alerts",
 			Type:        "generic_webhook",
 			ServiceFqid: gotBody.EntityID,
 			Severity:    gotBody.Severity,
-		})
+		}); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	})
 	defer server.Close()
 
@@ -160,7 +164,9 @@ func TestGetEntityNotificationBindings(t *testing.T) {
 
 	c, server := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(destinations)
+		if err := json.NewEncoder(w).Encode(destinations); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
 	})
 	defer server.Close()
 

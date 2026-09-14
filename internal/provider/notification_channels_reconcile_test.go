@@ -52,11 +52,11 @@ func (f *fakeNotificationServer) handler() http.HandlerFunc {
 					result = append(result, c)
 				}
 			}
-			json.NewEncoder(w).Encode(result)
+			_ = json.NewEncoder(w).Encode(result)
 
 		case r.Method == http.MethodPost:
 			var body client.AttachNotificationSettingsRequest
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			// path: /notification_settings/{channelID}/attach
 			var channelID int
 			for _, c := range f.catalog {
@@ -73,7 +73,7 @@ func (f *fakeNotificationServer) handler() http.HandlerFunc {
 					break
 				}
 			}
-			json.NewEncoder(w).Encode(f.live)
+			_ = json.NewEncoder(w).Encode(f.live)
 
 		case r.Method == http.MethodDelete:
 			for name, b := range f.live {
