@@ -389,3 +389,70 @@ func dataSourceDatasourceRead(ctx context.Context, d *schema.ResourceData, m int
 	_ = d.Set("default", found.Default)
 	return nil
 }
+
+func dataSourceUser() *schema.Resource {
+	return &schema.Resource{
+		ReadContext: dataSourceUserRead,
+		Schema: map[string]*schema.Schema{
+			"id": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "User ID",
+			},
+			"email": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "User email",
+			},
+			"name": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"role": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"status": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"active": {
+				Type:     schema.TypeBool,
+				Computed: true,
+			},
+			"organization_id": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+		},
+	}
+}
+
+func dataSourceUserRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	c := m.(*client.Client)
+
+	var user *client.User
+	var err error
+	if id, ok := d.GetOk("id"); ok {
+		user, err = c.FindUserByID(id.(string))
+	} else if email, ok := d.GetOk("email"); ok {
+		user, err = c.FindUserByEmail(email.(string))
+	} else {
+		return diag.FromErr(fmt.Errorf("either id or email must be provided"))
+	}
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	d.SetId(user.ID)
+	_ = d.Set("id", user.ID)
+	_ = d.Set("email", user.Email)
+	_ = d.Set("name", user.Name)
+	_ = d.Set("role", user.Role)
+	_ = d.Set("status", user.Status)
+	_ = d.Set("organization_id", user.OrganizationID)
+	_ = d.Set("active", user.DeletedAt == nil)
+	return nil
+}

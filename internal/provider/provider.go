@@ -71,6 +71,7 @@ func New() *schema.Provider {
 			"last9_sensitive_data_rule":    resourceSensitiveDataRule(),
 			"last9_physical_index":         resourcePhysicalIndex(),
 			"last9_rehydration":            resourceRehydration(),
+			"last9_user":                   resourceUser(),
 			// Note: notification_channel_attachment is not registered because the API
 			// doesn't support reading child channels after creation. Attachments should
 			// be managed via the entity's notification_channels field instead.
@@ -80,6 +81,7 @@ func New() *schema.Provider {
 			"last9_notification_destination": dataSourceNotificationDestination(),
 			"last9_cluster":                  dataSourceCluster(),
 			"last9_datasource":               dataSourceDatasource(),
+			"last9_user":                     dataSourceUser(),
 		},
 		ConfigureContextFunc: configureProvider,
 	}

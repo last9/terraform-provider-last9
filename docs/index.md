@@ -25,7 +25,8 @@ The Last9 provider enables Terraform to manage [Last9](https://last9.io) resourc
 - **Drop / Forward / Remapping**: OTel control-plane pipeline rules
 - **Sensitive data / Physical index / Rehydration**: Log pipeline controls
 - **Dashboards**: Custom dashboards with panels, queries, and variables
-- **Lookups**: `last9_cluster`, `last9_datasource`, entity, notification destination data sources
+- **Lookups**: `last9_cluster`, `last9_datasource`, `last9_user`, entity, notification destination data sources
+- **Users**: Invite and manage org members + roles (`last9_user`)
 
 See [docs/coverage.md](coverage.md) for the full API × Terraform × Datadog matrix.
 

@@ -60,6 +60,10 @@ export LAST9_API_BASE_URL=https://app.last9.io
 - `last9_notification_destination` — Query notification destinations
 - `last9_cluster` — Resolve cluster by region/name/default
 - `last9_datasource` — Resolve datasource by id/name/default
+- `last9_user` — Look up org user by id or email
+
+**Users**
+- `last9_user` — Invite users, set role (`admin`/`editor`/`viewer`), activate/deactivate
 
 Coverage matrix (API × TF × Datadog): [`docs/coverage.md`](docs/coverage.md)
 

@@ -15,11 +15,12 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 |----------|--------------|
 | Alerting (entities, metric alerts, scheduled search, snooze) | SLOs / slo_detectors |
 | Notifications | Macros |
-| Dashboards | Org users / ACL / RBAC |
+| Dashboards | Entity relationships |
 | Synthetics | Levitate tenants / sources / tokens / access policies |
 | Changeboards | Dashboard shares / snapshots / preferences |
-| OTel pipeline (drop, forward, remapping, sensitive data, rehydration, physical index) | Anomaly catalog, component templates, Grafana bridge |
-| Cluster + datasource lookups | Alert episode claims / live inventory |
+| Users + roles | Anomaly catalog, component templates, Grafana bridge |
+| OTel pipeline (drop, forward, remapping, sensitive data, rehydration, physical index) | Alert episode claims / live inventory |
+| Cluster + datasource lookups | |
 
 ## Resource coverage
 
@@ -42,6 +43,7 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Physical index | `/otel_settings/physical_index` | `last9_physical_index` | — | `datadog_logs_index` | ✅ |
 | Cluster lookup | `/clusters` | `data.last9_cluster` | — | — | ✅ |
 | Datasource lookup | `/datasources` | `data.last9_datasource` | — | — | ✅ |
+| Users | `/users`, `/users/invite`, `/users/{id}/roles` | `last9_user` / `data.last9_user` | — | `datadog_user` | ✅ |
 | SLOs | `/entities/{id}/slo` | — | slo | `datadog_service_level_objective` | ❌ skipped |
 | Macros | `/clusters/{id}/macros` | — | — | — | ❌ skipped |
 | Streaming aggregations | `/clusters/{id}/streaming_aggregations` | — | — | metrics pipelines | ❌ deferred |
@@ -58,6 +60,7 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Dashboards | dashboard | covered |
 | Logs pipelines / indexes | drop/forward/remap/sensitive/physical_index | covered |
 | Service catalog edges | — | intentionally skipped (relationships) |
+| Users / roles | `last9_user` | covered |
 | Security / RUM / cost / on-call | N/A | product gap, not TF gap |
 
 ## Legend

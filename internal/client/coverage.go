@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // --- Synthetics ---
@@ -481,4 +482,96 @@ func (c *Client) ListDatasources() ([]Datasource, error) {
 	var result []Datasource
 	err := c.Get("/datasources", &result)
 	return result, err
+}
+
+// --- Users ---
+
+type User struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Email          string  `json:"email"`
+	OrganizationID string  `json:"organization_id"`
+	Role           string  `json:"role"`
+	Status         string  `json:"status"`
+	DeletedAt      *int    `json:"deleted_at,omitempty"`
+	CreatedAt      string  `json:"created_at,omitempty"`
+	UpdatedAt      string  `json:"updated_at,omitempty"`
+}
+
+type InviteUsersRequest struct {
+	Emails []string `json:"emails"`
+	Role   string   `json:"role,omitempty"`
+}
+
+type PatchUserRequest struct {
+	Active *bool `json:"active,omitempty"`
+}
+
+type UpdateUserRoleRequest struct {
+	Role string `json:"role"`
+}
+
+type UserRoleResponse struct {
+	Role string `json:"role"`
+}
+
+func (c *Client) ListUsers() ([]User, error) {
+	var result []User
+	err := c.Get("/users", &result)
+	return result, err
+}
+
+func (c *Client) InviteUsers(emails []string, role string) error {
+	req := &InviteUsersRequest{Emails: emails, Role: role}
+	return c.Post("/users/invite", req, nil)
+}
+
+func (c *Client) PatchUser(userID string, active bool) error {
+	req := &PatchUserRequest{Active: &active}
+	return c.Patch(fmt.Sprintf("/users/%s", userID), req, nil)
+}
+
+func (c *Client) DeleteUser(userID string) error {
+	return c.Delete(fmt.Sprintf("/users/%s", userID))
+}
+
+func (c *Client) GetUserRole(userID string) (string, error) {
+	var result UserRoleResponse
+	err := c.Get(fmt.Sprintf("/users/%s/roles", userID), &result)
+	return result.Role, err
+}
+
+func (c *Client) UpdateUserRole(userID, role string) error {
+	return c.Put(fmt.Sprintf("/users/%s/roles", userID), &UpdateUserRoleRequest{Role: role}, nil)
+}
+
+func (c *Client) DeleteUserRole(userID string) error {
+	return c.Delete(fmt.Sprintf("/users/%s/roles", userID))
+}
+
+func (c *Client) FindUserByEmail(email string) (*User, error) {
+	users, err := c.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	want := strings.ToLower(strings.TrimSpace(email))
+	for i := range users {
+		if strings.ToLower(users[i].Email) == want {
+			return &users[i], nil
+		}
+	}
+	return nil, fmt.Errorf("user with email %q not found", email)
+}
+
+func (c *Client) FindUserByID(id string) (*User, error) {
+	users, err := c.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	for i := range users {
+		if users[i].ID == id {
+			return &users[i], nil
+		}
+	}
+	return nil, fmt.Errorf("user with id %q not found", id)
 }

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **last9_sensitive_data_rule** — OTel sensitive data scanning rules
 - **last9_physical_index** — OTel physical index configuration
 - **last9_rehydration** — OTel log rehydration jobs
+- **last9_user** / **data.last9_user** — invite/manage org users and roles (Datadog `datadog_user` parity)
 - **data.last9_cluster** / **data.last9_datasource** — lookup helpers for region/cluster and datasources
 
 ### Changed
@@ -27,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SLOs / slo_detectors
 - PromQL macros
 - Entity relationships (`last9_relationship`)
-- Org RBAC, Levitate tokens/access policies, streaming aggregations, cold storage
+- Levitate tokens/access policies, streaming aggregations, cold storage
 
 ## [0.5.0] - 2026-06-17
 
