@@ -47,10 +47,11 @@ func resourceSyntheticCheck() *schema.Resource {
 				Description: "Cron expression (e.g. '*/5 * * * *') or interval (e.g. 'every 5m')",
 			},
 			"config": {
-				Type:         schema.TypeString,
-				Required:     true,
-				Description:  "JSON config for the check (type-specific: url, host, script, etc.)",
-				ValidateFunc: validation.StringIsJSON,
+				Type:             schema.TypeString,
+				Required:         true,
+				Description:      "JSON config for the check (type-specific: url, host, script, etc.)",
+				ValidateFunc:     validation.StringIsJSON,
+				DiffSuppressFunc: suppressEquivalentJSON,
 			},
 			"timeout": {
 				Type:         schema.TypeInt,
@@ -136,7 +137,16 @@ func resourceSyntheticCheckRead(ctx context.Context, d *schema.ResourceData, m i
 		_ = d.Set("tags", check.Tags)
 	}
 	if len(check.Config) > 0 {
-		_ = d.Set("config", string(check.Config))
+		apiConfig := string(check.Config)
+		if planned, ok := d.GetOk("config"); ok {
+			if suppressEquivalentJSON("", planned.(string), apiConfig, d) {
+				_ = d.Set("config", planned.(string))
+			} else {
+				_ = d.Set("config", apiConfig)
+			}
+		} else {
+			_ = d.Set("config", apiConfig)
+		}
 	}
 	return nil
 }
@@ -233,4 +243,20 @@ func isNotFoundError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "404") || strings.Contains(msg, "not found")
+}
+
+func suppressEquivalentJSON(k, old, new string, d *schema.ResourceData) bool {
+	if old == "" || new == "" {
+		return old == new
+	}
+	var o, n interface{}
+	if err := json.Unmarshal([]byte(old), &o); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(new), &n); err != nil {
+		return false
+	}
+	ob, _ := json.Marshal(o)
+	nb, _ := json.Marshal(n)
+	return string(ob) == string(nb)
 }

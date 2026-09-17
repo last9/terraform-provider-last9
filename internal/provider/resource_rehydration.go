@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -45,13 +46,13 @@ func resourceRehydration() *schema.Resource {
 				Type:        schema.TypeInt,
 				Required:    true,
 				ForceNew:    true,
-				Description: "Start unix timestamp",
+				Description: "Start unix timestamp in seconds. Must be a cold/archived range (recent hot windows are rejected by the API).",
 			},
 			"to": {
 				Type:        schema.TypeInt,
 				Required:    true,
 				ForceNew:    true,
-				Description: "End unix timestamp",
+				Description: "End unix timestamp in seconds. Must be a cold/archived range (recent hot windows are rejected by the API).",
 			},
 			"message": {
 				Type:     schema.TypeString,
@@ -61,6 +62,7 @@ func resourceRehydration() *schema.Resource {
 			"granularity": {
 				Type:     schema.TypeString,
 				Optional: true,
+				Computed: true,
 				ForceNew: true,
 			},
 			"bucket_name": {
@@ -119,6 +121,11 @@ func resourceRehydrationRead(ctx context.Context, d *schema.ResourceData, m inte
 			return nil
 		}
 		return diag.FromErr(fmt.Errorf("read rehydration: %w", err))
+	}
+	// Soft-delete: API keeps the record while status is delete-pending.
+	if strings.Contains(strings.ToLower(resp.Status), "delete") {
+		d.SetId("")
+		return nil
 	}
 
 	_ = d.Set("region", region)

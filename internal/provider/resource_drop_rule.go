@@ -261,12 +261,7 @@ func expandRoutingFilters(input []interface{}) []client.RoutingFilter {
 	otel := expandOTelFilters(input)
 	out := make([]client.RoutingFilter, 0, len(otel))
 	for _, f := range otel {
-		out = append(out, client.RoutingFilter{
-			Key:         f.Key,
-			Value:       f.Value,
-			Operator:    f.Operator,
-			Conjunction: f.Conjunction,
-		})
+		out = append(out, client.RoutingFilter(f))
 	}
 	return out
 }
@@ -274,12 +269,7 @@ func expandRoutingFilters(input []interface{}) []client.RoutingFilter {
 func flattenRoutingFilters(input []client.RoutingFilter) []interface{} {
 	otel := make([]client.OTelSettingFilter, 0, len(input))
 	for _, f := range input {
-		otel = append(otel, client.OTelSettingFilter{
-			Key:         f.Key,
-			Value:       f.Value,
-			Operator:    f.Operator,
-			Conjunction: f.Conjunction,
-		})
+		otel = append(otel, client.OTelSettingFilter(f))
 	}
 	return flattenOTelFilters(otel)
 }

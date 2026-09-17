@@ -240,6 +240,10 @@ func (c *Client) getDeleteAccessToken() (string, error) {
 }
 
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
+	return c.doRequestWithHeaders(method, path, body, nil)
+}
+
+func (c *Client) doRequestWithHeaders(method, path string, body interface{}, headers map[string]string) (*http.Response, error) {
 	// Get valid access token
 	accessToken, err := c.getAccessToken()
 	if err != nil {
@@ -274,6 +278,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	// Use X-LAST9-API-TOKEN header with Bearer prefix as per Last9 API docs
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", accessToken))
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -359,6 +366,10 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 }
 
 func (c *Client) Delete(path string) error {
+	return c.DeleteWithHeaders(path, nil)
+}
+
+func (c *Client) DeleteWithHeaders(path string, headers map[string]string) error {
 	// Get valid delete access token (handles refresh token or static token)
 	deleteToken, err := c.getDeleteAccessToken()
 	if err != nil {
@@ -374,6 +385,9 @@ func (c *Client) Delete(path string) error {
 	// Use delete token for delete operations
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -387,6 +401,33 @@ func (c *Client) Delete(path string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) GetWithHeaders(path string, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("GET", path, nil, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
+func (c *Client) PostWithHeaders(path string, body interface{}, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("POST", path, body, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
+func (c *Client) PutWithHeaders(path string, body interface{}, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("PUT", path, body, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
 }
 
 // Alert methods

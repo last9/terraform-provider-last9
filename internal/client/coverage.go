@@ -51,21 +51,45 @@ type UpdateSyntheticCheckRequest struct {
 }
 
 func (c *Client) CreateSyntheticCheck(req *CreateSyntheticCheckRequest) (*SyntheticCheck, error) {
-	var result SyntheticCheck
-	err := c.Post("/synthetic/checks", req, &result)
-	return &result, err
+	var wrap struct {
+		Check SyntheticCheck `json:"check"`
+	}
+	err := c.Post("/synthetic/checks", req, &wrap)
+	if err != nil {
+		return nil, err
+	}
+	if wrap.Check.ID == "" {
+		return nil, fmt.Errorf("create synthetic check: empty id in response")
+	}
+	return &wrap.Check, nil
 }
 
 func (c *Client) GetSyntheticCheck(id string) (*SyntheticCheck, error) {
-	var result SyntheticCheck
-	err := c.Get(fmt.Sprintf("/synthetic/checks/%s", id), &result)
-	return &result, err
+	var wrap struct {
+		Check SyntheticCheck `json:"check"`
+	}
+	err := c.Get(fmt.Sprintf("/synthetic/checks/%s", id), &wrap)
+	if err != nil {
+		return nil, err
+	}
+	if wrap.Check.ID == "" {
+		return nil, fmt.Errorf("synthetic check %s not found", id)
+	}
+	return &wrap.Check, nil
 }
 
 func (c *Client) UpdateSyntheticCheck(id string, req *UpdateSyntheticCheckRequest) (*SyntheticCheck, error) {
-	var result SyntheticCheck
-	err := c.Put(fmt.Sprintf("/synthetic/checks/%s", id), req, &result)
-	return &result, err
+	var wrap struct {
+		Check SyntheticCheck `json:"check"`
+	}
+	err := c.Put(fmt.Sprintf("/synthetic/checks/%s", id), req, &wrap)
+	if err != nil {
+		return nil, err
+	}
+	if wrap.Check.ID != "" {
+		return &wrap.Check, nil
+	}
+	return c.GetSyntheticCheck(id)
 }
 
 func (c *Client) DeleteSyntheticCheck(id string) error {
@@ -574,4 +598,219 @@ func (c *Client) FindUserByID(id string) (*User, error) {
 		}
 	}
 	return nil, fmt.Errorf("user with id %q not found", id)
+}
+
+// --- Streaming aggregations ---
+
+type StreamingAggProperties struct {
+	Metric       string   `json:"metric"`
+	Resolution   string   `json:"resolution"`
+	Aggregation  string   `json:"aggregation"`
+	Clause       string   `json:"clause"`
+	Labels       []string `json:"labels"`
+	OutputMetric string   `json:"output_metric"`
+	WithName     string   `json:"with_name,omitempty"`
+	WithValue    string   `json:"with_value,omitempty"`
+}
+
+type StreamingAggRequest struct {
+	Name       string                 `json:"name"`
+	Telemetry  string                 `json:"telemetry"`
+	Properties StreamingAggProperties `json:"properties"`
+}
+
+type StreamingAggregation struct {
+	ID        string                 `json:"id"`
+	OrgID     string                 `json:"organization_id"`
+	Region    string                 `json:"region"`
+	ClusterID string                 `json:"cluster_id"`
+	Telemetry string                 `json:"telemetry"`
+	Name      string                 `json:"name"`
+	Properties StreamingAggProperties `json:"properties"`
+	CreatedAt int64                  `json:"created_at"`
+	UpdatedAt int64                  `json:"updated_at"`
+}
+
+func sapRegionHeader(region string) map[string]string {
+	return map[string]string{"region": region}
+}
+
+func (c *Client) CreateStreamingAggregation(clusterID, region string, req *StreamingAggRequest) (*StreamingAggregation, error) {
+	var result StreamingAggregation
+	path := fmt.Sprintf("/clusters/%s/streaming_aggregations", clusterID)
+	err := c.PostWithHeaders(path, req, &result, sapRegionHeader(region))
+	return &result, err
+}
+
+func (c *Client) ListStreamingAggregations(clusterID, region string) ([]StreamingAggregation, error) {
+	var result []StreamingAggregation
+	path := fmt.Sprintf("/clusters/%s/streaming_aggregations", clusterID)
+	err := c.GetWithHeaders(path, &result, sapRegionHeader(region))
+	return result, err
+}
+
+func (c *Client) GetStreamingAggregation(clusterID, region, id string) (*StreamingAggregation, error) {
+	list, err := c.ListStreamingAggregations(clusterID, region)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if list[i].ID == id {
+			return &list[i], nil
+		}
+	}
+	return nil, fmt.Errorf("streaming aggregation %s not found", id)
+}
+
+func (c *Client) UpdateStreamingAggregation(clusterID, region, id string, req *StreamingAggRequest) (*StreamingAggregation, error) {
+	var result StreamingAggregation
+	path := fmt.Sprintf("/clusters/%s/streaming_aggregations/%s", clusterID, id)
+	err := c.PutWithHeaders(path, req, &result, sapRegionHeader(region))
+	return &result, err
+}
+
+func (c *Client) DeleteStreamingAggregation(clusterID, region, id string) error {
+	path := fmt.Sprintf("/clusters/%s/streaming_aggregations/%s", clusterID, id)
+	return c.DeleteWithHeaders(path, sapRegionHeader(region))
+}
+
+// --- Cold storage bucket ---
+
+type ColdStorageBucketProperties struct {
+	Default         bool   `json:"default"`
+	AWSRegion       string `json:"aws_region"`
+	AWSBucket       string `json:"aws_bucket"`
+	AuthType        string `json:"auth_type"`
+	AWSAccessKey    string `json:"aws_access_key,omitempty"`
+	AWSSecretKey    string `json:"aws_secret_key,omitempty"`
+	AWSRole         string `json:"aws_role,omitempty"`
+	RetentionPeriod *int   `json:"retention_period,omitempty"`
+}
+
+type ColdStorageBucketRequest struct {
+	Name       string                       `json:"name"`
+	Properties ColdStorageBucketProperties  `json:"properties"`
+}
+
+type ColdStorageBucketResponse struct {
+	ID         string                      `json:"id"`
+	Name       string                      `json:"name"`
+	Properties ColdStorageBucketProperties `json:"properties"`
+	Status     string                      `json:"status"`
+	CreatedAt  int64                       `json:"created_at"`
+}
+
+func (c *Client) CreateColdStorageBucket(region string, req *ColdStorageBucketRequest) (*ColdStorageBucketResponse, error) {
+	var result ColdStorageBucketResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/cold_storage/bucket?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetColdStorageBucket(id, region string) (*ColdStorageBucketResponse, error) {
+	var result ColdStorageBucketResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/cold_storage/bucket/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateColdStorageBucket(id, region string, req *ColdStorageBucketRequest) (*ColdStorageBucketResponse, error) {
+	var result ColdStorageBucketResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/cold_storage/bucket/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteColdStorageBucket(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/cold_storage/bucket/%s?region=%s", id, region))
+}
+
+func (c *Client) MarkDefaultColdStorageBucket(id, region string) error {
+	return c.Patch(fmt.Sprintf("/otel_settings/cold_storage/bucket/mark_default/%s?region=%s", id, region), nil, nil)
+}
+
+// --- Cold storage backup ---
+
+type ColdStorageBackupProperties struct {
+	Enabled     *bool    `json:"enabled"`
+	BucketName  string   `json:"bucket_name"`
+	Granularity string   `json:"granularity"`
+	Targets     []string `json:"targets,omitempty"`
+}
+
+type ColdStorageBackupRequest struct {
+	Name       string                      `json:"name"`
+	Properties ColdStorageBackupProperties `json:"properties"`
+}
+
+type ColdStorageBackupResponse struct {
+	ID         string                      `json:"id"`
+	Name       string                      `json:"name"`
+	Properties ColdStorageBackupProperties `json:"properties"`
+	Status     string                      `json:"status"`
+	CreatedAt  int64                       `json:"created_at"`
+}
+
+func (c *Client) CreateColdStorageBackup(region string, req *ColdStorageBackupRequest) (*ColdStorageBackupResponse, error) {
+	var result ColdStorageBackupResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/cold_storage/backup?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetColdStorageBackup(id, region string) (*ColdStorageBackupResponse, error) {
+	var result ColdStorageBackupResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/cold_storage/backup/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateColdStorageBackup(id, region string, req *ColdStorageBackupRequest) (*ColdStorageBackupResponse, error) {
+	var result ColdStorageBackupResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/cold_storage/backup/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteColdStorageBackup(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/cold_storage/backup/%s?region=%s", id, region))
+}
+
+// --- S3 ingest ---
+
+type S3IngestProperties struct {
+	Default   bool   `json:"default"`
+	AWSBucket string `json:"aws_bucket"`
+	AuthType  string `json:"auth_type"`
+	AWSRole   string `json:"aws_role"`
+	AWSRegion string `json:"aws_region"`
+}
+
+type S3IngestRequest struct {
+	Name       string            `json:"name"`
+	Properties S3IngestProperties `json:"properties"`
+}
+
+type S3IngestResponse struct {
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Properties S3IngestProperties `json:"properties"`
+	Status     string            `json:"status"`
+	CreatedAt  int64             `json:"created_at"`
+}
+
+func (c *Client) CreateS3Ingest(region string, req *S3IngestRequest) (*S3IngestResponse, error) {
+	var result S3IngestResponse
+	err := c.Post(fmt.Sprintf("/otel_settings/s3_ingest?region=%s", region), req, &result)
+	return &result, err
+}
+
+func (c *Client) GetS3Ingest(id, region string) (*S3IngestResponse, error) {
+	var result S3IngestResponse
+	err := c.Get(fmt.Sprintf("/otel_settings/s3_ingest/%s?region=%s", id, region), &result)
+	return &result, err
+}
+
+func (c *Client) UpdateS3Ingest(id, region string, req *S3IngestRequest) (*S3IngestResponse, error) {
+	var result S3IngestResponse
+	err := c.Put(fmt.Sprintf("/otel_settings/s3_ingest/%s?region=%s", id, region), req, &result)
+	return &result, err
+}
+
+func (c *Client) DeleteS3Ingest(id, region string) error {
+	return c.Delete(fmt.Sprintf("/otel_settings/s3_ingest/%s?region=%s", id, region))
 }

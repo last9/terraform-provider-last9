@@ -71,6 +71,10 @@ func New() *schema.Provider {
 			"last9_sensitive_data_rule":    resourceSensitiveDataRule(),
 			"last9_physical_index":         resourcePhysicalIndex(),
 			"last9_rehydration":            resourceRehydration(),
+			"last9_streaming_aggregation":  resourceStreamingAggregation(),
+			"last9_cold_storage_bucket":    resourceColdStorageBucket(),
+			"last9_cold_storage_backup":    resourceColdStorageBackup(),
+			"last9_s3_ingest":              resourceS3Ingest(),
 			"last9_user":                   resourceUser(),
 			// Note: notification_channel_attachment is not registered because the API
 			// doesn't support reading child channels after creation. Attachments should

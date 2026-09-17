@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -73,7 +74,16 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, m interface
 		return diag.FromErr(fmt.Errorf("invite user: %w", err))
 	}
 
-	user, err := c.FindUserByEmail(email)
+	// Invited users can take a moment to appear in list; retry briefly.
+	var user *client.User
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		user, err = c.FindUserByEmail(email)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * 300 * time.Millisecond)
+	}
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("invite succeeded but could not resolve user: %w", err))
 	}

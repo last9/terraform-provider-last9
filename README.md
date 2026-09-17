@@ -51,6 +51,12 @@ export LAST9_API_BASE_URL=https://app.last9.io
 - `last9_sensitive_data_rule` — PII scan/redact rules
 - `last9_physical_index` — Physical index partitions
 - `last9_rehydration` — Rehydrate archived logs
+- `last9_cold_storage_bucket` — S3 bucket for log cold storage
+- `last9_cold_storage_backup` — Backup rules into cold storage
+- `last9_s3_ingest` — S3 ingest bucket config
+
+**Metrics pipelines**
+- `last9_streaming_aggregation` — Streaming aggregation rules on a cluster
 
 **Dashboards**
 - `last9_dashboard` — Build dashboards across metrics, logs, and traces

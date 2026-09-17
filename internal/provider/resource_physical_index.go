@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -64,6 +65,7 @@ func resourcePhysicalIndex() *schema.Resource {
 			"retention_period": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				Computed: true,
 			},
 			"bucket_name": {
 				Type:     schema.TypeString,
@@ -146,6 +148,12 @@ func resourcePhysicalIndexDelete(ctx context.Context, d *schema.ResourceData, m 
 		return diag.FromErr(err)
 	}
 	if err := c.DeletePhysicalIndex(otelID, region, clusterID); err != nil {
+		// Pending indexes cannot be soft-deleted; treat as gone for Terraform.
+		if strings.Contains(strings.ToLower(err.Error()), "not created yet") ||
+			strings.Contains(strings.ToLower(err.Error()), "cannot soft-delete") {
+			d.SetId("")
+			return nil
+		}
 		return diag.FromErr(fmt.Errorf("delete physical index: %w", err))
 	}
 	d.SetId("")
