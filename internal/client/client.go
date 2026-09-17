@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -266,7 +267,7 @@ func (c *Client) doRequestWithHeaders(method, path string, body interface{}, hea
 	if os.Getenv("TF_LOG") != "" {
 		log.Printf("[DEBUG] Last9 API Request: %s %s", method, reqURL)
 		if jsonBodyBytes != nil {
-			log.Printf("[DEBUG] Last9 API Request Body: %s", string(jsonBodyBytes))
+			log.Printf("[DEBUG] Last9 API Request Body: %s", redactSensitiveJSON(jsonBodyBytes))
 		}
 	}
 
@@ -314,7 +315,7 @@ func (c *Client) decodeResponse(resp *http.Response, result interface{}) error {
 
 	// Debug logging when TF_LOG is set
 	if os.Getenv("TF_LOG") != "" {
-		log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+		log.Printf("[DEBUG] Last9 API Response Body: %s", redactSensitiveJSON(bodyBytes))
 	}
 
 	// Decode the response
@@ -323,6 +324,49 @@ func (c *Client) decodeResponse(resp *http.Response, result interface{}) error {
 	}
 
 	return nil
+}
+
+// redactSensitiveJSON returns a copy of JSON bytes safe for debug logs.
+// Known secret keys (AWS credentials, tokens, passwords) are replaced with "***".
+func redactSensitiveJSON(raw []byte) string {
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "[unredactable body]"
+	}
+	redactSensitiveValue(v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "[unredactable body]"
+	}
+	return string(out)
+}
+
+func redactSensitiveValue(v interface{}) {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, child := range t {
+			if isSensitiveJSONKey(k) {
+				t[k] = "***"
+				continue
+			}
+			redactSensitiveValue(child)
+		}
+	case []interface{}:
+		for _, child := range t {
+			redactSensitiveValue(child)
+		}
+	}
+}
+
+func isSensitiveJSONKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "aws_secret_key", "aws_access_key", "password", "secret", "token",
+		"access_token", "refresh_token", "api_token", "delete_token",
+		"authorization", "x-last9-api-token":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) Get(path string, result interface{}) error {
