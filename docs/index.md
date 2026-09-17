@@ -17,13 +17,17 @@ The Last9 provider enables Terraform to manage [Last9](https://last9.io) resourc
 
 ## Features
 
-- **Alerts**: Configure alerting rules (metric-based with thresholds/expressions, or log-based with scheduled searches)
-- **Notification Channels**: Manage alert destinations (Slack, PagerDuty, email, webhooks)
-- **Drop Rules**: Filter and drop logs for cost optimization at Last9 Control Plane
-- **Forward Rules**: Forward logs to external destinations such as S3 bucket
-- **Remapping Rules**: Extract fields from logs and map attributes to standard fields (logs and traces)
-- **Dashboards**: Define custom dashboards with panels, queries, variables, and layout grid
-- **Macros**: PromQL query templates
+- **Alerts**: Metric-based and log-based (scheduled search) alerting rules
+- **Alert snooze**: Entity-level mute until a timestamp (`last9_alert_snooze`)
+- **Notification Channels**: Slack, PagerDuty, email, webhooks
+- **Synthetics**: HTTP/TCP/DNS/ICMP/API/script checks (`last9_synthetic_check`)
+- **Changeboards**: Entity change correlation views
+- **Drop / Forward / Remapping**: OTel control-plane pipeline rules
+- **Sensitive data / Physical index / Rehydration**: Log pipeline controls
+- **Dashboards**: Custom dashboards with panels, queries, and variables
+- **Lookups**: `last9_cluster`, `last9_datasource`, entity, notification destination data sources
+
+See [docs/coverage.md](coverage.md) for the full API × Terraform × Datadog matrix.
 
 ## Alerting Lifecycle
 

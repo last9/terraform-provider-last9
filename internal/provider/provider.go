@@ -59,12 +59,18 @@ func New() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"last9_entity":                 resourceEntity(),
 			"last9_alert":                  resourceAlert(),
+			"last9_alert_snooze":           resourceAlertSnooze(),
 			"last9_drop_rule":              resourceDropRule(),
 			"last9_forward_rule":           resourceForwardRule(),
 			"last9_scheduled_search_alert": resourceScheduledSearchAlert(),
 			"last9_notification_channel":   resourceNotificationChannel(),
 			"last9_remapping_rule":         resourceRemappingRule(),
 			"last9_dashboard":              resourceDashboard(),
+			"last9_synthetic_check":        resourceSyntheticCheck(),
+			"last9_changeboard":            resourceChangeboard(),
+			"last9_sensitive_data_rule":    resourceSensitiveDataRule(),
+			"last9_physical_index":         resourcePhysicalIndex(),
+			"last9_rehydration":            resourceRehydration(),
 			// Note: notification_channel_attachment is not registered because the API
 			// doesn't support reading child channels after creation. Attachments should
 			// be managed via the entity's notification_channels field instead.
@@ -72,6 +78,8 @@ func New() *schema.Provider {
 		DataSourcesMap: map[string]*schema.Resource{
 			"last9_entity":                   dataSourceEntity(),
 			"last9_notification_destination": dataSourceNotificationDestination(),
+			"last9_cluster":                  dataSourceCluster(),
+			"last9_datasource":               dataSourceDatasource(),
 		},
 		ConfigureContextFunc: configureProvider,
 	}

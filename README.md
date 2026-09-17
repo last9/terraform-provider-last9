@@ -35,14 +35,22 @@ export LAST9_API_BASE_URL=https://app.last9.io
 - `last9_entity` — Alert groups that organize your metrics (supports per-group repeat notification control)
 - `last9_alert` — Metric-based alert rules with thresholds
 - `last9_scheduled_search_alert` — Log-based alerts on search queries
+- `last9_alert_snooze` — Mute an alert group until a unix timestamp
 
 **Notifications**
 - `last9_notification_channel` — Slack, PagerDuty, webhooks, email
 
-**Log Pipeline**
-- `last9_drop_rule` — Drop logs before they're stored (cuts costs)
-- `last9_forward_rule` — Route logs to external destinations
-- `last9_remapping_rule` — Extract fields and map attributes from logs and traces
+**Synthetics & catalog**
+- `last9_synthetic_check` — HTTP/TCP/DNS/ICMP/API/script probes
+- `last9_changeboard` — Change correlation boards
+
+**Log / OTel pipeline**
+- `last9_drop_rule` — Drop telemetry before storage (`/otel_settings/drop`)
+- `last9_forward_rule` — Route telemetry to external destinations
+- `last9_remapping_rule` — Extract/map attributes from logs and traces
+- `last9_sensitive_data_rule` — PII scan/redact rules
+- `last9_physical_index` — Physical index partitions
+- `last9_rehydration` — Rehydrate archived logs
 
 **Dashboards**
 - `last9_dashboard` — Build dashboards across metrics, logs, and traces
@@ -50,6 +58,10 @@ export LAST9_API_BASE_URL=https://app.last9.io
 **Data Sources**
 - `last9_entity` — Query existing alert groups
 - `last9_notification_destination` — Query notification destinations
+- `last9_cluster` — Resolve cluster by region/name/default
+- `last9_datasource` — Resolve datasource by id/name/default
+
+Coverage matrix (API × TF × Datadog): [`docs/coverage.md`](docs/coverage.md)
 
 ## Examples
 

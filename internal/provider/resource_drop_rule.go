@@ -4,18 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
-
-// dropRuleMutex serializes drop rule operations to prevent race conditions.
-// The drop rules API stores all rules as a single list, so concurrent
-// create/update/delete operations can overwrite each other.
-var dropRuleMutex sync.Mutex
 
 func resourceDropRule() *schema.Resource {
 	return &schema.Resource{
@@ -38,319 +32,273 @@ func resourceDropRule() *schema.Resource {
 				Optional:    true,
 				Computed:    true,
 				ForceNew:    true,
-				Description: "Cluster ID for the drop rule. If not specified, the default cluster for the region will be used.",
+				Description: "Cluster ID. If omitted, the default cluster for the region is used.",
 			},
 			"name": {
 				Type:        schema.TypeString,
 				Required:    true,
-				ForceNew:    true,
 				Description: "Name of the drop rule",
 			},
 			"telemetry": {
 				Type:         schema.TypeString,
 				Required:     true,
-				ForceNew:     true,
-				Description:  "Telemetry type: 'logs', 'traces', or 'metrics'.",
+				Description:  "Telemetry type: logs, traces, or metrics",
 				ValidateFunc: validation.StringInSlice([]string{"logs", "traces", "metrics"}, false),
 			},
 			"filters": {
 				Type:        schema.TypeList,
 				Required:    true,
-				Description: "Filters to match telemetry for dropping. For logs/traces, use attribute filters. For metrics, use PromQL expressions in the value field.",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"key": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "Filter key. For logs/traces: must use attributes[\"key\"] or resource.attributes[\"key\"]. For metrics: can be empty (PromQL goes in value).",
-						},
-						"value": {
-							Type:        schema.TypeString,
-							Required:    true,
-							Description: "Filter value. For logs/traces: the attribute value to match. For metrics: a PromQL expression like {__name__=~\"metric_name\"}.",
-						},
-						"operator": {
-							Type:         schema.TypeString,
-							Required:     true,
-							Description:  "Filter operator: equals, not_equals, or like (regex match)",
-							ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals", "like"}, false),
-						},
-						"conjunction": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "Conjunction for combining filters (AND)",
-						},
-					},
-				},
+				MinItems:    1,
+				Description: "Filters to match telemetry for dropping",
+				Elem:        otelFilterSchema(),
 			},
 			"action": {
 				Type:        schema.TypeList,
 				Required:    true,
 				MaxItems:    1,
-				Description: "Action to take when rule matches. Use name = 'drop-matching' for drop rules.",
+				Description: "Drop action",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"name": {
-							Type:        schema.TypeString,
-							Required:    true,
-							Description: "Action name. Must be 'drop-matching' for drop rules.",
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"destination": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"properties": {
+							Type:     schema.TypeMap,
+							Optional: true,
+							Elem:     &schema.Schema{Type: schema.TypeString},
 						},
 					},
 				},
+			},
+			"status": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+		},
+	}
+}
+
+func otelFilterSchema() *schema.Resource {
+	return &schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"key": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"value": {
+				Type:     schema.TypeString,
+				Required: true,
+			},
+			"operator": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice([]string{"equals", "not_equals", "like"}, false),
+			},
+			"conjunction": {
+				Type:     schema.TypeString,
+				Optional: true,
 			},
 		},
 	}
 }
 
 func resourceDropRuleCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	apiClient := m.(*client.Client)
+	c := m.(*client.Client)
 	region := d.Get("region").(string)
-	clusterID := d.Get("cluster_id").(string)
-	ruleName := d.Get("name").(string)
-
-	// If cluster_id is not provided, fetch the default cluster for the region
-	if clusterID == "" {
-		defaultCluster, err := apiClient.GetDefaultCluster(region)
-		if err != nil {
-			return diag.FromErr(fmt.Errorf("failed to get default cluster for region %s: %w", region, err))
-		}
-		clusterID = defaultCluster.ID
-		d.Set("cluster_id", clusterID)
-	}
-
-	newRule := client.DropRule{
-		Name:      ruleName,
-		Telemetry: d.Get("telemetry").(string),
-		Filters:   expandRoutingFilters(d.Get("filters").([]interface{})),
-		Action:    expandDropAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
-	}
-
-	// Lock to prevent race conditions - drop rules are stored as a single list
-	dropRuleMutex.Lock()
-	defer dropRuleMutex.Unlock()
-
-	// Get existing rules
-	existing, err := apiClient.GetDropRules(region)
+	clusterID, err := resolveClusterID(c, d)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to get existing drop rules: %w", err))
+		return diag.FromErr(err)
 	}
 
-	// Check if rule already exists (to avoid duplicates)
-	for _, rule := range existing.Properties {
-		if rule.Name == ruleName {
-			return diag.FromErr(fmt.Errorf("drop rule %s already exists in region %s", ruleName, region))
-		}
-	}
-
-	// Add new rule to the list
-	rules := append(existing.Properties, newRule)
-
-	// POST the updated list
-	req := &client.DropRulesRequest{
-		Properties: rules,
-	}
-
-	_, err = apiClient.UpdateDropRules(region, clusterID, req)
+	req := buildOTelDropRequest(d)
+	resp, err := c.CreateOTelDrop(region, clusterID, req)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to create drop rule: %w", err))
+		return diag.FromErr(fmt.Errorf("create drop rule: %w", err))
 	}
 
-	// Set ID (format: region:cluster_id:rule_name)
-	d.SetId(fmt.Sprintf("%s:%s:%s", region, clusterID, ruleName))
-
+	_ = d.Set("cluster_id", clusterID)
+	d.SetId(fmt.Sprintf("%s:%s:%s", region, clusterID, resp.ID))
 	return resourceDropRuleRead(ctx, d, m)
 }
 
 func resourceDropRuleRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	apiClient := m.(*client.Client)
-
-	// Parse ID to extract region, cluster_id, and rule name (format: region:cluster_id:rule_name)
-	// During import, d.Get("region") will be empty, so we need to parse from ID
-	id := d.Id()
-	parts := strings.SplitN(id, ":", 3)
-	if len(parts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid drop rule ID format: %s (expected region:cluster_id:rule_name)", id))
-	}
-
-	region := parts[0]
-	clusterID := parts[1]
-	ruleName := parts[2]
-
-	result, err := apiClient.GetDropRules(region)
+	c := m.(*client.Client)
+	region, clusterID, otelID, err := parseOTelResourceID(d.Id())
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to read drop rules: %w", err))
+		return diag.FromErr(err)
 	}
 
-	var foundRule *client.DropRule
-	for i := range result.Properties {
-		if result.Properties[i].Name == ruleName {
-			foundRule = &result.Properties[i]
-			break
+	resp, err := c.GetOTelDrop(otelID, region)
+	if err != nil {
+		if isNotFoundError(err) {
+			d.SetId("")
+			return nil
 		}
+		return diag.FromErr(fmt.Errorf("read drop rule: %w", err))
 	}
 
-	if foundRule == nil {
-		d.SetId("")
-		return nil
-	}
-
-	// Set all attributes from the found rule
-	d.Set("region", region)
-	d.Set("cluster_id", clusterID)
-	d.Set("name", foundRule.Name)
-	d.Set("telemetry", foundRule.Telemetry)
-	d.Set("filters", flattenRoutingFilters(foundRule.Filters))
-	d.Set("action", flattenDropAction(foundRule.Action))
-
+	_ = d.Set("region", region)
+	_ = d.Set("cluster_id", clusterID)
+	_ = d.Set("name", resp.Name)
+	_ = d.Set("telemetry", resp.Properties.Telemetry)
+	_ = d.Set("filters", flattenOTelFilters(resp.Properties.Filters))
+	_ = d.Set("action", []interface{}{map[string]interface{}{
+		"name":        resp.Properties.Action.Name,
+		"destination": resp.Properties.Action.Destination,
+		"properties":  resp.Properties.Action.Properties,
+	}})
+	_ = d.Set("status", resp.Status)
 	return nil
 }
 
 func resourceDropRuleUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	apiClient := m.(*client.Client)
-	region := d.Get("region").(string)
-	clusterID := d.Get("cluster_id").(string)
-	ruleName := d.Get("name").(string)
-
-	// Lock to prevent race conditions - drop rules are stored as a single list
-	dropRuleMutex.Lock()
-	defer dropRuleMutex.Unlock()
-
-	// Get existing rules
-	existing, err := apiClient.GetDropRules(region)
+	c := m.(*client.Client)
+	region, clusterID, otelID, err := parseOTelResourceID(d.Id())
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to get existing drop rules: %w", err))
+		return diag.FromErr(err)
 	}
 
-	// Create updated rule
-	updatedRule := client.DropRule{
-		Name:      ruleName,
-		Telemetry: d.Get("telemetry").(string),
-		Filters:   expandRoutingFilters(d.Get("filters").([]interface{})),
-		Action:    expandDropAction(d.Get("action").([]interface{})[0].(map[string]interface{})),
+	req := buildOTelDropRequest(d)
+	if _, err := c.UpdateOTelDrop(otelID, region, clusterID, req); err != nil {
+		return diag.FromErr(fmt.Errorf("update drop rule: %w", err))
 	}
-
-	// Update the rule in the list
-	rules := make([]client.DropRule, 0, len(existing.Properties))
-	found := false
-	for _, rule := range existing.Properties {
-		if rule.Name == ruleName {
-			rules = append(rules, updatedRule)
-			found = true
-		} else {
-			rules = append(rules, rule)
-		}
-	}
-
-	if !found {
-		return diag.FromErr(fmt.Errorf("drop rule %s not found for update", ruleName))
-	}
-
-	// POST the updated list
-	req := &client.DropRulesRequest{
-		Properties: rules,
-	}
-
-	result, err := apiClient.UpdateDropRules(region, clusterID, req)
-	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to update drop rule: %w", err))
-	}
-
-	// Update ID with new response ID
-	d.SetId(fmt.Sprintf("%s:%s:%s", region, clusterID, ruleName))
-	_ = result // Response ID not needed as we use cluster_id
-
 	return resourceDropRuleRead(ctx, d, m)
 }
 
 func resourceDropRuleDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	apiClient := m.(*client.Client)
-
-	// Parse ID to extract region, cluster_id, and rule name (format: region:cluster_id:rule_name)
-	id := d.Id()
-	parts := strings.SplitN(id, ":", 3)
-	if len(parts) != 3 {
-		return diag.FromErr(fmt.Errorf("invalid drop rule ID format: %s", id))
-	}
-
-	region := parts[0]
-	clusterID := parts[1]
-	ruleName := parts[2]
-
-	// Lock to prevent race conditions - drop rules are stored as a single list
-	dropRuleMutex.Lock()
-	defer dropRuleMutex.Unlock()
-
-	// Get existing rules
-	existing, err := apiClient.GetDropRules(region)
+	c := m.(*client.Client)
+	region, clusterID, otelID, err := parseOTelResourceID(d.Id())
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to get existing drop rules: %w", err))
+		return diag.FromErr(err)
 	}
-
-	// Remove the rule from the list
-	rules := make([]client.DropRule, 0)
-	for _, rule := range existing.Properties {
-		if rule.Name != ruleName {
-			rules = append(rules, rule)
-		}
+	if err := c.DeleteOTelDrop(otelID, region, clusterID); err != nil {
+		return diag.FromErr(fmt.Errorf("delete drop rule: %w", err))
 	}
-
-	// Update with the filtered list using cluster_id
-	req := &client.DropRulesRequest{
-		Properties: rules,
-	}
-
-	_, err = apiClient.UpdateDropRules(region, clusterID, req)
-	if err != nil {
-		return diag.FromErr(fmt.Errorf("failed to delete drop rule: %w", err))
-	}
-
 	d.SetId("")
 	return nil
 }
 
-func expandRoutingFilters(filters []interface{}) []client.RoutingFilter {
-	result := make([]client.RoutingFilter, 0, len(filters))
-	for _, f := range filters {
-		filterMap := f.(map[string]interface{})
-		filter := client.RoutingFilter{
-			Key:      filterMap["key"].(string),
-			Value:    filterMap["value"].(string),
-			Operator: filterMap["operator"].(string),
-		}
-		if conj, ok := filterMap["conjunction"].(string); ok && conj != "" {
-			filter.Conjunction = &conj
-		}
-		result = append(result, filter)
+func buildOTelDropRequest(d *schema.ResourceData) *client.OTelDropRequest {
+	actionList := d.Get("action").([]interface{})
+	actionMap := actionList[0].(map[string]interface{})
+	action := client.OTelDropAction{
+		Name:        actionMap["name"].(string),
+		Destination: actionMap["destination"].(string),
 	}
-	return result
+	if props, ok := actionMap["properties"].(map[string]interface{}); ok {
+		action.Properties = expandStringMap(props)
+	}
+	return &client.OTelDropRequest{
+		Name: d.Get("name").(string),
+		Properties: client.OTelDropProperties{
+			Telemetry: d.Get("telemetry").(string),
+			Filters:   expandOTelFilters(d.Get("filters").([]interface{})),
+			Action:    action,
+		},
+	}
 }
 
-func flattenRoutingFilters(filters []client.RoutingFilter) []interface{} {
-	result := make([]interface{}, 0, len(filters))
-	for _, f := range filters {
-		filterMap := map[string]interface{}{
+func expandOTelFilters(in []interface{}) []client.OTelSettingFilter {
+	out := make([]client.OTelSettingFilter, 0, len(in))
+	for _, raw := range in {
+		m := raw.(map[string]interface{})
+		f := client.OTelSettingFilter{
+			Key:      m["key"].(string),
+			Value:    m["value"].(string),
+			Operator: m["operator"].(string),
+		}
+		if c, ok := m["conjunction"].(string); ok && c != "" {
+			f.Conjunction = &c
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+func flattenOTelFilters(in []client.OTelSettingFilter) []interface{} {
+	out := make([]interface{}, 0, len(in))
+	for _, f := range in {
+		m := map[string]interface{}{
 			"key":      f.Key,
 			"value":    f.Value,
 			"operator": f.Operator,
 		}
 		if f.Conjunction != nil {
-			filterMap["conjunction"] = *f.Conjunction
+			m["conjunction"] = *f.Conjunction
 		}
-		result = append(result, filterMap)
+		out = append(out, m)
 	}
-	return result
+	return out
 }
 
-func expandDropAction(actionMap map[string]interface{}) client.RoutingAction {
-	return client.RoutingAction{
-		Name: actionMap["name"].(string),
+func resolveClusterID(c *client.Client, d *schema.ResourceData) (string, error) {
+	if v, ok := d.GetOk("cluster_id"); ok && v.(string) != "" {
+		return v.(string), nil
 	}
+	cluster, err := c.GetDefaultCluster(d.Get("region").(string))
+	if err != nil {
+		return "", fmt.Errorf("resolve default cluster: %w", err)
+	}
+	return cluster.ID, nil
+}
+
+// parseOTelResourceID parses region:cluster_id:otel_id
+func parseOTelResourceID(id string) (region, clusterID, otelID string, err error) {
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", "", fmt.Errorf("invalid ID %q; expected region:cluster_id:id", id)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
+// Compatibility helpers kept for unit tests / shared filter expand patterns.
+func expandRoutingFilters(input []interface{}) []client.RoutingFilter {
+	otel := expandOTelFilters(input)
+	out := make([]client.RoutingFilter, 0, len(otel))
+	for _, f := range otel {
+		out = append(out, client.RoutingFilter{
+			Key:         f.Key,
+			Value:       f.Value,
+			Operator:    f.Operator,
+			Conjunction: f.Conjunction,
+		})
+	}
+	return out
+}
+
+func flattenRoutingFilters(input []client.RoutingFilter) []interface{} {
+	otel := make([]client.OTelSettingFilter, 0, len(input))
+	for _, f := range input {
+		otel = append(otel, client.OTelSettingFilter{
+			Key:         f.Key,
+			Value:       f.Value,
+			Operator:    f.Operator,
+			Conjunction: f.Conjunction,
+		})
+	}
+	return flattenOTelFilters(otel)
+}
+
+func expandDropAction(input map[string]interface{}) client.RoutingAction {
+	action := client.RoutingAction{Name: input["name"].(string)}
+	if dest, ok := input["destination"].(string); ok {
+		action.Destination = dest
+	}
+	if props, ok := input["properties"].(map[string]interface{}); ok {
+		action.Properties = expandStringMap(props)
+	}
+	return action
 }
 
 func flattenDropAction(action client.RoutingAction) []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"name": action.Name,
-		},
-	}
+	return []interface{}{map[string]interface{}{
+		"name":        action.Name,
+		"destination": action.Destination,
+		"properties":  action.Properties,
+	}}
 }
