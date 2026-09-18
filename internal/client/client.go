@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -240,6 +241,10 @@ func (c *Client) getDeleteAccessToken() (string, error) {
 }
 
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
+	return c.doRequestWithHeaders(method, path, body, nil)
+}
+
+func (c *Client) doRequestWithHeaders(method, path string, body interface{}, headers map[string]string) (*http.Response, error) {
 	// Get valid access token
 	accessToken, err := c.getAccessToken()
 	if err != nil {
@@ -262,7 +267,7 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	if os.Getenv("TF_LOG") != "" {
 		log.Printf("[DEBUG] Last9 API Request: %s %s", method, reqURL)
 		if jsonBodyBytes != nil {
-			log.Printf("[DEBUG] Last9 API Request Body: %s", string(jsonBodyBytes))
+			log.Printf("[DEBUG] Last9 API Request Body: %s", redactSensitiveJSON(jsonBodyBytes))
 		}
 	}
 
@@ -274,6 +279,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	// Use X-LAST9-API-TOKEN header with Bearer prefix as per Last9 API docs
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", accessToken))
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -307,7 +315,7 @@ func (c *Client) decodeResponse(resp *http.Response, result interface{}) error {
 
 	// Debug logging when TF_LOG is set
 	if os.Getenv("TF_LOG") != "" {
-		log.Printf("[DEBUG] Last9 API Response Body: %s", string(bodyBytes))
+		log.Printf("[DEBUG] Last9 API Response Body: %s", redactSensitiveJSON(bodyBytes))
 	}
 
 	// Decode the response
@@ -316,6 +324,49 @@ func (c *Client) decodeResponse(resp *http.Response, result interface{}) error {
 	}
 
 	return nil
+}
+
+// redactSensitiveJSON returns a copy of JSON bytes safe for debug logs.
+// Known secret keys (AWS credentials, tokens, passwords) are replaced with "***".
+func redactSensitiveJSON(raw []byte) string {
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "[unredactable body]"
+	}
+	redactSensitiveValue(v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "[unredactable body]"
+	}
+	return string(out)
+}
+
+func redactSensitiveValue(v interface{}) {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, child := range t {
+			if isSensitiveJSONKey(k) {
+				t[k] = "***"
+				continue
+			}
+			redactSensitiveValue(child)
+		}
+	case []interface{}:
+		for _, child := range t {
+			redactSensitiveValue(child)
+		}
+	}
+}
+
+func isSensitiveJSONKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "aws_secret_key", "aws_access_key", "password", "secret", "token",
+		"access_token", "refresh_token", "api_token", "delete_token",
+		"authorization", "x-last9-api-token":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) Get(path string, result interface{}) error {
@@ -359,6 +410,10 @@ func (c *Client) Patch(path string, body interface{}, result interface{}) error 
 }
 
 func (c *Client) Delete(path string) error {
+	return c.DeleteWithHeaders(path, nil)
+}
+
+func (c *Client) DeleteWithHeaders(path string, headers map[string]string) error {
 	// Get valid delete access token (handles refresh token or static token)
 	deleteToken, err := c.getDeleteAccessToken()
 	if err != nil {
@@ -374,6 +429,9 @@ func (c *Client) Delete(path string) error {
 	// Use delete token for delete operations
 	req.Header.Set("X-LAST9-API-TOKEN", fmt.Sprintf("Bearer %s", deleteToken))
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -387,6 +445,33 @@ func (c *Client) Delete(path string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) GetWithHeaders(path string, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("GET", path, nil, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
+func (c *Client) PostWithHeaders(path string, body interface{}, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("POST", path, body, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
+func (c *Client) PutWithHeaders(path string, body interface{}, result interface{}, headers map[string]string) error {
+	resp, err := c.doRequestWithHeaders("PUT", path, body, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
 }
 
 // Alert methods
