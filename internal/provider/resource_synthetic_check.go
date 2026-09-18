@@ -109,6 +109,16 @@ func resourceSyntheticCheckCreate(ctx context.Context, d *schema.ResourceData, m
 	}
 
 	d.SetId(check.ID)
+
+	// Create API may ignore status; apply via update when configured value differs.
+	desiredStatus := d.Get("status").(string)
+	if desiredStatus != "" && !strings.EqualFold(check.Status, desiredStatus) {
+		status := desiredStatus
+		if _, err := c.UpdateSyntheticCheck(check.ID, &client.UpdateSyntheticCheckRequest{Status: &status}); err != nil {
+			return diag.FromErr(fmt.Errorf("set synthetic check status after create: %w", err))
+		}
+	}
+
 	return resourceSyntheticCheckRead(ctx, d, m)
 }
 
@@ -218,6 +228,7 @@ func buildSyntheticCheckCreateRequest(d *schema.ResourceData) (*client.CreateSyn
 		Name:        d.Get("name").(string),
 		Description: d.Get("description").(string),
 		Type:        d.Get("type").(string),
+		Status:      d.Get("status").(string),
 		Schedule:    d.Get("schedule").(string),
 		Config:      json.RawMessage(configStr),
 		Timeout:     d.Get("timeout").(int),

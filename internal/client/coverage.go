@@ -30,6 +30,7 @@ type CreateSyntheticCheckRequest struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Type        string            `json:"type"`
+	Status      string            `json:"status,omitempty"`
 	Schedule    string            `json:"schedule"`
 	Config      json.RawMessage   `json:"config"`
 	Timeout     int               `json:"timeout"`

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -207,6 +208,57 @@ func TestReviewDatasourceDefaultWireContract(t *testing.T) {
 			}
 			if !byID && d.Get("default") != true {
 				t.Fatalf("default flag=%v want true", d.Get("default"))
+			}
+		})
+	}
+}
+
+func TestReviewSyntheticCreateHonorsPaused(t *testing.T) {
+	for _, status := range []string{"active", "paused"} {
+		t.Run(status, func(t *testing.T) {
+			createdStatus := "active"
+			updated := false
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/synthetic/checks"):
+					var body map[string]interface{}
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					if s, ok := body["status"].(string); ok && s != "" {
+						createdStatus = s
+					} else {
+						createdStatus = "active"
+					}
+					fmt.Fprintf(w, `{"check":{"id":"c1","name":"test","type":"http","status":%q,"schedule":"every 5m","timeout":30,"frequency":60,"locations":["us-east-1"],"config":{"url":"https://example.test"}}}`+"\n", createdStatus)
+				case r.Method == "PUT" && strings.Contains(r.URL.Path, "/synthetic/checks/c1"):
+					var body map[string]interface{}
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					if s, ok := body["status"].(string); ok {
+						createdStatus = s
+						updated = true
+					}
+					fmt.Fprintf(w, `{"check":{"id":"c1","name":"test","type":"http","status":%q,"schedule":"every 5m","timeout":30,"frequency":60,"locations":["us-east-1"],"config":{"url":"https://example.test"}}}`+"\n", createdStatus)
+				case r.Method == "GET" && strings.Contains(r.URL.Path, "/synthetic/checks/c1"):
+					fmt.Fprintf(w, `{"check":{"id":"c1","name":"test","type":"http","status":%q,"schedule":"every 5m","timeout":30,"frequency":60,"locations":["us-east-1"],"config":{"url":"https://example.test"}}}`+"\n", createdStatus)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+					w.WriteHeader(500)
+				}
+			})
+			d := schema.TestResourceDataRaw(t, resourceSyntheticCheck().Schema, map[string]interface{}{
+				"name":      "test",
+				"type":      "http",
+				"schedule":  "every 5m",
+				"timeout":   30,
+				"frequency": 60,
+				"locations": []interface{}{"us-east-1"},
+				"config":    `{"url":"https://example.test"}`,
+				"status":    status,
+			})
+			if ds := resourceSyntheticCheckCreate(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			if got := d.Get("status").(string); got != status {
+				t.Fatalf("status=%q want=%q (updated=%v)", got, status, updated)
 			}
 		})
 	}
