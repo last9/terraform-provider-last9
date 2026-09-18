@@ -96,7 +96,7 @@ func resourceUserCreate(ctx context.Context, d *schema.ResourceData, m interface
 		}
 	}
 
-	if active, ok := d.GetOk("active"); ok && !active.(bool) {
+	if !d.Get("active").(bool) {
 		if err := c.PatchUser(user.ID, false); err != nil {
 			return diag.FromErr(fmt.Errorf("deactivate invited user: %w", err))
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -147,17 +148,28 @@ func resourcePhysicalIndexDelete(ctx context.Context, d *schema.ResourceData, m 
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	if err := c.DeletePhysicalIndex(otelID, region, clusterID); err != nil {
-		// Pending indexes cannot be soft-deleted; treat as gone for Terraform.
-		if strings.Contains(strings.ToLower(err.Error()), "not created yet") ||
-			strings.Contains(strings.ToLower(err.Error()), "cannot soft-delete") {
+
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		lastErr = c.DeletePhysicalIndex(otelID, region, clusterID)
+		if lastErr == nil {
 			d.SetId("")
 			return nil
 		}
-		return diag.FromErr(fmt.Errorf("delete physical index: %w", err))
+		msg := strings.ToLower(lastErr.Error())
+		// Index still provisioning — keep ID and retry so destroy can succeed later.
+		if strings.Contains(msg, "not created yet") || strings.Contains(msg, "cannot soft-delete") {
+			select {
+			case <-ctx.Done():
+				return diag.FromErr(fmt.Errorf("delete physical index: %w", ctx.Err()))
+			case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond):
+			}
+			continue
+		}
+		return diag.FromErr(fmt.Errorf("delete physical index: %w", lastErr))
 	}
-	d.SetId("")
-	return nil
+	// Still pending after retries — retain ID so a later destroy can retry.
+	return diag.FromErr(fmt.Errorf("delete physical index: %w", lastErr))
 }
 
 func buildPhysicalIndexRequest(d *schema.ResourceData) *client.PhysicalIndexRequest {

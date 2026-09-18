@@ -1,6 +1,5 @@
 # Streaming Aggregation Example
 
-```hcl
 terraform {
   required_providers {
     last9 = {
@@ -28,4 +27,3 @@ resource "last9_streaming_aggregation" "http_by_service" {
   labels        = ["instance"]
   output_metric = "http_requests_by_service"
 }
-```

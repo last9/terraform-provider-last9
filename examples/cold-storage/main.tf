@@ -1,6 +1,5 @@
 # Cold Storage Example
 
-```hcl
 terraform {
   required_providers {
     last9 = {
@@ -43,4 +42,3 @@ resource "last9_s3_ingest" "imports" {
   aws_role   = var.aws_role
   auth_type  = "role"
 }
-```

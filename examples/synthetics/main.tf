@@ -1,6 +1,5 @@
 # Synthetic Check Example
 
-```hcl
 terraform {
   required_providers {
     last9 = {
@@ -30,4 +29,3 @@ resource "last9_synthetic_check" "api_health" {
     method = "GET"
   })
 }
-```

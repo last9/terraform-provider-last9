@@ -139,10 +139,11 @@ func resourceSyntheticCheckRead(ctx context.Context, d *schema.ResourceData, m i
 	if len(check.Config) > 0 {
 		apiConfig := string(check.Config)
 		if planned, ok := d.GetOk("config"); ok {
-			if suppressEquivalentJSON("", planned.(string), apiConfig, d) {
+			merged := mergeMaskedSyntheticConfig(planned.(string), apiConfig)
+			if suppressEquivalentJSON("", planned.(string), merged, d) {
 				_ = d.Set("config", planned.(string))
 			} else {
-				_ = d.Set("config", apiConfig)
+				_ = d.Set("config", merged)
 			}
 		} else {
 			_ = d.Set("config", apiConfig)
@@ -259,4 +260,49 @@ func suppressEquivalentJSON(k, old, new string, d *schema.ResourceData) bool {
 	ob, _ := json.Marshal(o)
 	nb, _ := json.Marshal(n)
 	return string(ob) == string(nb)
+}
+
+// mergeMaskedSyntheticConfig keeps configured header values when the API returns masks
+// (e.g. "********") so Read does not create perpetual config drift.
+func mergeMaskedSyntheticConfig(configured, api string) string {
+	var cfgMap, apiMap map[string]interface{}
+	if err := json.Unmarshal([]byte(configured), &cfgMap); err != nil {
+		return api
+	}
+	if err := json.Unmarshal([]byte(api), &apiMap); err != nil {
+		return api
+	}
+	cfgHeaders, _ := cfgMap["headers"].(map[string]interface{})
+	apiHeaders, _ := apiMap["headers"].(map[string]interface{})
+	if cfgHeaders != nil && apiHeaders != nil {
+		for k, apiVal := range apiHeaders {
+			s, ok := apiVal.(string)
+			if !ok {
+				continue
+			}
+			if isMaskedSecret(s) {
+				if cfgVal, exists := cfgHeaders[k]; exists {
+					apiHeaders[k] = cfgVal
+				}
+			}
+		}
+		apiMap["headers"] = apiHeaders
+	}
+	out, err := json.Marshal(apiMap)
+	if err != nil {
+		return api
+	}
+	return string(out)
+}
+
+func isMaskedSecret(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r != '*' {
+			return false
+		}
+	}
+	return true
 }

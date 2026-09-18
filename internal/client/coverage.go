@@ -499,7 +499,7 @@ type Datasource struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	Region  string `json:"region"`
-	Default bool   `json:"default"`
+	Default bool   `json:"is_default"`
 }
 
 func (c *Client) ListDatasources() ([]Datasource, error) {

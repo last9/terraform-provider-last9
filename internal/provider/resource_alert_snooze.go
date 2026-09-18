@@ -66,10 +66,8 @@ func resourceAlertSnoozeRead(ctx context.Context, d *schema.ResourceData, m inte
 
 	_ = d.Set("entity_id", entityID)
 	_ = d.Set("alert_snoozed_until", resp.AlertSnoozedUntil)
-	// Keep until in state; if API reports 0 and we expected a future value, drift will show.
-	if _, ok := d.GetOk("until"); !ok {
-		_ = d.Set("until", resp.AlertSnoozedUntil)
-	}
+	// Sync until from API so a remotely cleared snooze produces a repair plan.
+	_ = d.Set("until", resp.AlertSnoozedUntil)
 	return nil
 }
 
