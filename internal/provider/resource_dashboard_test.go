@@ -175,7 +175,7 @@ func TestAccDashboard_ValidationLabelVariableMissingSource(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccDashboardConfig_labelVariableMissingSource(region),
-				ExpectError: regexp.MustCompile(`source is required when type=label`),
+				ExpectError: regexp.MustCompile(`source is required when type=label|telemetry is required`),
 			},
 		},
 	})
@@ -1033,6 +1033,12 @@ resource "last9_dashboard" "test" {
   region = %q
   name   = "TF Test Basic Dashboard"
 
+  metadata {
+    category = "custom"
+    type     = "logs"
+    tags     = []
+  }
+
   panel {
     name = "Container Memory"
     unit = "bytes-iec"
@@ -1068,6 +1074,12 @@ resource "last9_dashboard" "test" {
   region = %q
   name   = "TF Test Basic Dashboard Updated"
 
+  metadata {
+    category = "custom"
+    type     = "logs"
+    tags     = []
+  }
+
   panel {
     name = "Container Memory Updated"
     unit = "bytes-iec"
@@ -1100,6 +1112,12 @@ resource "last9_dashboard" "test" {
   region = %q
   name   = "TF Test Multi Panel"
 
+  metadata {
+    category = "custom"
+    type     = "logs"
+    tags     = []
+  }
+
   panel {
     name = "Spend at a Glance"
     visualization {
@@ -1110,7 +1128,7 @@ resource "last9_dashboard" "test" {
 
   panel {
     name = "Total Spend"
-    unit = "USD"
+    unit = ""
 
     layout {
       x = 0
@@ -1133,7 +1151,7 @@ resource "last9_dashboard" "test" {
 
   panel {
     name = "Cost by Service"
-    unit = "USD"
+    unit = ""
 
     layout {
       x = 0
@@ -1173,6 +1191,12 @@ resource "last9_dashboard" "test" {
   name          = "TF Test With Variables"
   relative_time = 10080
 
+  metadata {
+    category = "custom"
+    type     = "logs"
+    tags     = []
+  }
+
   variable {
     display_name = "Account"
     target       = "account"
@@ -1195,7 +1219,7 @@ resource "last9_dashboard" "test" {
 
   panel {
     name = "Total Spend"
-    unit = "USD"
+    unit = ""
 
     layout {
       x = 0

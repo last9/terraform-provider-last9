@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Coverage sweep** — control-plane IaC parity matrix in `docs/coverage.md` (Last9 API × TF × Datadog × l9iac)
+- **last9_synthetic_check** — manage synthetic checks (`/synthetic/checks`)
+- **last9_changeboard** — manage changeboards (`/changeboards`)
+- **last9_alert_snooze** — entity-level alert snooze / mute until timestamp
+- **last9_sensitive_data_rule** — OTel sensitive data scanning rules
+- **last9_physical_index** — OTel physical index configuration
+- **last9_rehydration** — OTel log rehydration jobs
+- **last9_streaming_aggregation** — Levitate streaming aggregation rules (`/clusters/{id}/streaming_aggregations`)
+- **last9_cold_storage_bucket** — OTel cold storage S3 bucket config
+- **last9_cold_storage_backup** — OTel cold storage backup rules
+- **last9_s3_ingest** — OTel S3 ingest bucket config
+- **last9_user** / **data.last9_user** — invite/manage org users and roles (Datadog `datadog_user` parity)
+- **data.last9_cluster** / **data.last9_datasource** — lookup helpers for region/cluster and datasources
+
+### Changed
+
+- **last9_drop_rule** / **last9_forward_rule** — migrated from legacy list-merge `logs_settings` APIs to individual REST on `/otel_settings/drop` and `/otel_settings/forward`. Import ID remains `region:cluster_id:<id>` where `<id>` is now the otel setting UUID (not the rule name). Existing state from the list-merge era must be re-imported.
+
+### Explicitly out of scope
+
+- SLOs / slo_detectors
+- PromQL macros
+- Entity relationships (`last9_relationship`)
+- Levitate tokens/access policies
+
 ## [0.5.0] - 2026-06-17
 
 ### Added
