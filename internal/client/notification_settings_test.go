@@ -58,6 +58,63 @@ func TestFindNotificationDestinationByName(t *testing.T) {
 	}
 }
 
+// TestFindNotificationDestinationByName_PrefersMasterRow verifies that when
+// a channel has both a master row (ServiceFqid empty) and a per-entity
+// binding row (ServiceFqid set) sharing its name, the master row's ID is
+// returned. The binding row's ID is that binding's own row ID — not the
+// master channel ID that AttachNotificationSettings/DetachNotificationSettings
+// expect — so returning it would call attach/detach against an ID no
+// /notification_settings/{id}/attach route recognizes.
+func TestFindNotificationDestinationByName_PrefersMasterRow(t *testing.T) {
+	destinations := []NotificationDestination{
+		// Binding row appears first in the list, to prove ordering isn't
+		// what makes this pass.
+		{ID: 200001, Name: "Channel A", ServiceFqid: "entity-1", Severity: "threat"},
+		{ID: 1, Name: "Channel A", Type: "slack"}, // master row
+	}
+
+	c, server := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(destinations); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
+	})
+	defer server.Close()
+
+	dest, err := c.FindNotificationDestinationByName("Channel A")
+	if err != nil {
+		t.Fatalf("FindNotificationDestinationByName() error = %v", err)
+	}
+	if dest.ID != 1 {
+		t.Errorf("got ID %d, want master row ID 1 (not binding row ID 200001)", dest.ID)
+	}
+}
+
+// TestFindNotificationDestinationByName_FallsBackToBindingRow verifies a
+// channel that only exists as binding rows (no master row was returned by
+// this page of the API response) is still resolvable, rather than erroring.
+func TestFindNotificationDestinationByName_FallsBackToBindingRow(t *testing.T) {
+	destinations := []NotificationDestination{
+		{ID: 200001, Name: "Channel A", ServiceFqid: "entity-1", Severity: "threat"},
+	}
+
+	c, server := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(destinations); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
+	})
+	defer server.Close()
+
+	dest, err := c.FindNotificationDestinationByName("Channel A")
+	if err != nil {
+		t.Fatalf("FindNotificationDestinationByName() error = %v", err)
+	}
+	if dest.ID != 200001 {
+		t.Errorf("got ID %d, want fallback binding row ID 200001", dest.ID)
+	}
+}
+
 // TestAttachNotificationSettings verifies the actual binding call: the
 // request body must carry entity_id and severity (severity is mandatory —
 // the live API returns 400 "severity required" without it), and the path

@@ -868,20 +868,36 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 }
 
 // FindNotificationDestinationByName looks up a channel by its display name.
-// Channel names are not unique keys in the API (multiple per-entity binding
-// rows can share one display name), so this returns the first match; that
-// is sufficient for resolving a name to the channel ID used by attach/detach,
-// since every row sharing a name is a binding of the same underlying channel.
+// GET /notification_settings returns both master channel rows (ServiceFqid
+// empty) and per-entity binding rows (ServiceFqid set to the bound entity)
+// in one flat list, and a binding row's ID is the binding's own row ID, NOT
+// the master channel ID that attach/detach expect. A channel that already
+// has a live binding somewhere in the org therefore has multiple rows
+// sharing its name — matching whichever appears first would risk returning
+// a binding row and resolving to the wrong ID (e.g. calling attach on a
+// binding-row ID that no /attach route recognizes). Prefer a master row
+// (empty ServiceFqid); fall back to any match only if no master row is
+// found, so a channel is still resolvable rather than erroring outright.
 func (c *Client) FindNotificationDestinationByName(name string) (*NotificationDestination, error) {
 	destinations, err := c.ListNotificationDestinations()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list notification destinations: %w", err)
 	}
 
-	for _, dest := range destinations {
-		if dest.Name == name {
-			return &dest, nil
+	var fallback *NotificationDestination
+	for i, dest := range destinations {
+		if dest.Name != name {
+			continue
 		}
+		if dest.ServiceFqid == "" {
+			return &destinations[i], nil
+		}
+		if fallback == nil {
+			fallback = &destinations[i]
+		}
+	}
+	if fallback != nil {
+		return fallback, nil
 	}
 
 	return nil, fmt.Errorf("notification channel %q not found", name)
