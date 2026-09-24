@@ -212,16 +212,43 @@ func TestDetachNotificationSettings(t *testing.T) {
 // return only the rows actually bound to the given entity (service_fqid
 // match), not every channel in the org, and not the alert-rule's own
 // (unused) notification_channels field.
+// TestGetEntityNotificationBindings uses a fake server that mimics the real
+// API's confirmed production behavior: GET /notification_settings with NO
+// entity_id query param returns only master/global rows (empty
+// ServiceFqid) and never a per-entity bound row, even when one exists —
+// verified directly against a live tenant, where the unfiltered endpoint
+// returned zero bound rows for an entity with a real, confirmed-live
+// binding. Only GET /notification_settings?entity_id=<id> includes that
+// entity's bound rows (mixed in with the masters). A fake server that (like
+// an earlier version of this test) ignores the query string and always
+// returns the full fixed list would pass even if GetEntityNotificationBindings
+// silently reverted to calling the unfiltered endpoint, hiding exactly the
+// bug this test exists to catch.
 func TestGetEntityNotificationBindings(t *testing.T) {
-	destinations := []NotificationDestination{
-		{ID: 1, Name: "CreditPlus - All Alerts", ServiceFqid: "entity-a", Severity: "breach"},
-		{ID: 2, Name: "CreditPlus - All Alerts", ServiceFqid: "entity-b", Severity: "breach"},
-		{ID: 3, Name: "Some Other Channel", ServiceFqid: "entity-a", Severity: "threat"},
+	masters := []NotificationDestination{
+		{ID: 1, Name: "CreditPlus - All Alerts", Severity: "", ServiceFqid: ""},
+		{ID: 2, Name: "Some Other Channel", Severity: "", ServiceFqid: ""},
+	}
+	boundByEntity := map[string][]NotificationDestination{
+		"entity-a": {
+			{ID: 101, Name: "CreditPlus - All Alerts", ServiceFqid: "entity-a", Severity: "breach"},
+			{ID: 103, Name: "Some Other Channel", ServiceFqid: "entity-a", Severity: "threat"},
+		},
+		"entity-b": {
+			{ID: 102, Name: "CreditPlus - All Alerts", ServiceFqid: "entity-b", Severity: "breach"},
+		},
 	}
 
+	var gotQuery string
 	c, server := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(destinations); err != nil {
+		entityID := r.URL.Query().Get("entity_id")
+		result := append([]NotificationDestination{}, masters...)
+		if entityID != "" {
+			result = append(result, boundByEntity[entityID]...)
+		}
+		if err := json.NewEncoder(w).Encode(result); err != nil {
 			t.Fatalf("failed to encode response: %v", err)
 		}
 	})
@@ -230,6 +257,9 @@ func TestGetEntityNotificationBindings(t *testing.T) {
 	bindings, err := c.GetEntityNotificationBindings("entity-a")
 	if err != nil {
 		t.Fatalf("GetEntityNotificationBindings() error = %v", err)
+	}
+	if gotQuery != "entity_id=entity-a" {
+		t.Fatalf("request query = %q, want entity_id=entity-a -- GetEntityNotificationBindings must query the entity_id-filtered endpoint, not the unfiltered list", gotQuery)
 	}
 	if len(bindings) != 2 {
 		t.Fatalf("got %d bindings, want 2", len(bindings))

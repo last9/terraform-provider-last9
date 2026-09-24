@@ -14,9 +14,17 @@ import (
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
+// TestReviewEntityRefreshDoesNotClaimAlertBindings guards against the entity
+// resource adopting (and later deleting) a binding it was never told to
+// manage. Originally reproduced with a channel bound via
+// last9_alert.notification_channels; that field is now deprecated and
+// inert (see resource_alert.go), so the same hazard is simulated by
+// attaching the channel directly through the client -- from last9_entity's
+// perspective this is indistinguishable from a UI-managed binding, and the
+// undeclared-severity guard must ignore it either way.
 func TestReviewEntityRefreshDoesNotClaimAlertBindings(t *testing.T) {
 	for _, configured := range []bool{false, true} {
-		name := "omitted_entity_block_preserves_alert_binding"
+		name := "omitted_entity_block_preserves_external_binding"
 		if configured {
 			name = "explicit_entity_owner_control"
 		}
@@ -34,8 +42,16 @@ func TestReviewEntityRefreshDoesNotClaimAlertBindings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Existing configuration manages bindings on last9_alert, not last9_entity.
-			if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}); err != nil {
+			// Channel A is bound externally to last9_entity's management --
+			// e.g. via the Last9 UI, or (before last9_alert.notification_channels
+			// was deprecated) via a last9_alert resource. Simulate that
+			// directly through the client rather than via any Terraform
+			// resource, since last9_alert no longer touches bindings at all.
+			dest, err := resolveNotificationChannel(c, "Channel A")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.AttachNotificationSettings(dest.ID, "entity-1", "breach"); err != nil {
 				t.Fatal(err)
 			}
 			raw := map[string]interface{}{"name": "Synthetic", "type": "service", "external_ref": "synthetic"}

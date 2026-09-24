@@ -106,9 +106,9 @@ resource "last9_entity" "production_api" {
   # this entity shares the exact same bindings at a given severity, which
   # matches the Last9 UI itself: it only lets you edit notification
   # channels at the alert-group level ("Inherited from the alert group").
-  # last9_alert.notification_channels still exists for attach-only
-  # convenience, but only last9_entity can safely add AND remove a
-  # channel, since it's the one true owner of the binding.
+  # last9_alert.notification_channels is deprecated and a no-op: only
+  # last9_entity can safely add AND remove a channel, since it's the one
+  # true owner of the binding.
   notification_channels {
     severity = "breach"
     channels = ["testing-integrations", "PD Test"]

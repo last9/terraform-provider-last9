@@ -68,7 +68,7 @@ resource "last9_entity" "api_alerts" {
 }
 ```
 
-~> **Note** Manage notification channels here, on the alert group, not on individual `last9_alert` resources. This matches the Last9 UI, which only lets you edit notification channels at the alert-group level ("Inherited from the alert group"). `last9_alert.notification_channels` still exists for attach-only convenience but cannot safely remove a channel — see its own docs for why.
+~> **Note** Manage notification channels here, on the alert group, not on individual `last9_alert` resources. This matches the Last9 UI, which only lets you edit notification channels at the alert-group level ("Inherited from the alert group"). `last9_alert.notification_channels` is deprecated and a no-op — see its own docs for why two resources can't safely manage the same entity/severity.
 
 ~> **Note** A `notification_channels` block only reconciles the severity it names, and declaring one makes this resource **fully authoritative** for that severity's bindings — like any other Terraform-managed list. It will attach every channel you list, and detach anything else bound at that severity (added via the UI, `last9_alert.notification_channels`, or any other means) on the next apply. If a severity's channels are managed elsewhere, simply omit that severity's block here entirely — this resource never touches, reports on, or reconciles a severity it has no block for. To manage a severity but intentionally keep it empty, add a block with `channels = []`. `terraform import` seeds a block for every severity that currently has a live binding, so an imported entity starts out managing everything already bound to it.
 

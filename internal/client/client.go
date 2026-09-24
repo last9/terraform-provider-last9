@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -949,10 +950,24 @@ func (c *Client) DetachNotificationSettings(rowID int) error {
 // notify when this entity's alerts fire — as opposed to what a Terraform
 // alert resource's notification_channels field claims, which the API does
 // not use.
+//
+// The unfiltered GET /notification_settings (what ListNotificationDestinations
+// calls) does NOT include per-entity bound rows in production — verified
+// directly against a live tenant: it returned only the org's master/global
+// channel definitions (all with an empty service_fqid), even for an entity
+// with a real, confirmed-live binding. The bound row only appeared when
+// querying with an explicit entity_id filter. So this must hit
+// /notification_settings?entity_id=<id> directly rather than filtering
+// client-side over the unfiltered list — the earlier version compiled and
+// passed every unit test (whose fake server was hand-built to the assumed,
+// not the real, API shape) while silently never finding any binding on a
+// real tenant, which made every entity look like it had zero notification
+// channels regardless of what was actually attached.
 func (c *Client) GetEntityNotificationBindings(entityID string) ([]NotificationDestination, error) {
-	destinations, err := c.ListNotificationDestinations()
+	var destinations []NotificationDestination
+	err := c.Get(fmt.Sprintf("/notification_settings?entity_id=%s", url.QueryEscape(entityID)), &destinations)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list notification destinations: %w", err)
+		return nil, fmt.Errorf("failed to list notification destinations for entity %s: %w", entityID, err)
 	}
 
 	bindings := make([]NotificationDestination, 0)
