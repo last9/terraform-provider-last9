@@ -84,6 +84,13 @@ resource "last9_entity" "api_alerts" {
   external_ref = "api-service-prod"
   description  = "Alerts for Production API Service"
   ui_readonly  = true  # Prevent UI edits, manage via Terraform only
+
+  # Notification channels are bound per severity, on the alert group --
+  # every last9_alert below at "breach" severity shares this binding.
+  notification_channels {
+    severity = "breach"
+    channels = [last9_notification_channel.slack_alerts.id]
+  }
 }
 
 # Create a notification channel (Slack App)
@@ -106,8 +113,6 @@ resource "last9_alert" "high_error_rate" {
   bad_minutes   = 5
   total_minutes = 10
   severity      = "breach"
-
-  notification_channels = [last9_notification_channel.slack_alerts.id]
 
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-error-rate"

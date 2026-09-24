@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -10,6 +11,249 @@ import (
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
+// entitySeverityChannels reads the notification_channels block into a map
+// from severity to its configured channel list, erroring on a duplicate
+// severity block (the schema allows repeating the block; only one per
+// severity makes sense since the API has one binding set per
+// (entity, severity)).
+func entitySeverityChannels(d *schema.ResourceData) (map[string][]string, error) {
+	raw, ok := d.GetOk("notification_channels")
+	if !ok {
+		return nil, nil
+	}
+	return parseEntitySeverityChannels(raw.([]interface{}))
+}
+
+// entitySeverityOrder returns the severities named by notification_channels
+// in the order their blocks appear in config/state. notification_channels
+// is a schema.TypeList, so block position is part of Terraform state;
+// setEntityNotificationChannels must rebuild blocks in this same order on
+// every read, since ranging over entitySeverityChannels's map would use
+// Go's intentionally randomized map iteration order and produce a
+// different block order on every refresh, causing a false diff on
+// unchanged configuration.
+func entitySeverityOrder(d *schema.ResourceData) []string {
+	raw, ok := d.GetOk("notification_channels")
+	if !ok {
+		return nil
+	}
+	blocks := raw.([]interface{})
+	order := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		order = append(order, b.(map[string]interface{})["severity"].(string))
+	}
+	return order
+}
+
+// parseEntitySeverityChannels is the raw-value form of entitySeverityChannels,
+// for use with d.GetChange (which returns []interface{} directly rather
+// than through GetOk).
+func parseEntitySeverityChannels(blocks []interface{}) (map[string][]string, error) {
+	bySeverity := make(map[string][]string, len(blocks))
+	for _, b := range blocks {
+		block := b.(map[string]interface{})
+		severity := block["severity"].(string)
+		if _, dup := bySeverity[severity]; dup {
+			return nil, fmt.Errorf("notification_channels has more than one block for severity %q", severity)
+		}
+		channelsList := block["channels"].([]interface{})
+		bySeverity[severity] = toStringSlice(channelsList)
+	}
+	return bySeverity, nil
+}
+
+// reconcileEntityNotificationChannels makes entityID's live notification
+// bindings match the configured notification_channels blocks exactly, for
+// every severity that appears in EITHER the configured or previously
+// applied state. Unlike last9_alert.notification_channels (attach-only —
+// see reconcileNotificationChannels), this performs a full reconcile
+// including detach: the entity is the sole real owner of a
+// (entity, severity, channel) binding — the Last9 backend has no per-alert-
+// rule binding at all, every alert rule on this entity at a given severity
+// shares these exact rows — so there is no sibling resource whose channels
+// could be mistakenly removed by fully reconciling here.
+//
+// prevBySeverity/wantBySeverity may each be missing a severity the other
+// has (e.g. the block for "threat" was removed from config entirely), so
+// this iterates the union of both keys rather than just wantBySeverity's.
+func reconcileEntityNotificationChannels(apiClient *client.Client, entityID string, prevBySeverity, wantBySeverity map[string][]string) error {
+	severities := make(map[string]bool, len(prevBySeverity)+len(wantBySeverity))
+	for s := range prevBySeverity {
+		severities[s] = true
+	}
+	for s := range wantBySeverity {
+		severities[s] = true
+	}
+
+	for severity := range severities {
+		if err := reconcileEntityNotificationChannelsAtSeverity(apiClient, entityID, severity, wantBySeverity[severity]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileEntityNotificationChannelsAtSeverity attaches every channel in
+// wantChannels not yet bound to entityID at severity, and detaches every
+// currently-bound channel at that severity not in wantChannels. See
+// reconcileEntityNotificationChannels for why detach is safe here (unlike
+// the identically-shaped attach-only reconcileNotificationChannels for
+// last9_alert).
+func reconcileEntityNotificationChannelsAtSeverity(apiClient *client.Client, entityID, severity string, wantChannels []string) error {
+	live, err := apiClient.GetEntityNotificationBindings(entityID)
+	if err != nil {
+		return fmt.Errorf("failed to read existing notification bindings for entity %s: %w", entityID, err)
+	}
+
+	liveByName := make(map[string]client.NotificationDestination, len(live))
+	for _, b := range live {
+		if b.Severity == severity {
+			liveByName[b.Name] = b
+		}
+	}
+
+	wantResolved, err := resolveChannels(apiClient, wantChannels)
+	if err != nil {
+		return err
+	}
+	want := make(map[string]bool, len(wantResolved))
+	for _, r := range wantResolved {
+		want[r.name] = true
+	}
+
+	for _, r := range wantResolved {
+		if _, ok := liveByName[r.name]; ok {
+			continue // already bound at this severity
+		}
+		if _, err := apiClient.AttachNotificationSettings(r.id, entityID, severity); err != nil {
+			return fmt.Errorf("failed to attach notification channel %q (id %d) to entity %s: %w", r.value, r.id, entityID, err)
+		}
+	}
+
+	for name, binding := range liveByName {
+		if want[name] {
+			continue // still wanted
+		}
+		if err := apiClient.DetachNotificationSettings(binding.ID); err != nil {
+			return fmt.Errorf("failed to detach notification channel %q (binding id %d) from entity %s: %w", name, binding.ID, entityID, err)
+		}
+	}
+
+	return nil
+}
+
+// setEntityNotificationChannels writes notification_channels from the real
+// live bindings for entityID, one block for every severity the current
+// config already declares a block for — never for a severity this
+// resource's config doesn't mention at all.
+//
+// It's tempting to think "the entity IS the sole owner of every binding on
+// it, so reporting everything live is just accurate drift detection" — but
+// that reasoning breaks the moment a customer manages a severity's
+// channels via last9_alert.notification_channels (still supported,
+// attach-only) and simply never adds a notification_channels block for
+// that severity on last9_entity. Iterating every severity with a live
+// binding would then adopt that alert-managed channel into this resource's
+// state on the very next Read, and the following plan/apply would delete
+// it as "no longer configured" — destroying paging that was never this
+// resource's to touch. So: only severities present in configured are ever
+// examined or emitted, including one with an explicit empty channels list
+// (an empty block is a real "I want zero channels here" declaration and
+// must survive Read unchanged, not disappear for having nothing live to
+// report). A severity with real bindings that isn't in configured is left
+// entirely alone — visible only via last9_alert or the Last9 UI, exactly
+// as it was before this resource existed. Adopting an existing severity's
+// bindings into last9_entity happens explicitly, via `terraform import`
+// (see resourceEntityImportState) or by adding the block to config, never
+// implicitly via Read.
+//
+// A channel already present in the current config for its severity keeps
+// its configured spelling (ID vs. name) rather than always being rewritten
+// to the API's display name, avoiding perpetual plan diffs from that
+// alone. Within a declared severity, every live binding is reported —
+// including one this config never listed (e.g. added via the Last9 UI
+// after this block started managing the severity) — so the next apply's
+// reconcile actually detaches it. A declared severity is a claim of full
+// ownership: reporting only the configured subset would hide that drift
+// forever, since an unchanged plan never triggers reconcile at all. This
+// is what "declaring a severity block" is FOR — once declared, this
+// resource is authoritative for every channel at that severity, exactly
+// like the undeclared-severity guard makes it hands-off when not declared.
+//
+// Blocks are emitted in entitySeverityOrder's order, not by ranging over
+// the configured map — notification_channels is a schema.TypeList, so
+// block position is part of Terraform state, and Go's map iteration order
+// is intentionally randomized. Rebuilding blocks from map order would
+// reorder breach/threat on an arbitrary refresh with no config or remote
+// change, producing a false diff that can never converge.
+func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Client, entityID string) diag.Diagnostics {
+	configured, err := entitySeverityChannels(d)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if len(configured) == 0 {
+		return nil // this resource doesn't manage any severity's channels
+	}
+	severityOrder := entitySeverityOrder(d)
+
+	bindings, err := apiClient.GetEntityNotificationBindings(entityID)
+	if err != nil {
+		return diag.FromErr(fmt.Errorf("failed to read notification bindings for entity %s: %w", entityID, err))
+	}
+	liveNamesBySeverity := make(map[string]map[string]bool)
+	for _, b := range bindings {
+		if liveNamesBySeverity[b.Severity] == nil {
+			liveNamesBySeverity[b.Severity] = make(map[string]bool)
+		}
+		liveNamesBySeverity[b.Severity][b.Name] = true
+	}
+
+	blocks := make([]interface{}, 0, len(configured))
+	for _, severity := range severityOrder {
+		configuredChannels := configured[severity]
+		liveNames := liveNamesBySeverity[severity]
+		remaining := make(map[string]bool, len(liveNames))
+		for name := range liveNames {
+			remaining[name] = true
+		}
+
+		channels := make([]string, 0, len(configuredChannels))
+		for _, value := range configuredChannels {
+			dest, err := resolveNotificationChannel(apiClient, value)
+			if err != nil {
+				if errors.Is(err, client.ErrNotificationChannelNotFound) {
+					continue // genuinely deleted from the org -- drop it, surfaces as drift
+				}
+				// A transport error, non-2xx response, or malformed JSON from
+				// the lookup is NOT the same as "channel doesn't exist" —
+				// propagate it rather than silently dropping the value,
+				// which would otherwise report a transient API failure as a
+				// real configuration change.
+				return diag.FromErr(fmt.Errorf("failed to resolve notification channel %q: %w", value, err))
+			}
+			if liveNames[dest.Name] {
+				channels = append(channels, value)
+				delete(remaining, dest.Name)
+			}
+		}
+		// Anything still live at this DECLARED severity that wasn't matched
+		// above is drift within this resource's own ownership boundary
+		// (e.g. attached externally after this block started managing the
+		// severity) -- report it by display name so the next reconcile
+		// detaches it, instead of hiding it and leaving it live forever.
+		for name := range remaining {
+			channels = append(channels, name)
+		}
+
+		blocks = append(blocks, map[string]interface{}{
+			"severity": severity,
+			"channels": channels,
+		})
+	}
+
+	return diag.FromErr(d.Set("notification_channels", blocks))
+}
+
 func resourceEntity() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resourceEntityCreate,
@@ -17,7 +261,7 @@ func resourceEntity() *schema.Resource {
 		UpdateContext: resourceEntityUpdate,
 		DeleteContext: resourceEntityDelete,
 		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
+			StateContext: resourceEntityImportState,
 		},
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -160,10 +404,33 @@ func resourceEntity() *schema.Resource {
 				},
 			},
 			"notification_channels": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				Description: "Notification channel IDs or names assigned to this entity",
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				Type:     schema.TypeList,
+				Optional: true,
+				Description: "Notification channel bindings for this entity (alert group), one " +
+					"block per severity. This is the authoritative place to manage channel " +
+					"bindings: the underlying binding is keyed by (entity, severity, channel) " +
+					"with no per-alert-rule ownership at all — every alert rule on this " +
+					"entity at a given severity shares the exact same bindings, matching " +
+					"how the Last9 UI itself only lets you edit notification channels at " +
+					"the alert-group level (\"Inherited from the alert group\"). Because " +
+					"this resource is the entity, it's safe to fully reconcile (attach AND " +
+					"detach) here, unlike last9_alert.notification_channels.",
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"severity": {
+							Type:         schema.TypeString,
+							Required:     true,
+							Description:  "Severity this channel list applies to (breach or threat).",
+							ValidateFunc: validation.StringInSlice([]string{"breach", "threat"}, false),
+						},
+						"channels": {
+							Type:        schema.TypeList,
+							Required:    true,
+							Description: "Notification channel IDs or names to bind at this severity.",
+							Elem:        &schema.Schema{Type: schema.TypeString},
+						},
+					},
+				},
 			},
 			"renotify_enabled": {
 				Type:        schema.TypeBool,
@@ -295,16 +562,6 @@ func resourceEntityCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		req.Links = links
 	}
 
-	// Notification channels
-	if v, ok := d.GetOk("notification_channels"); ok {
-		channelsList := v.([]interface{})
-		channels := make([]string, len(channelsList))
-		for i, ch := range channelsList {
-			channels[i] = ch.(string)
-		}
-		req.NotificationChannels = channels
-	}
-
 	entity, err := apiClient.CreateEntity(req)
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to create entity: %w", err))
@@ -411,6 +668,20 @@ func resourceEntityCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		}
 	}
 
+	// Notification channel bindings live in a separate API
+	// (/notification_settings) from entity create/update — see
+	// reconcileEntityNotificationChannels. Nothing was live before a
+	// brand-new entity, so prevBySeverity is nil.
+	wantBySeverity, err := entitySeverityChannels(d)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	if len(wantBySeverity) > 0 {
+		if err := reconcileEntityNotificationChannels(apiClient, entity.ID, nil, wantBySeverity); err != nil {
+			return diag.FromErr(err)
+		}
+	}
+
 	return resourceEntityRead(ctx, d, m)
 }
 
@@ -433,7 +704,10 @@ func resourceEntityRead(ctx context.Context, d *schema.ResourceData, m interface
 	d.Set("workspace", entity.Workspace)
 	d.Set("entity_class", entity.EntityClass)
 	d.Set("ui_readonly", entity.UIReadonly)
-	d.Set("notification_channels", entity.NotificationChannels)
+
+	if diags := setEntityNotificationChannels(d, apiClient, entity.ID); diags.HasError() {
+		return diags
+	}
 
 	// Metadata fields (tags, labels, team, links, adhoc_filter) are returned
 	// nested in the 'metadata' object from the API response
@@ -688,6 +962,21 @@ func resourceEntityUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 		}
 	}
 
+	if d.HasChange("notification_channels") {
+		oldRaw, newRaw := d.GetChange("notification_channels")
+		prevBySeverity, err := parseEntitySeverityChannels(oldRaw.([]interface{}))
+		if err != nil {
+			return diag.FromErr(err)
+		}
+		wantBySeverity, err := parseEntitySeverityChannels(newRaw.([]interface{}))
+		if err != nil {
+			return diag.FromErr(err)
+		}
+		if err := reconcileEntityNotificationChannels(apiClient, d.Id(), prevBySeverity, wantBySeverity); err != nil {
+			return diag.FromErr(err)
+		}
+	}
+
 	return resourceEntityRead(ctx, d, m)
 }
 
@@ -701,4 +990,49 @@ func resourceEntityDelete(ctx context.Context, d *schema.ResourceData, m interfa
 
 	d.SetId("")
 	return nil
+}
+
+// resourceEntityImportState seeds notification_channels from every severity
+// that currently has at least one live binding, before delegating the rest
+// of the import to a normal Read. setEntityNotificationChannels only ever
+// examines a severity already present in config (see its docstring) —
+// necessary so an ordinary Read never adopts a severity managed by
+// last9_alert instead, but that same rule means a fresh import (no prior
+// config at all) needs an explicit seed here, or every existing binding
+// would be invisible to this resource forever. Import is the one point
+// where adopting "everything currently live" as this resource's declared
+// ownership is exactly what the user is asking for.
+func resourceEntityImportState(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+	apiClient := m.(*client.Client)
+
+	bindings, err := apiClient.GetEntityNotificationBindings(d.Id())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read notification bindings for import: %w", err)
+	}
+	namesBySeverity := make(map[string][]string)
+	var severityOrder []string
+	for _, b := range bindings {
+		if _, seen := namesBySeverity[b.Severity]; !seen {
+			severityOrder = append(severityOrder, b.Severity)
+		}
+		namesBySeverity[b.Severity] = append(namesBySeverity[b.Severity], b.Name)
+	}
+	if len(namesBySeverity) > 0 {
+		// Emit in first-seen order from the bindings list (itself in the
+		// API's own response order), not by ranging over namesBySeverity —
+		// see setEntityNotificationChannels for why map order would make
+		// two otherwise-identical imports produce different block orders.
+		blocks := make([]interface{}, 0, len(namesBySeverity))
+		for _, severity := range severityOrder {
+			names := namesBySeverity[severity]
+			channels := make([]interface{}, len(names))
+			for i, n := range names {
+				channels[i] = n
+			}
+			blocks = append(blocks, map[string]interface{}{"severity": severity, "channels": channels})
+		}
+		d.Set("notification_channels", blocks)
+	}
+
+	return []*schema.ResourceData{d}, nil
 }

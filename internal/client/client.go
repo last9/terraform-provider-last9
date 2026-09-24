@@ -3,15 +3,27 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ErrNotificationChannelNotFound is returned by GetNotificationDestination
+// and FindNotificationDestinationByName specifically when the destination
+// list was fetched successfully but no row matches — as opposed to the
+// lookup itself failing (transport error, non-2xx response, malformed
+// JSON). Callers that need to tell "genuinely doesn't exist" apart from "we
+// couldn't tell" (e.g. to decide whether a missing channel means it was
+// deleted, versus the API being temporarily unavailable) should check for
+// this with errors.Is rather than treating any non-nil error the same way.
+var ErrNotificationChannelNotFound = errors.New("notification channel not found")
 
 type Config struct {
 	// Direct access token (legacy) - for read/write operations
@@ -397,6 +409,25 @@ func (c *Client) Put(path string, body interface{}, result interface{}) error {
 	defer resp.Body.Close()
 
 	return c.decodeResponse(resp, result)
+}
+
+// DeleteWithWriteToken issues a DELETE using the regular write access token
+// instead of the delete-scoped token. Most DELETE endpoints in this API
+// (entities, alerts, KPIs, dashboards) require the delete-scoped token by
+// design, but notification_settings/{id}/attach does not — server-side it
+// sits behind the same auth as attach (see ValidateDeleteNotificationSetting
+// in last9/last9, which only checks entity ownership, not token scope).
+// Requiring a delete_refresh_token just to detach a channel from an alert
+// would be a much bigger blast-radius ask than the operation warrants, so
+// this uses doRequest (write token) rather than the existing Delete()
+// helper (delete token).
+func (c *Client) DeleteWithWriteToken(path string) error {
+	resp, err := c.doRequest("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
 }
 
 func (c *Client) Patch(path string, body interface{}, result interface{}) error {
@@ -930,7 +961,107 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 		}
 	}
 
-	return nil, fmt.Errorf("notification destination with ID %d not found", id)
+	return nil, fmt.Errorf("%w: id %d", ErrNotificationChannelNotFound, id)
+}
+
+// FindNotificationDestinationByName looks up a channel by its display name.
+// GET /notification_settings returns both master channel rows (ServiceFqid
+// empty) and per-entity binding rows (ServiceFqid set to the bound entity)
+// in one flat list, and a binding row's ID is the binding's own row ID, NOT
+// the master channel ID that attach/detach expect. A channel that already
+// has a live binding somewhere in the org therefore has multiple rows
+// sharing its name — matching whichever appears first would risk returning
+// a binding row and resolving to the wrong ID (e.g. calling attach on a
+// binding-row ID that no /attach route recognizes). Prefer a master row
+// (empty ServiceFqid); fall back to any match only if no master row is
+// found, so a channel is still resolvable rather than erroring outright.
+func (c *Client) FindNotificationDestinationByName(name string) (*NotificationDestination, error) {
+	destinations, err := c.ListNotificationDestinations()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notification destinations: %w", err)
+	}
+
+	var fallback *NotificationDestination
+	for i, dest := range destinations {
+		if dest.Name != name {
+			continue
+		}
+		if dest.ServiceFqid == "" {
+			return &destinations[i], nil
+		}
+		if fallback == nil {
+			fallback = &destinations[i]
+		}
+	}
+	if fallback != nil {
+		return fallback, nil
+	}
+
+	return nil, fmt.Errorf("%w: %q", ErrNotificationChannelNotFound, name)
+}
+
+// AttachNotificationSettingsRequest is the body for binding a channel to an entity.
+// Severity is mandatory when EntityID is set (the API returns 400 otherwise).
+type AttachNotificationSettingsRequest struct {
+	EntityID string `json:"entity_id"`
+	Severity string `json:"severity"`
+}
+
+// AttachNotificationSettings binds an existing notification channel (by its
+// numeric ID) to an entity for the given severity. This is the ONLY thing
+// that creates a live notification binding — setting notification_channels
+// in an alert-rule create/update request body is a no-op server-side; the
+// alert-rules API has no such field, so it's silently dropped.
+func (c *Client) AttachNotificationSettings(channelID int, entityID, severity string) (*NotificationDestination, error) {
+	var result NotificationDestination
+	req := &AttachNotificationSettingsRequest{
+		EntityID: entityID,
+		Severity: severity,
+	}
+	err := c.Post(fmt.Sprintf("/notification_settings/%d/attach", channelID), req, &result)
+	return &result, err
+}
+
+// DetachNotificationSettings removes one binding row (the per-entity child
+// record created by an earlier AttachNotificationSettings call — NOT the
+// master channel definition). rowID is that row's own id, e.g. from
+// GetEntityNotificationBindings, not the channel's master ID used to attach.
+func (c *Client) DetachNotificationSettings(rowID int) error {
+	return c.DeleteWithWriteToken(fmt.Sprintf("/notification_settings/%d/attach", rowID))
+}
+
+// GetEntityNotificationBindings returns the live notification-settings rows
+// bound to a specific entity, i.e. the ground truth for what will actually
+// notify when this entity's alerts fire — as opposed to what a Terraform
+// alert resource's notification_channels field claims, which the API does
+// not use.
+//
+// The unfiltered GET /notification_settings (what ListNotificationDestinations
+// calls) does NOT include per-entity bound rows in production — verified
+// directly against a live tenant: it returned only the org's master/global
+// channel definitions (all with an empty service_fqid), even for an entity
+// with a real, confirmed-live binding. The bound row only appeared when
+// querying with an explicit entity_id filter. So this must hit
+// /notification_settings?entity_id=<id> directly rather than filtering
+// client-side over the unfiltered list — the earlier version compiled and
+// passed every unit test (whose fake server was hand-built to the assumed,
+// not the real, API shape) while silently never finding any binding on a
+// real tenant, which made every entity look like it had zero notification
+// channels regardless of what was actually attached.
+func (c *Client) GetEntityNotificationBindings(entityID string) ([]NotificationDestination, error) {
+	var destinations []NotificationDestination
+	err := c.Get(fmt.Sprintf("/notification_settings?entity_id=%s", url.QueryEscape(entityID)), &destinations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notification destinations for entity %s: %w", entityID, err)
+	}
+
+	bindings := make([]NotificationDestination, 0)
+	for _, dest := range destinations {
+		if dest.ServiceFqid == entityID {
+			bindings = append(bindings, dest)
+		}
+	}
+	return bindings, nil
 }
 
 // Scheduled Search methods
@@ -983,27 +1114,26 @@ type EntityMetadata struct {
 }
 
 type Entity struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	Type                 string            `json:"type"`
-	ExternalRef          string            `json:"external_ref"`
-	Description          string            `json:"description"`
-	DataSource           string            `json:"data_source,omitempty"`
-	DataSourceID         string            `json:"data_source_id,omitempty"`
-	Namespace            string            `json:"namespace,omitempty"`
-	Team                 string            `json:"team,omitempty"`
-	Tier                 string            `json:"tier,omitempty"`
-	Workspace            string            `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          string            `json:"entity_class,omitempty"`
-	UIReadonly           bool              `json:"ui_readonly"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
-	CreatedAt            int64             `json:"created_at,omitempty"`
-	UpdatedAt            int64             `json:"updated_at,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	ExternalRef  string            `json:"external_ref"`
+	Description  string            `json:"description"`
+	DataSource   string            `json:"data_source,omitempty"`
+	DataSourceID string            `json:"data_source_id,omitempty"`
+	Namespace    string            `json:"namespace,omitempty"`
+	Team         string            `json:"team,omitempty"`
+	Tier         string            `json:"tier,omitempty"`
+	Workspace    string            `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  string            `json:"entity_class,omitempty"`
+	UIReadonly   bool              `json:"ui_readonly"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
+	CreatedAt    int64             `json:"created_at,omitempty"`
+	UpdatedAt    int64             `json:"updated_at,omitempty"`
 	// Metadata is returned nested in GET response - we extract fields from it
 	Metadata *EntityMetadata `json:"metadata,omitempty"`
 }
@@ -1025,45 +1155,43 @@ type EntityLink struct {
 }
 
 type EntityCreateRequest struct {
-	Name                 string            `json:"name"`
-	Type                 string            `json:"type"`
-	ExternalRef          string            `json:"external_ref"`
-	Description          string            `json:"description,omitempty"`
-	DataSource           string            `json:"data_source,omitempty"`
-	DataSourceID         string            `json:"data_source_id,omitempty"`
-	Namespace            string            `json:"namespace,omitempty"`
-	Team                 string            `json:"team,omitempty"`
-	Tier                 string            `json:"tier,omitempty"`
-	Workspace            string            `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          string            `json:"entity_class,omitempty"`
-	UIReadonly           bool              `json:"ui_readonly"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	ExternalRef  string            `json:"external_ref"`
+	Description  string            `json:"description,omitempty"`
+	DataSource   string            `json:"data_source,omitempty"`
+	DataSourceID string            `json:"data_source_id,omitempty"`
+	Namespace    string            `json:"namespace,omitempty"`
+	Team         string            `json:"team,omitempty"`
+	Tier         string            `json:"tier,omitempty"`
+	Workspace    string            `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  string            `json:"entity_class,omitempty"`
+	UIReadonly   bool              `json:"ui_readonly"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
 }
 
 type EntityUpdateRequest struct {
-	Name                 *string           `json:"name,omitempty"`
-	Type                 *string           `json:"type,omitempty"`
-	ExternalRef          *string           `json:"external_ref,omitempty"`
-	Description          *string           `json:"description,omitempty"`
-	DataSource           *string           `json:"data_source,omitempty"`
-	DataSourceID         *string           `json:"data_source_id,omitempty"`
-	Namespace            *string           `json:"namespace,omitempty"`
-	Team                 *string           `json:"team,omitempty"`
-	Tier                 *string           `json:"tier,omitempty"`
-	Workspace            *string           `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          *string           `json:"entity_class,omitempty"`
-	UIReadonly           *bool             `json:"ui_readonly,omitempty"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
+	Name         *string           `json:"name,omitempty"`
+	Type         *string           `json:"type,omitempty"`
+	ExternalRef  *string           `json:"external_ref,omitempty"`
+	Description  *string           `json:"description,omitempty"`
+	DataSource   *string           `json:"data_source,omitempty"`
+	DataSourceID *string           `json:"data_source_id,omitempty"`
+	Namespace    *string           `json:"namespace,omitempty"`
+	Team         *string           `json:"team,omitempty"`
+	Tier         *string           `json:"tier,omitempty"`
+	Workspace    *string           `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  *string           `json:"entity_class,omitempty"`
+	UIReadonly   *bool             `json:"ui_readonly,omitempty"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
 }
 
 type EntitiesListResponse struct {
