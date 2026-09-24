@@ -122,15 +122,28 @@ func TestReconcileEntityNotificationChannels_SeverityRemovedEntirely(t *testing.
 // last9_alert.notification_channels (attach-only, still supported): the
 // next apply would then delete that externally/alert-managed channel as
 // "no longer configured." See setEntityNotificationChannels's docstring.
-func TestSetEntityNotificationChannels_PreservesConfiguredSpellingWithoutClaimingUndeclaredChannels(t *testing.T) {
+// TestSetEntityNotificationChannels_PreservesConfiguredSpellingAndSurfacesDriftWithinDeclaredSeverity
+// verifies two things at once: a channel already in config keeps its
+// configured spelling (ID vs. name) rather than being rewritten to the
+// display name, AND a channel live at the SAME declared severity but not
+// listed in config is still surfaced (as drift this resource now owns,
+// since it declared a block for this severity) so the next apply detaches
+// it. A prior version of this test asserted the opposite for the second
+// part; a code review correctly pointed out that once a severity has a
+// notification_channels block, this resource is authoritative for it, so
+// hiding an extra live channel there would leave it paging forever with no
+// way for `terraform plan` to ever notice. (Contrast with a severity that
+// has NO block at all, which must stay completely untouched -- see
+// TestReviewEntityRefreshDoesNotClaimAlertBindings.)
+func TestSetEntityNotificationChannels_PreservesConfiguredSpellingAndSurfacesDriftWithinDeclaredSeverity(t *testing.T) {
 	catalog := []client.NotificationDestination{
 		{ID: 1, Name: "Channel A", Type: "slack"},
 		{ID: 2, Name: "Channel B", Type: "generic_webhook"},
 	}
 	live := map[string]client.NotificationDestination{
 		"Channel A": {ID: 100001, Name: "Channel A", ServiceFqid: "entity-1", Severity: "breach"},
-		// Channel B is bound at the same severity but never configured here
-		// (e.g. attached via last9_alert or the UI) -- must not be adopted.
+		// Channel B is bound at the same, DECLARED severity but not listed
+		// in config -- this is drift the entity now owns and must surface.
 		"Channel B": {ID: 100002, Name: "Channel B", ServiceFqid: "entity-1", Severity: "breach"},
 	}
 	fake := newFakeNotificationServer(catalog, live)
@@ -161,8 +174,23 @@ func TestSetEntityNotificationChannels_PreservesConfiguredSpellingWithoutClaimin
 		t.Fatalf("entitySeverityChannels() error = %v", err)
 	}
 	channels := got["breach"]
-	if len(channels) != 1 || channels[0] != "1" {
-		t.Fatalf("got %v, want [\"1\"] (configured spelling preserved, Channel B not adopted)", channels)
+	if len(channels) != 2 {
+		t.Fatalf("got %v, want 2 channels (Channel A by configured ID + drift Channel B)", channels)
+	}
+	foundConfigured, foundDrift := false, false
+	for _, ch := range channels {
+		if ch == "1" {
+			foundConfigured = true // preserved the configured "1", not rewritten to "Channel A"
+		}
+		if ch == "Channel B" {
+			foundDrift = true
+		}
+	}
+	if !foundConfigured {
+		t.Errorf("expected configured spelling \"1\" preserved, got: %v", channels)
+	}
+	if !foundDrift {
+		t.Errorf("expected drift Channel B surfaced (declared severity is authoritative), got: %v", channels)
 	}
 }
 

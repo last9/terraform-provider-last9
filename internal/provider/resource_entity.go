@@ -149,7 +149,15 @@ func reconcileEntityNotificationChannelsAtSeverity(apiClient *client.Client, ent
 // A channel already present in the current config for its severity keeps
 // its configured spelling (ID vs. name) rather than always being rewritten
 // to the API's display name, avoiding perpetual plan diffs from that
-// alone.
+// alone. Within a declared severity, every live binding is reported —
+// including one this config never listed (e.g. added via the Last9 UI
+// after this block started managing the severity) — so the next apply's
+// reconcile actually detaches it. A declared severity is a claim of full
+// ownership: reporting only the configured subset would hide that drift
+// forever, since an unchanged plan never triggers reconcile at all. This
+// is what "declaring a severity block" is FOR — once declared, this
+// resource is authoritative for every channel at that severity, exactly
+// like the undeclared-severity guard makes it hands-off when not declared.
 func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Client, entityID string) diag.Diagnostics {
 	configured, err := entitySeverityChannels(d)
 	if err != nil {
@@ -174,6 +182,10 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 	blocks := make([]interface{}, 0, len(configured))
 	for severity, configuredChannels := range configured {
 		liveNames := liveNamesBySeverity[severity]
+		remaining := make(map[string]bool, len(liveNames))
+		for name := range liveNames {
+			remaining[name] = true
+		}
 
 		channels := make([]string, 0, len(configuredChannels))
 		for _, value := range configuredChannels {
@@ -191,7 +203,16 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 			}
 			if liveNames[dest.Name] {
 				channels = append(channels, value)
+				delete(remaining, dest.Name)
 			}
+		}
+		// Anything still live at this DECLARED severity that wasn't matched
+		// above is drift within this resource's own ownership boundary
+		// (e.g. attached externally after this block started managing the
+		// severity) -- report it by display name so the next reconcile
+		// detaches it, instead of hiding it and leaving it live forever.
+		for name := range remaining {
+			channels = append(channels, name)
 		}
 
 		blocks = append(blocks, map[string]interface{}{
