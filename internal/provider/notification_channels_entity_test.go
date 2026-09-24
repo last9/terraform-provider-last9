@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -165,5 +166,89 @@ func TestSetEntityNotificationChannels_PreservesConfiguredSpellingAndSurfacesExt
 	}
 	if !foundExternal {
 		t.Errorf("expected externally-bound Channel B surfaced, got: %v", channels)
+	}
+}
+
+// TestReviewEntityLookupFailureDoesNotRewriteID guards against a code-review
+// finding: setEntityNotificationChannels's per-value resolveNotificationChannel
+// failure handling treated ANY error (transport failure, non-2xx response,
+// malformed JSON, or a genuine not-found) as "drop this configured value" --
+// the same defect already fixed on the alert Read path in
+// resourceAlertRead (see TestReviewResolutionFailurePropagates), just not
+// carried over to this newer entity path. With configured channel "1" and
+// a live binding for "Channel A" (id 1), a failed lookup used to silently
+// drop "1" from the resolved-channels loop, and the still-live "Channel A"
+// name would then get added back by the "remaining" pass -- rewriting
+// state from the configured ID "1" to the display name "Channel A" and
+// manufacturing a spurious plan diff from a transient API failure, not an
+// actual configuration change.
+func TestReviewEntityLookupFailureDoesNotRewriteID(t *testing.T) {
+	for _, failure := range []string{"healthy", "503", "malformed_json"} {
+		t.Run(failure, func(t *testing.T) {
+			catalog := []client.NotificationDestination{{ID: 1, Name: "Channel A", Type: "slack"}}
+			live := map[string]client.NotificationDestination{
+				"Channel A": {ID: 100001, Name: "Channel A", ServiceFqid: "entity-1", Severity: "breach"},
+			}
+			fake := newFakeNotificationServer(catalog, live)
+			gets := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					gets++
+					// GET #1 is GetEntityNotificationBindings (must succeed so
+					// the binding is visible); GET #2 is the per-value
+					// resolveNotificationChannel("1") lookup -- fail only that one.
+					if gets == 2 {
+						if failure == "503" {
+							http.Error(w, "synthetic temporary failure", 503)
+							return
+						}
+						if failure == "malformed_json" {
+							_, _ = w.Write([]byte("{"))
+							return
+						}
+					}
+				}
+				fake.handler().ServeHTTP(w, r)
+			}))
+			defer server.Close()
+
+			c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+
+			d := schema.TestResourceDataRaw(t, resourceEntity().Schema, map[string]interface{}{
+				"name":         "test",
+				"type":         "service",
+				"external_ref": "test",
+				"notification_channels": []interface{}{
+					newEntityChannelsBlock("breach", []string{"1"}), // configured by ID
+				},
+			})
+			d.SetId("entity-1")
+
+			diags := setEntityNotificationChannels(d, c, "entity-1")
+
+			if failure == "healthy" {
+				if diags.HasError() {
+					t.Fatalf("setEntityNotificationChannels() error = %v", diags)
+				}
+				got, err := entitySeverityChannels(d)
+				if err != nil {
+					t.Fatalf("entitySeverityChannels() error = %v", err)
+				}
+				if channels := got["breach"]; len(channels) != 1 || channels[0] != "1" {
+					t.Errorf("healthy control: notification_channels = %v, want [\"1\"]", channels)
+				}
+				return
+			}
+
+			// A failed lookup must abort the read, not silently rewrite "1"
+			// to "Channel A" and report success.
+			if !diags.HasError() {
+				got, _ := entitySeverityChannels(d)
+				t.Fatalf("expected error propagated from failed channel lookup (response=%s), got success with notification_channels = %v", failure, got["breach"])
+			}
+		})
 	}
 }

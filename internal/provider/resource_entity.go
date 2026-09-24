@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -163,7 +164,17 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 		for _, value := range configured[severity] {
 			dest, err := resolveNotificationChannel(apiClient, value)
 			if err != nil {
-				continue // no longer resolvable -- drop it, surfaces as drift
+				if errors.Is(err, client.ErrNotificationChannelNotFound) {
+					continue // genuinely deleted from the org -- drop it, surfaces as drift
+				}
+				// A transport error, non-2xx response, or malformed JSON from
+				// the lookup is NOT the same as "channel doesn't exist" — if
+				// this were swallowed the same way, the "remaining" pass
+				// below would add back the still-live display name in its
+				// place, silently rewriting the configured ID/name spelling
+				// and reporting a transient API failure as if it were a
+				// real configuration change.
+				return diag.FromErr(fmt.Errorf("failed to resolve notification channel %q: %w", value, err))
 			}
 			if liveNames[dest.Name] {
 				channels = append(channels, value)
