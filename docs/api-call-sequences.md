@@ -32,8 +32,7 @@ Alert Groups are represented as `last9_entity` resources in Terraform.
 │   "workspace": "default",                                                    │
 │   "entity_class": "alert-manager",                                           │
 │   "ui_readonly": true,                                                       │
-│   "indicators": [...],                                                       │
-│   "notification_channels": [...]                                             │
+│   "indicators": [...]                                                       │
 │ }                                                                            │
 │                                                                              │
 │ Response: Entity object with ID                                              │
@@ -58,16 +57,35 @@ Alert Groups are represented as `last9_entity` resources in Terraform.
 │ }                                                                            │
 │                                                                              │
 │ Note: POST /entities does NOT accept metadata fields (tags, labels, team,    │
-│       links, adhoc_filter). These must be set via separate PUT call.         │
+│       links, adhoc_filter, notification_channels). Metadata fields go via   │
+│       this PUT call; notification channels go via Step 3 below.             │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Step 3: Read Entity (to sync state)                                          │
+│ Step 3: Attach/Detach Notification Channels (if configured)                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST   /notification_settings/{channel_id}/attach   (per new channel)       │
+│ DELETE /notification_settings/{binding_id}/attach   (per removed channel)   │
+│                                                                              │
+│ Request Body (attach): {"entity_id": "<entity_id>", "severity": "breach"}    │
+│                                                                              │
+│ Note: notification_channels is NOT a field on the entity itself — it's a     │
+│       list of separate binding rows keyed by (entity, severity, channel).   │
+│       There is no bulk "set channels" call; each channel is attached or     │
+│       detached individually. This is the ONLY resource that safely detaches │
+│       a channel: the entity is the sole real owner of these bindings.       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Read Entity (to sync state)                                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ GET /entities/{entity_id}                                                    │
+│ GET /notification_settings   (filtered client-side by service_fqid)         │
 │                                                                              │
-│ Response: Full entity object including nested metadata                       │
+│ Response: Full entity object including nested metadata, plus the live       │
+│           notification_settings rows bound to this entity                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,7 +112,6 @@ Alert Groups are represented as `last9_entity` resources in Terraform.
 │   "entity_class": "alert-manager",                                           │
 │   "ui_readonly": true,                                                       │
 │   "indicators": [...],                                                       │
-│   "notification_channels": [...],                                            │
 │   "metadata": {                            ◄── Metadata is nested            │
 │     "team": "platform",                                                      │
 │     "tags": ["production", "critical"],                                      │
@@ -243,13 +260,34 @@ Alerts are represented as `last9_alert` resources in Terraform. Alerts require a
 │ }                                                                            │
 │                                                                              │
 │ Response: Alert object with ID                                               │
+│                                                                              │
+│ Note: the alert-rules API has NO notification_channels field of its own --  │
+│       this key is silently dropped server-side. It's sent here only        │
+│       because the request struct is shared with other fields; the field    │
+│       does nothing until Step 3 below.                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Step 3: Read Alert (to sync state)                                           │
+│ Step 3: Attach Notification Channels (attach-only, see last9_alert docs)    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ POST /notification_settings/{channel_id}/attach   (per new channel)         │
+│                                                                              │
+│ Request Body: {"entity_id": "<entity_id>", "severity": "breach"}             │
+│                                                                              │
+│ Note: this NEVER detaches a channel removed from config -- the binding is   │
+│       keyed by (entity, severity, channel) with no per-alert-rule          │
+│       ownership, so this alert can't tell whether a sibling alert on the   │
+│       same entity/severity still needs it. Manage removal via              │
+│       last9_entity.notification_channels instead.                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Read Alert (to sync state)                                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ GET /entities/{entity_id}/alert-rules/{alert_id}                             │
+│ GET /notification_settings   (filtered client-side by service_fqid)         │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐

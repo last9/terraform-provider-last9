@@ -40,8 +40,6 @@ resource "last9_alert" "high_error_rate" {
 
   severity = "breach"
 
-  notification_channels = [last9_notification_channel.slack.id]
-
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-error-rate"
     annotations = {
@@ -51,6 +49,8 @@ resource "last9_alert" "high_error_rate" {
   }
 }
 ```
+
+~> **Note** Manage notification channels on the alert group (`last9_entity.notification_channels`), not here. Every alert in a group at a given severity shares the exact same channel bindings — the Last9 API has no per-alert-rule notification setting. This resource's `notification_channels` field still exists and can attach a channel, but it can never safely remove one; see the field description below.
 
 ### Threshold Alert (Less Than)
 
@@ -123,7 +123,7 @@ resource "last9_alert" "service_down" {
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.
 - `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `true`.
-- `notification_channels` (List of String) Notification channel IDs to notify when alert fires.
+- `notification_channels` (List of String) Notification channel IDs or names to attach at this alert's severity. **Attach-only**: Terraform binds each listed channel, but removing one from this list does NOT unbind it — the Last9 API binds channels to an `(entity, severity)` pair with no per-alert-rule ownership, so this resource can't tell whether a sibling alert on the same group/severity still needs it. To stop notifying through a channel, remove it from `last9_entity.notification_channels` instead, or delete the alert.
 - `properties` (Block) Additional alert properties. See [Properties](#properties).
 
 ### Read-Only

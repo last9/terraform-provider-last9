@@ -90,12 +90,6 @@ func dataSourceEntity() *schema.Resource {
 				Computed:    true,
 				Description: "Whether UI edits are disabled",
 			},
-			"notification_channels": {
-				Type:        schema.TypeList,
-				Computed:    true,
-				Description: "Notification channel IDs or names",
-				Elem:        &schema.Schema{Type: schema.TypeString},
-			},
 		},
 	}
 }
@@ -133,7 +127,6 @@ func dataSourceEntityRead(ctx context.Context, d *schema.ResourceData, m interfa
 	d.Set("ui_readonly", entity.UIReadonly)
 	d.Set("tags", entity.Tags)
 	d.Set("labels", entity.Labels)
-	d.Set("notification_channels", entity.NotificationChannels)
 
 	return nil
 }

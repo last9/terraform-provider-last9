@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,16 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrNotificationChannelNotFound is returned by GetNotificationDestination
+// and FindNotificationDestinationByName specifically when the destination
+// list was fetched successfully but no row matches — as opposed to the
+// lookup itself failing (transport error, non-2xx response, malformed
+// JSON). Callers that need to tell "genuinely doesn't exist" apart from "we
+// couldn't tell" (e.g. to decide whether a missing channel means it was
+// deleted, versus the API being temporarily unavailable) should check for
+// this with errors.Is rather than treating any non-nil error the same way.
+var ErrNotificationChannelNotFound = errors.New("notification channel not found")
 
 type Config struct {
 	// Direct access token (legacy) - for read/write operations
@@ -864,7 +875,7 @@ func (c *Client) GetNotificationDestination(id int) (*NotificationDestination, e
 		}
 	}
 
-	return nil, fmt.Errorf("notification destination with ID %d not found", id)
+	return nil, fmt.Errorf("%w: id %d", ErrNotificationChannelNotFound, id)
 }
 
 // FindNotificationDestinationByName looks up a channel by its display name.
@@ -900,7 +911,7 @@ func (c *Client) FindNotificationDestinationByName(name string) (*NotificationDe
 		return fallback, nil
 	}
 
-	return nil, fmt.Errorf("notification channel %q not found", name)
+	return nil, fmt.Errorf("%w: %q", ErrNotificationChannelNotFound, name)
 }
 
 // AttachNotificationSettingsRequest is the body for binding a channel to an entity.
@@ -1003,27 +1014,26 @@ type EntityMetadata struct {
 }
 
 type Entity struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	Type                 string            `json:"type"`
-	ExternalRef          string            `json:"external_ref"`
-	Description          string            `json:"description"`
-	DataSource           string            `json:"data_source,omitempty"`
-	DataSourceID         string            `json:"data_source_id,omitempty"`
-	Namespace            string            `json:"namespace,omitempty"`
-	Team                 string            `json:"team,omitempty"`
-	Tier                 string            `json:"tier,omitempty"`
-	Workspace            string            `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          string            `json:"entity_class,omitempty"`
-	UIReadonly           bool              `json:"ui_readonly"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
-	CreatedAt            int64             `json:"created_at,omitempty"`
-	UpdatedAt            int64             `json:"updated_at,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	ExternalRef  string            `json:"external_ref"`
+	Description  string            `json:"description"`
+	DataSource   string            `json:"data_source,omitempty"`
+	DataSourceID string            `json:"data_source_id,omitempty"`
+	Namespace    string            `json:"namespace,omitempty"`
+	Team         string            `json:"team,omitempty"`
+	Tier         string            `json:"tier,omitempty"`
+	Workspace    string            `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  string            `json:"entity_class,omitempty"`
+	UIReadonly   bool              `json:"ui_readonly"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
+	CreatedAt    int64             `json:"created_at,omitempty"`
+	UpdatedAt    int64             `json:"updated_at,omitempty"`
 	// Metadata is returned nested in GET response - we extract fields from it
 	Metadata *EntityMetadata `json:"metadata,omitempty"`
 }
@@ -1045,45 +1055,43 @@ type EntityLink struct {
 }
 
 type EntityCreateRequest struct {
-	Name                 string            `json:"name"`
-	Type                 string            `json:"type"`
-	ExternalRef          string            `json:"external_ref"`
-	Description          string            `json:"description,omitempty"`
-	DataSource           string            `json:"data_source,omitempty"`
-	DataSourceID         string            `json:"data_source_id,omitempty"`
-	Namespace            string            `json:"namespace,omitempty"`
-	Team                 string            `json:"team,omitempty"`
-	Tier                 string            `json:"tier,omitempty"`
-	Workspace            string            `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          string            `json:"entity_class,omitempty"`
-	UIReadonly           bool              `json:"ui_readonly"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	ExternalRef  string            `json:"external_ref"`
+	Description  string            `json:"description,omitempty"`
+	DataSource   string            `json:"data_source,omitempty"`
+	DataSourceID string            `json:"data_source_id,omitempty"`
+	Namespace    string            `json:"namespace,omitempty"`
+	Team         string            `json:"team,omitempty"`
+	Tier         string            `json:"tier,omitempty"`
+	Workspace    string            `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  string            `json:"entity_class,omitempty"`
+	UIReadonly   bool              `json:"ui_readonly"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
 }
 
 type EntityUpdateRequest struct {
-	Name                 *string           `json:"name,omitempty"`
-	Type                 *string           `json:"type,omitempty"`
-	ExternalRef          *string           `json:"external_ref,omitempty"`
-	Description          *string           `json:"description,omitempty"`
-	DataSource           *string           `json:"data_source,omitempty"`
-	DataSourceID         *string           `json:"data_source_id,omitempty"`
-	Namespace            *string           `json:"namespace,omitempty"`
-	Team                 *string           `json:"team,omitempty"`
-	Tier                 *string           `json:"tier,omitempty"`
-	Workspace            *string           `json:"workspace,omitempty"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	EntityClass          *string           `json:"entity_class,omitempty"`
-	UIReadonly           *bool             `json:"ui_readonly,omitempty"`
-	AdhocFilter          *AdhocFilter      `json:"adhoc_filter,omitempty"`
-	Indicators           []Indicator       `json:"indicators,omitempty"`
-	Links                []EntityLink      `json:"links,omitempty"`
-	NotificationChannels []string          `json:"notification_channels,omitempty"`
+	Name         *string           `json:"name,omitempty"`
+	Type         *string           `json:"type,omitempty"`
+	ExternalRef  *string           `json:"external_ref,omitempty"`
+	Description  *string           `json:"description,omitempty"`
+	DataSource   *string           `json:"data_source,omitempty"`
+	DataSourceID *string           `json:"data_source_id,omitempty"`
+	Namespace    *string           `json:"namespace,omitempty"`
+	Team         *string           `json:"team,omitempty"`
+	Tier         *string           `json:"tier,omitempty"`
+	Workspace    *string           `json:"workspace,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EntityClass  *string           `json:"entity_class,omitempty"`
+	UIReadonly   *bool             `json:"ui_readonly,omitempty"`
+	AdhocFilter  *AdhocFilter      `json:"adhoc_filter,omitempty"`
+	Indicators   []Indicator       `json:"indicators,omitempty"`
+	Links        []EntityLink      `json:"links,omitempty"`
 }
 
 type EntitiesListResponse struct {

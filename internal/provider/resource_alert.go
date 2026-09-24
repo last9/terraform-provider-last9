@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -55,23 +56,16 @@ type resolvedChannel struct {
 // A" compare equal when they name the same channel, since both resolve to
 // the same canonical Name.
 //
-// An entry that fails to resolve is skipped rather than erroring when
-// skipUnresolvable is true. This is for prevChannels: a previously-owned
-// channel can have been deleted from the org entirely between applies, and
-// failing the whole reconcile over a now-nonexistent channel would also
-// block legitimate attach/detach work for the current wantChannels list —
-// there is nothing to detach for a channel that no longer exists anyway.
-// wantChannels must NOT skip: a channel the user's config currently asks
-// for that fails to resolve is a real configuration error and should fail
-// the apply.
-func resolveChannels(apiClient *client.Client, values []string, skipUnresolvable bool) ([]resolvedChannel, error) {
+// Any resolution failure — including client.ErrNotificationChannelNotFound
+// — is propagated rather than skipped: wantChannels is always the user's
+// current desired config, and a channel it names that can't be resolved
+// (deleted, or a transient API failure) is something the apply must fail
+// on rather than silently drop from the attach set.
+func resolveChannels(apiClient *client.Client, values []string) ([]resolvedChannel, error) {
 	resolved := make([]resolvedChannel, 0, len(values))
 	for _, v := range values {
 		dest, err := resolveNotificationChannel(apiClient, v)
 		if err != nil {
-			if skipUnresolvable {
-				continue
-			}
 			return nil, fmt.Errorf("failed to resolve notification channel %q: %w", v, err)
 		}
 		resolved = append(resolved, resolvedChannel{value: v, name: dest.Name, id: dest.ID})
@@ -79,30 +73,36 @@ func resolveChannels(apiClient *client.Client, values []string, skipUnresolvable
 	return resolved, nil
 }
 
-// reconcileNotificationChannels makes entityID's live notification bindings
-// at the given severity match wantChannels exactly, without disturbing
-// bindings at other severities or bindings this alert never owned. The
-// alert-rules Create/Update API has no notification_channels field of its
-// own — a channel is bound to an entity via dedicated attach/detach calls,
-// so simply including notification_channels in the alert-rule request body
-// is silently ignored server-side and creates no live binding. This
-// function makes the calls that actually create/remove one:
-//   - any wanted channel not currently bound (at this severity) gets attached
-//   - any channel this alert previously attached (per prevChannels) that is
-//     no longer wanted gets detached — this is what makes a channel
-//     *removed* from config actually stop notifying, instead of the stale
-//     binding silently surviving
-//   - a channel already correctly bound is left untouched, regardless of
-//     whether config spells it as a name or a numeric ID
+// reconcileNotificationChannels attaches each wanted channel to entityID at
+// the given severity, if it isn't already bound there. The alert-rules
+// Create/Update API has no notification_channels field of its own — a
+// channel is bound to an entity via a dedicated attach call, so simply
+// including notification_channels in the alert-rule request body is
+// silently ignored server-side and creates no live binding. This function
+// makes the call that actually creates one.
 //
-// The binding API has no concept of which alert owns a binding — a row is
-// keyed only by (entity, severity, channel). Scoping detachment to
-// prevChannels (this resource's own prior notification_channels — see the
-// ownership-tracking note on resourceAlertRead for where that value must
-// come from) rather than "every live binding not currently wanted" is what
-// keeps one alert's reconcile from deleting a sibling alert's or an
-// externally-managed binding that happens to share the same entity and
-// severity.
+// This is intentionally attach-only: it never detaches a channel that's no
+// longer in wantChannels. The binding API has no concept of which alert
+// owns a binding — a row is keyed only by (entity, severity, channel), with
+// no per-alert reference count and no endpoint to enumerate every alert on
+// an entity to check whether another one still wants a channel before
+// removing it. examples/entity-with-alerts/main.tf has two breach-severity
+// alerts on one entity sharing a channel; earlier revisions of this
+// function tracked "channels this alert previously declared" as a proxy
+// for ownership, but that proxy is wrong the moment two alerts share a
+// channel — reconciling either one after removing it from just that one
+// alert's config would detach the still-wanted shared binding and silently
+// stop the other alert's paging. Given no reliable way to attribute a
+// shared binding to a single owner, attach-only is the only choice that
+// can't misfire.
+//
+// The practical effect: removing a channel from one alert's
+// notification_channels stops Terraform from re-attaching it if externally
+// detached, but does NOT itself detach it — the entity keeps notifying
+// through that channel (correctly, if another alert still declares it;
+// harmlessly stale otherwise) until it's removed via the Last9 UI/API or
+// the whole alert is deleted. This is documented on the notification_channels
+// schema field.
 //
 // Matching against live bindings is done by resolved canonical name, not
 // the raw config string or the master channel ID: a binding row (from
@@ -114,7 +114,7 @@ func resolveChannels(apiClient *client.Client, values []string, skipUnresolvable
 // maps both to that channel's canonical Name.
 //
 // entityID must already exist (this is called after alert create/update).
-func reconcileNotificationChannels(apiClient *client.Client, entityID, severity string, prevChannels, wantChannels []string) error {
+func reconcileNotificationChannels(apiClient *client.Client, entityID, severity string, wantChannels []string) error {
 	live, err := apiClient.GetEntityNotificationBindings(entityID)
 	if err != nil {
 		return fmt.Errorf("failed to read existing notification bindings for entity %s: %w", entityID, err)
@@ -130,20 +130,9 @@ func reconcileNotificationChannels(apiClient *client.Client, entityID, severity 
 		}
 	}
 
-	wantResolved, err := resolveChannels(apiClient, wantChannels, false)
+	wantResolved, err := resolveChannels(apiClient, wantChannels)
 	if err != nil {
 		return err
-	}
-	// prevChannels tolerates unresolvable entries -- see resolveChannels.
-	prevResolved, _ := resolveChannels(apiClient, prevChannels, true)
-
-	want := make(map[string]bool, len(wantResolved))
-	for _, r := range wantResolved {
-		want[r.name] = true
-	}
-	owned := make(map[string]bool, len(prevResolved))
-	for _, r := range prevResolved {
-		owned[r.name] = true
 	}
 
 	for _, r := range wantResolved {
@@ -152,18 +141,6 @@ func reconcileNotificationChannels(apiClient *client.Client, entityID, severity 
 		}
 		if _, err := apiClient.AttachNotificationSettings(r.id, entityID, severity); err != nil {
 			return fmt.Errorf("failed to attach notification channel %q (id %d) to entity %s: %w", r.value, r.id, entityID, err)
-		}
-	}
-
-	for name, binding := range liveByName {
-		if want[name] {
-			continue // still wanted
-		}
-		if !owned[name] {
-			continue // this alert never attached it — leave it to its owner
-		}
-		if err := apiClient.DetachNotificationSettings(binding.ID); err != nil {
-			return fmt.Errorf("failed to detach notification channel %q (binding id %d) from entity %s: %w", name, binding.ID, entityID, err)
 		}
 	}
 
@@ -298,10 +275,18 @@ func resourceAlert() *schema.Resource {
 				Description: "Group timeseries notifications",
 			},
 			"notification_channels": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				Description: "Notification channel IDs or names to send alerts to",
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				Type:     schema.TypeList,
+				Optional: true,
+				Description: "Notification channel IDs or names to send alerts to. This is " +
+					"ATTACH-ONLY: Terraform will bind each listed channel to the alert's " +
+					"entity/severity, but removing a channel from this list does NOT " +
+					"unbind it. The underlying API has no per-alert ownership of a " +
+					"binding and no way to tell whether another alert on the same " +
+					"entity/severity still needs it, so automatic removal risks silently " +
+					"cutting off a shared alert's notifications. To stop notifying " +
+					"through a channel, remove it via the Last9 UI/API directly, or " +
+					"delete the alert.",
+				Elem: &schema.Schema{Type: schema.TypeString},
 			},
 		},
 	}
@@ -419,10 +404,10 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	// The alert-rules API has no notification_channels field of its own (see
 	// reconcileNotificationChannels docstring) — bind each requested channel
 	// via a separate attach call now that the entity/alert exist. Nothing to
-	// detach on a brand-new entity, so skip the reconcile call entirely when
-	// the list is empty.
+	// attach on a brand-new entity with no configured channels, so skip the
+	// call entirely when the list is empty.
 	if len(req.NotificationChannels) > 0 {
-		if err := reconcileNotificationChannels(apiClient, entityID, req.Severity, nil, req.NotificationChannels); err != nil {
+		if err := reconcileNotificationChannels(apiClient, entityID, req.Severity, req.NotificationChannels); err != nil {
 			return diag.FromErr(err)
 		}
 	}
@@ -453,12 +438,11 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	// alert-rules endpoint has no such field (see reconcileNotificationChannels).
 	// The binding API has no per-alert ownership, so Read must not simply
 	// report "every live binding on this entity/severity" as this alert's
-	// notification_channels: on a shared entity that would promote a
-	// sibling alert's channel into this alert's state, and the next
-	// Update's reconcile (which trusts state as "what this alert owns," per
-	// reconcileNotificationChannels) would then detach that sibling's
-	// channel as no-longer-wanted the moment this alert's config doesn't
-	// happen to list it too.
+	// notification_channels: on a shared entity (examples/entity-with-alerts/main.tf
+	// has two breach alerts sharing one channel) that would promote a
+	// sibling alert's channel into this alert's state, permanently
+	// inflating notification_channels beyond what this alert's own config
+	// ever asked for and showing spurious drift on every plan.
 	//
 	// So Read only ever keeps or drops entries this alert already claimed
 	// in state — it never adds one: for each configured value, resolve it
@@ -486,7 +470,17 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	for _, value := range configured {
 		dest, err := resolveNotificationChannel(apiClient, value)
 		if err != nil {
-			continue // channel no longer resolvable at all -- drop it, surfaces as drift
+			if errors.Is(err, client.ErrNotificationChannelNotFound) {
+				continue // genuinely deleted from the org -- drop it, surfaces as drift
+			}
+			// A transport error, non-2xx response, or malformed JSON from
+			// the lookup is NOT the same as "channel doesn't exist" — if we
+			// swallowed this the same way, Read would report success with
+			// this channel silently missing from state, and the next
+			// Update would then detach a still-wanted, still-live binding
+			// because state no longer claims to own it. Fail the read
+			// instead so Terraform preserves prior state and retries.
+			return diag.FromErr(fmt.Errorf("failed to resolve notification channel %q: %w", value, err))
 		}
 		if liveAtSeverity[dest.Name] {
 			stillOwned = append(stillOwned, value)
@@ -679,33 +673,17 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 
 	// Bindings are keyed on entity_id, which is stable across this update
-	// (only the alert-rule itself is deleted/recreated), so a binding that's
-	// still wanted survives untouched. Always reconcile — including when
-	// req.NotificationChannels is empty, which means "remove every channel"
-	// and must still run to detach whatever was bound before. Skipping this
-	// call on an empty list was the exact case that let a channel silently
-	// stay bound after being removed from config.
-	//
-	// prevChannels scopes detachment to what THIS alert previously declared
-	// (see reconcileNotificationChannels), so a sibling alert's binding on
-	// the same entity/severity is never touched even if this alert's new
-	// list happens not to include it.
-	oldChannelsRaw, _ := d.GetChange("notification_channels")
-	prevChannels := toStringSlice(oldChannelsRaw.([]interface{}))
-	oldSeverity, _ := d.GetChange("severity")
-
-	if oldSeverity.(string) != *req.Severity {
-		// Severity changed: the previously-owned bindings live under the OLD
-		// severity, so detach them there first (want=nil clears everything
-		// this alert owned), then attach the full new list fresh under the
-		// new severity.
-		if err := reconcileNotificationChannels(apiClient, entityID, oldSeverity.(string), prevChannels, nil); err != nil {
-			return diag.FromErr(err)
-		}
-		prevChannels = nil
-	}
-
-	if err := reconcileNotificationChannels(apiClient, entityID, *req.Severity, prevChannels, req.NotificationChannels); err != nil {
+	// (only the alert-rule itself is deleted/recreated). Attach any newly
+	// configured channel that isn't already bound at the current severity —
+	// see reconcileNotificationChannels for why this never detaches: the
+	// binding API has no per-alert ownership or reference count, so a
+	// channel shared with a sibling alert on the same entity/severity
+	// (examples/entity-with-alerts/main.tf does this) can't be safely
+	// removed just because this alert's config no longer lists it. If
+	// severity changed, the old severity's binding (if this was the only
+	// alert using it) is simply left in place rather than chased down and
+	// removed, for the same reason.
+	if err := reconcileNotificationChannels(apiClient, entityID, *req.Severity, req.NotificationChannels); err != nil {
 		return diag.FromErr(err)
 	}
 

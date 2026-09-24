@@ -13,36 +13,31 @@ import (
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
-// TestReviewRefreshOwnershipAndIDs guards against the regression a code
-// review found in the initial ownership-tracking fix: prevChannels was
-// sourced from d.GetChange("notification_channels"), but Read populated
-// notification_channels from the full live binding set at this severity —
-// including a sibling alert's channels on a shared entity. One refresh
-// therefore promoted the sibling's channel into this alert's "owned" state,
-// and the next reconcile deleted it as no-longer-wanted. It also caught a
-// second bug: Read rewrote a configured numeric channel ID ("1") to its
-// display name ("Channel A") on every refresh, so reconcile's next call
-// treated the two spellings as different channels and cycled
-// attach-then-immediately-detach on unchanged configuration.
+// TestReviewRefreshDoesNotLeakSiblingOrDrift guards against two bugs a code
+// review found: (1) Read reporting "every live binding at this severity" as
+// notification_channels would promote a sibling alert's channel into this
+// alert's state on a shared entity, permanently inflating it beyond what
+// this alert's own config ever asked for; (2) Read rewriting a configured
+// numeric channel ID ("1") to its display name ("Channel A") would cause
+// config drift on every refresh. Both are now moot for the DETACH direction
+// since reconcileNotificationChannels is attach-only (see its docstring),
+// but Read's reported state still matters: it's what shows up in `terraform
+// plan` diffs and in TestResourceAlertImportState_AdoptsLiveBindings-style
+// import flows, so it must not misrepresent what this alert actually owns.
 //
-//   - ownership_control: no refresh — establishes the sibling survives when
-//     prevChannels is exactly the as-configured value.
-//   - refresh_preserves_sibling: same setup, but goes through a real
-//     resourceAlertRead first (as Terraform does before every apply) to
-//     prove the refreshed state doesn't leak the sibling channel into
-//     prevChannels.
+//   - refresh_preserves_sibling: a sibling alert's channel on the same
+//     entity/severity must never appear in this alert's refreshed
+//     notification_channels.
 //   - numeric_id_round_trip: configuring by ID must survive a refresh with
-//     the same spelling, and must not cause a spurious detach/attach cycle.
-func TestReviewRefreshOwnershipAndIDs(t *testing.T) {
+//     the same spelling ("1" stays "1", not rewritten to "Channel A").
+func TestReviewRefreshDoesNotLeakSiblingOrDrift(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		configured []string
-		refresh    bool
 		sibling    bool
 	}{
-		{"ownership_control", []string{"Channel A"}, false, true},
-		{"refresh_preserves_sibling", []string{"Channel A"}, true, true},
-		{"numeric_id_round_trip", []string{"1"}, true, false},
+		{"refresh_preserves_sibling", []string{"Channel A"}, true},
+		{"numeric_id_round_trip", []string{"1"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			catalog := []client.NotificationDestination{{ID: 1, Name: "Channel A", Type: "slack"}, {ID: 2, Name: "Channel B", Type: "slack"}}
@@ -70,27 +65,13 @@ func TestReviewRefreshOwnershipAndIDs(t *testing.T) {
 			}
 			d := schema.TestResourceDataRaw(t, resourceAlert().Schema, map[string]interface{}{"entity_id": "entity-1", "name": "Synthetic", "severity": "breach", "notification_channels": raw})
 			d.SetId("alert-a")
-			prior := tc.configured
-			if tc.refresh {
-				if diags := resourceAlertRead(context.Background(), d, c); diags.HasError() {
-					t.Fatal(diags)
-				}
-				prior = toStringSlice(d.Get("notification_channels").([]interface{}))
-				if tc.name == "numeric_id_round_trip" && !reflect.DeepEqual(prior, tc.configured) {
-					t.Errorf("ID representation changed on read: got %v want %v", prior, tc.configured)
-				}
+
+			if diags := resourceAlertRead(context.Background(), d, c); diags.HasError() {
+				t.Fatal(diags)
 			}
-			// Terraform uses refreshed state as the old side of GetChange on update.
-			if err := reconcileNotificationChannels(c, "entity-1", "breach", prior, tc.configured); err != nil {
-				t.Fatal(err)
-			}
-			if len(fake.detached) != 0 {
-				t.Errorf("unchanged config deleted live bindings: %v (refreshed prior=%v)", fake.detached, prior)
-			}
-			if tc.sibling {
-				if _, ok := fake.live["Channel B"]; !ok {
-					t.Error("sibling alert lost notification channel B")
-				}
+			got := toStringSlice(d.Get("notification_channels").([]interface{}))
+			if !reflect.DeepEqual(got, tc.configured) {
+				t.Errorf("notification_channels after refresh = %v, want %v (sibling leak or ID rewrite)", got, tc.configured)
 			}
 		})
 	}

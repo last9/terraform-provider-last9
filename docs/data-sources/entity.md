@@ -56,5 +56,4 @@ output "alert_group_id" {
 - `tier` (String) Tier.
 - `workspace` (String) Workspace.
 - `labels` (Map of String) Labels.
-- `notification_channels` (List of Number) Default notification channel IDs.
 - `ui_readonly` (Boolean) Whether read-only in UI.

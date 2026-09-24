@@ -14,8 +14,12 @@ import (
 // fakeNotificationServer serves ListNotificationDestinations from a fixed
 // catalog and records every attach/detach call it receives, so a test can
 // assert reconcileNotificationChannels made exactly the calls it should —
-// no more (don't touch what's already correct) and no less (don't leave a
-// removed channel bound).
+// no more (don't touch what's already correct) and never a detach, since
+// last9_alert's notification_channels is attach-only (see
+// reconcileNotificationChannels's docstring for why: the binding API has no
+// per-alert-rule ownership at all, only per-entity+severity, so an alert
+// resource can never safely detach a channel another alert on the same
+// entity might still need).
 type fakeNotificationServer struct {
 	mu       sync.Mutex
 	catalog  []client.NotificationDestination // full org channel list
@@ -108,7 +112,7 @@ func TestReconcileNotificationChannels_AttachesMissing(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}, []string{"Channel A", "Channel B"}); err != nil {
+	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A", "Channel B"}); err != nil {
 		t.Fatalf("reconcileNotificationChannels() error = %v", err)
 	}
 
@@ -120,49 +124,19 @@ func TestReconcileNotificationChannels_AttachesMissing(t *testing.T) {
 	}
 }
 
-// TestReconcileNotificationChannels_DetachesRemoved verifies a channel that
-// is currently bound but no longer listed in wantChannels gets detached —
-// this is the fix for a channel removed from config staying silently bound.
-func TestReconcileNotificationChannels_DetachesRemoved(t *testing.T) {
-	catalog := []client.NotificationDestination{
-		{ID: 1, Name: "Channel A", Type: "slack"},
-		{ID: 2, Name: "Channel B", Type: "generic_webhook"},
-	}
-	live := map[string]client.NotificationDestination{
-		"Channel A": {ID: 100001, Name: "Channel A", ServiceFqid: "entity-1", Severity: "breach"},
-		"Channel B": {ID: 100002, Name: "Channel B", ServiceFqid: "entity-1", Severity: "breach"},
-	}
-	fake := newFakeNotificationServer(catalog, live)
-	server := httptest.NewServer(fake.handler())
-	defer server.Close()
-
-	c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
-	if err != nil {
-		t.Fatalf("NewClient() error = %v", err)
-	}
-
-	// Config now only wants Channel A -- Channel B was removed. Both were
-	// previously declared by this alert, so both are eligible for detach.
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A", "Channel B"}, []string{"Channel A"}); err != nil {
-		t.Fatalf("reconcileNotificationChannels() error = %v", err)
-	}
-
-	if len(fake.attached) != 0 {
-		t.Errorf("expected nothing attached, got: %v", fake.attached)
-	}
-	if len(fake.detached) != 1 || fake.detached[0] != 100002 {
-		t.Errorf("expected binding row 100002 (Channel B) detached, got: %v", fake.detached)
-	}
-	if _, stillBound := fake.live["Channel B"]; stillBound {
-		t.Error("Channel B is still bound after being removed from config")
-	}
-}
-
-// TestReconcileNotificationChannels_EmptyWantDetachesAll verifies the
-// specific case that motivated this fix: notification_channels going from
-// non-empty to [] must detach every existing binding, not be treated as
-// "nothing to do".
-func TestReconcileNotificationChannels_EmptyWantDetachesAll(t *testing.T) {
+// TestReconcileNotificationChannels_NeverDetaches verifies last9_alert's
+// notification_channels is attach-only: removing a channel from
+// wantChannels (or clearing the list entirely) must never call detach. The
+// binding API keys a row by (entity, severity, channel) only, with no
+// alert-rule column at all (confirmed against the Last9 backend schema —
+// service_fqid is the entity/alert-group id, and CSTRecord, the alert-rule
+// row, has no reference to notification_settings), and
+// examples/entity-with-alerts/main.tf has two alert rules on one entity
+// sharing a channel. Detaching from either alert's reconcile would delete
+// the one shared row and silently stop the other alert's paging, so this
+// function must never do it — channel removal is only safe at the entity
+// level (see resource_entity.go), never per alert-rule.
+func TestReconcileNotificationChannels_NeverDetaches(t *testing.T) {
 	catalog := []client.NotificationDestination{
 		{ID: 1, Name: "Channel A", Type: "slack"},
 	}
@@ -178,22 +152,25 @@ func TestReconcileNotificationChannels_EmptyWantDetachesAll(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}, []string{}); err != nil {
+	// Config now wants no channels at all -- Channel A was removed.
+	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{}); err != nil {
 		t.Fatalf("reconcileNotificationChannels() error = %v", err)
 	}
 
-	if len(fake.live) != 0 {
-		t.Errorf("expected all bindings removed, still live: %v", fake.live)
+	if len(fake.detached) != 0 {
+		t.Errorf("expected nothing detached (attach-only), got: %v", fake.detached)
+	}
+	if _, stillBound := fake.live["Channel A"]; !stillBound {
+		t.Error("Channel A was detached, but last9_alert's notification_channels must be attach-only")
 	}
 }
 
-// TestReconcileNotificationChannels_PreservesSiblingAlertBinding verifies the
-// P1 fix: reconciling one alert must not delete a binding that belongs to a
-// sibling alert sharing the same entity and severity. The binding API has no
-// per-alert ownership, so this alert only detaches channels IT previously
-// declared (prevChannels) — never a binding it never owned, even if that
-// binding isn't in this alert's wantChannels.
-func TestReconcileNotificationChannels_PreservesSiblingAlertBinding(t *testing.T) {
+// TestReconcileNotificationChannels_SharedChannelUnaffected verifies that a
+// channel already bound by a sibling alert on the same entity/severity
+// (examples/entity-with-alerts/main.tf's overlap scenario) is visible as
+// "already bound" and neither re-attached nor touched, regardless of
+// whether this alert's own config lists it.
+func TestReconcileNotificationChannels_SharedChannelUnaffected(t *testing.T) {
 	catalog := []client.NotificationDestination{
 		{ID: 1, Name: "Channel A", Type: "slack"},
 		{ID: 2, Name: "Channel B", Type: "generic_webhook"},
@@ -212,12 +189,15 @@ func TestReconcileNotificationChannels_PreservesSiblingAlertBinding(t *testing.T
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	// This alert only ever declared Channel A and still wants only Channel A.
-	// It must not touch Channel B, which it never owned.
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}, []string{"Channel A"}); err != nil {
+	// This alert only wants Channel A. Channel B (the sibling's) must be
+	// left alone -- not attached again, not detached.
+	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}); err != nil {
 		t.Fatalf("reconcileNotificationChannels() error = %v", err)
 	}
 
+	if len(fake.attached) != 0 {
+		t.Errorf("expected nothing attached (Channel A already bound), got: %v", fake.attached)
+	}
 	if len(fake.detached) != 0 {
 		t.Errorf("expected sibling binding 100002 (Channel B) preserved, but detached: %v", fake.detached)
 	}
@@ -226,12 +206,10 @@ func TestReconcileNotificationChannels_PreservesSiblingAlertBinding(t *testing.T
 	}
 }
 
-// TestReconcileNotificationChannels_SeverityScoped verifies the second P1
-// fix: reconciling a breach alert must not see or touch a threat-severity
-// binding for the same channel name on the same entity, in either direction
-// — it must attach a breach binding even if a threat one already exists
-// (attach_missing_severity), and must not detach the threat one when it's
-// not in the breach alert's wantChannels (preserve_other_severity).
+// TestReconcileNotificationChannels_SeverityScoped verifies reconciling a
+// breach alert must not see or touch a threat-severity binding for the
+// same channel name on the same entity — it must attach a breach binding
+// even if a threat one already exists.
 func TestReconcileNotificationChannels_SeverityScoped(t *testing.T) {
 	catalog := []client.NotificationDestination{
 		{ID: 1, Name: "Channel A", Type: "slack"},
@@ -251,7 +229,7 @@ func TestReconcileNotificationChannels_SeverityScoped(t *testing.T) {
 
 	// Reconciling a breach alert wanting Channel A must attach it at breach
 	// severity rather than treating the threat binding as satisfying it.
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", nil, []string{"Channel A"}); err != nil {
+	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"Channel A"}); err != nil {
 		t.Fatalf("reconcileNotificationChannels() error = %v", err)
 	}
 	if len(fake.attached) != 1 || fake.attached[0] != "Channel A" {
@@ -259,15 +237,12 @@ func TestReconcileNotificationChannels_SeverityScoped(t *testing.T) {
 	}
 
 	// The pre-existing threat binding (row 100001) must survive untouched.
-	// The fake server keys live bindings by name, so asserting via the
-	// detach log (severity-agnostic) is the unambiguous check here: nothing
-	// was ever detached, meaning row 100001 was never touched.
 	if len(fake.detached) != 0 {
 		t.Errorf("expected the pre-existing threat binding preserved, but detached: %v", fake.detached)
 	}
 }
 
-// TestReconcileNotificationChannels_AcceptsChannelID verifies the P2 fix:
+// TestReconcileNotificationChannels_AcceptsChannelID verifies
 // notification_channels entries that are numeric strings (as produced by
 // data.last9_notification_destination.*.id, per
 // examples/entity-with-alerts/main.tf) resolve by ID instead of being
@@ -287,7 +262,7 @@ func TestReconcileNotificationChannels_AcceptsChannelID(t *testing.T) {
 	}
 
 	// "1" is the numeric ID of Channel A, not its name.
-	if err := reconcileNotificationChannels(c, "entity-1", "breach", nil, []string{"1"}); err != nil {
+	if err := reconcileNotificationChannels(c, "entity-1", "breach", []string{"1"}); err != nil {
 		t.Fatalf("reconcileNotificationChannels() error = %v, want channel ID \"1\" to resolve to Channel A", err)
 	}
 	if len(fake.attached) != 1 || fake.attached[0] != "Channel A" {
