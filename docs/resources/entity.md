@@ -70,6 +70,8 @@ resource "last9_entity" "api_alerts" {
 
 ~> **Note** Manage notification channels here, on the alert group, not on individual `last9_alert` resources. This matches the Last9 UI, which only lets you edit notification channels at the alert-group level ("Inherited from the alert group"). `last9_alert.notification_channels` still exists for attach-only convenience but cannot safely remove a channel — see its own docs for why.
 
+~> **Note** A `notification_channels` block only reconciles the severity it names. If a severity's channels are managed elsewhere (e.g. via `last9_alert.notification_channels`, or manually), simply omit that severity's block here — this resource will never adopt or remove bindings for a severity it has no block for. To fully manage a severity (including removing channels), add a block for it, even with an empty `channels = []` list. `terraform import` seeds a block for every severity that currently has a live binding, so an imported entity starts out managing everything already bound to it.
+
 ### Notify-Once (Suppress Repeat Notifications)
 
 ```terraform

@@ -122,23 +122,41 @@ func reconcileEntityNotificationChannelsAtSeverity(apiClient *client.Client, ent
 }
 
 // setEntityNotificationChannels writes notification_channels from the real
-// live bindings for entityID, one block per severity that currently has at
-// least one bound channel. Unlike last9_alert's Read (which must not report
-// a channel this alert never declared — see resourceAlertRead), this
-// entity resource IS the sole owner of every binding on it, so reporting
-// exactly what's live is correct and is what makes drift (a channel added
-// or removed outside Terraform) visible.
+// live bindings for entityID, one block for every severity the current
+// config already declares a block for — never for a severity this
+// resource's config doesn't mention at all.
+//
+// It's tempting to think "the entity IS the sole owner of every binding on
+// it, so reporting everything live is just accurate drift detection" — but
+// that reasoning breaks the moment a customer manages a severity's
+// channels via last9_alert.notification_channels (still supported,
+// attach-only) and simply never adds a notification_channels block for
+// that severity on last9_entity. Iterating every severity with a live
+// binding would then adopt that alert-managed channel into this resource's
+// state on the very next Read, and the following plan/apply would delete
+// it as "no longer configured" — destroying paging that was never this
+// resource's to touch. So: only severities present in configured are ever
+// examined or emitted, including one with an explicit empty channels list
+// (an empty block is a real "I want zero channels here" declaration and
+// must survive Read unchanged, not disappear for having nothing live to
+// report). A severity with real bindings that isn't in configured is left
+// entirely alone — visible only via last9_alert or the Last9 UI, exactly
+// as it was before this resource existed. Adopting an existing severity's
+// bindings into last9_entity happens explicitly, via `terraform import`
+// (see resourceEntityImportState) or by adding the block to config, never
+// implicitly via Read.
 //
 // A channel already present in the current config for its severity keeps
 // its configured spelling (ID vs. name) rather than always being rewritten
 // to the API's display name, avoiding perpetual plan diffs from that
-// alone; a live channel not in config (external change, or on import) is
-// reported by its display name since there's no configured spelling to
-// preserve.
+// alone.
 func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Client, entityID string) diag.Diagnostics {
 	configured, err := entitySeverityChannels(d)
 	if err != nil {
 		return diag.FromErr(err)
+	}
+	if len(configured) == 0 {
+		return nil // this resource doesn't manage any severity's channels
 	}
 
 	bindings, err := apiClient.GetEntityNotificationBindings(entityID)
@@ -153,41 +171,27 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 		liveNamesBySeverity[b.Severity][b.Name] = true
 	}
 
-	blocks := make([]interface{}, 0, len(liveNamesBySeverity))
-	for severity, liveNames := range liveNamesBySeverity {
-		remaining := make(map[string]bool, len(liveNames))
-		for name := range liveNames {
-			remaining[name] = true
-		}
+	blocks := make([]interface{}, 0, len(configured))
+	for severity, configuredChannels := range configured {
+		liveNames := liveNamesBySeverity[severity]
 
-		channels := make([]string, 0, len(liveNames))
-		for _, value := range configured[severity] {
+		channels := make([]string, 0, len(configuredChannels))
+		for _, value := range configuredChannels {
 			dest, err := resolveNotificationChannel(apiClient, value)
 			if err != nil {
 				if errors.Is(err, client.ErrNotificationChannelNotFound) {
 					continue // genuinely deleted from the org -- drop it, surfaces as drift
 				}
 				// A transport error, non-2xx response, or malformed JSON from
-				// the lookup is NOT the same as "channel doesn't exist" — if
-				// this were swallowed the same way, the "remaining" pass
-				// below would add back the still-live display name in its
-				// place, silently rewriting the configured ID/name spelling
-				// and reporting a transient API failure as if it were a
+				// the lookup is NOT the same as "channel doesn't exist" —
+				// propagate it rather than silently dropping the value,
+				// which would otherwise report a transient API failure as a
 				// real configuration change.
 				return diag.FromErr(fmt.Errorf("failed to resolve notification channel %q: %w", value, err))
 			}
 			if liveNames[dest.Name] {
 				channels = append(channels, value)
-				delete(remaining, dest.Name)
 			}
-		}
-		// Anything live at this severity that wasn't in config (external
-		// change, or nothing configured yet on import) is still reported,
-		// by its display name, since detach here is safe/authoritative —
-		// unlike last9_alert, there's no risk of manufacturing state this
-		// resource doesn't actually own.
-		for name := range remaining {
-			channels = append(channels, name)
 		}
 
 		blocks = append(blocks, map[string]interface{}{
@@ -206,7 +210,7 @@ func resourceEntity() *schema.Resource {
 		UpdateContext: resourceEntityUpdate,
 		DeleteContext: resourceEntityDelete,
 		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
+			StateContext: resourceEntityImportState,
 		},
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -935,4 +939,40 @@ func resourceEntityDelete(ctx context.Context, d *schema.ResourceData, m interfa
 
 	d.SetId("")
 	return nil
+}
+
+// resourceEntityImportState seeds notification_channels from every severity
+// that currently has at least one live binding, before delegating the rest
+// of the import to a normal Read. setEntityNotificationChannels only ever
+// examines a severity already present in config (see its docstring) —
+// necessary so an ordinary Read never adopts a severity managed by
+// last9_alert instead, but that same rule means a fresh import (no prior
+// config at all) needs an explicit seed here, or every existing binding
+// would be invisible to this resource forever. Import is the one point
+// where adopting "everything currently live" as this resource's declared
+// ownership is exactly what the user is asking for.
+func resourceEntityImportState(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+	apiClient := m.(*client.Client)
+
+	bindings, err := apiClient.GetEntityNotificationBindings(d.Id())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read notification bindings for import: %w", err)
+	}
+	namesBySeverity := make(map[string][]string)
+	for _, b := range bindings {
+		namesBySeverity[b.Severity] = append(namesBySeverity[b.Severity], b.Name)
+	}
+	if len(namesBySeverity) > 0 {
+		blocks := make([]interface{}, 0, len(namesBySeverity))
+		for severity, names := range namesBySeverity {
+			channels := make([]interface{}, len(names))
+			for i, n := range names {
+				channels[i] = n
+			}
+			blocks = append(blocks, map[string]interface{}{"severity": severity, "channels": channels})
+		}
+		d.Set("notification_channels", blocks)
+	}
+
+	return []*schema.ResourceData{d}, nil
 }
