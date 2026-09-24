@@ -24,6 +24,27 @@ func entitySeverityChannels(d *schema.ResourceData) (map[string][]string, error)
 	return parseEntitySeverityChannels(raw.([]interface{}))
 }
 
+// entitySeverityOrder returns the severities named by notification_channels
+// in the order their blocks appear in config/state. notification_channels
+// is a schema.TypeList, so block position is part of Terraform state;
+// setEntityNotificationChannels must rebuild blocks in this same order on
+// every read, since ranging over entitySeverityChannels's map would use
+// Go's intentionally randomized map iteration order and produce a
+// different block order on every refresh, causing a false diff on
+// unchanged configuration.
+func entitySeverityOrder(d *schema.ResourceData) []string {
+	raw, ok := d.GetOk("notification_channels")
+	if !ok {
+		return nil
+	}
+	blocks := raw.([]interface{})
+	order := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		order = append(order, b.(map[string]interface{})["severity"].(string))
+	}
+	return order
+}
+
 // parseEntitySeverityChannels is the raw-value form of entitySeverityChannels,
 // for use with d.GetChange (which returns []interface{} directly rather
 // than through GetOk).
@@ -158,6 +179,13 @@ func reconcileEntityNotificationChannelsAtSeverity(apiClient *client.Client, ent
 // is what "declaring a severity block" is FOR — once declared, this
 // resource is authoritative for every channel at that severity, exactly
 // like the undeclared-severity guard makes it hands-off when not declared.
+//
+// Blocks are emitted in entitySeverityOrder's order, not by ranging over
+// the configured map — notification_channels is a schema.TypeList, so
+// block position is part of Terraform state, and Go's map iteration order
+// is intentionally randomized. Rebuilding blocks from map order would
+// reorder breach/threat on an arbitrary refresh with no config or remote
+// change, producing a false diff that can never converge.
 func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Client, entityID string) diag.Diagnostics {
 	configured, err := entitySeverityChannels(d)
 	if err != nil {
@@ -166,6 +194,7 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 	if len(configured) == 0 {
 		return nil // this resource doesn't manage any severity's channels
 	}
+	severityOrder := entitySeverityOrder(d)
 
 	bindings, err := apiClient.GetEntityNotificationBindings(entityID)
 	if err != nil {
@@ -180,7 +209,8 @@ func setEntityNotificationChannels(d *schema.ResourceData, apiClient *client.Cli
 	}
 
 	blocks := make([]interface{}, 0, len(configured))
-	for severity, configuredChannels := range configured {
+	for _, severity := range severityOrder {
+		configuredChannels := configured[severity]
 		liveNames := liveNamesBySeverity[severity]
 		remaining := make(map[string]bool, len(liveNames))
 		for name := range liveNames {
@@ -980,12 +1010,21 @@ func resourceEntityImportState(ctx context.Context, d *schema.ResourceData, m in
 		return nil, fmt.Errorf("failed to read notification bindings for import: %w", err)
 	}
 	namesBySeverity := make(map[string][]string)
+	var severityOrder []string
 	for _, b := range bindings {
+		if _, seen := namesBySeverity[b.Severity]; !seen {
+			severityOrder = append(severityOrder, b.Severity)
+		}
 		namesBySeverity[b.Severity] = append(namesBySeverity[b.Severity], b.Name)
 	}
 	if len(namesBySeverity) > 0 {
+		// Emit in first-seen order from the bindings list (itself in the
+		// API's own response order), not by ranging over namesBySeverity —
+		// see setEntityNotificationChannels for why map order would make
+		// two otherwise-identical imports produce different block orders.
 		blocks := make([]interface{}, 0, len(namesBySeverity))
-		for severity, names := range namesBySeverity {
+		for _, severity := range severityOrder {
+			names := namesBySeverity[severity]
 			channels := make([]interface{}, len(names))
 			for i, n := range names {
 				channels[i] = n
