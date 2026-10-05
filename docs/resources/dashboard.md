@@ -7,7 +7,15 @@ description: |-
 
 # last9_dashboard (Resource)
 
-Manages a Last9 custom dashboard. Dashboards organize panels (timeseries, stat, bar, table, doughnut, markdown, section) over a time range with optional template variables. Query-backed panels run queries against metrics (PromQL), logs (LogQL or JSON pipeline), or traces (TraceQL or JSON pipeline) and render the result with type-specific visualization config.
+Manages a Last9 custom dashboard. Dashboards organize panels (timeseries, stat, bar, table, doughnut, markdown, section, logs) over a time range with optional template variables. Query-backed panels run queries against metrics (PromQL), logs (LogQL or JSON pipeline), or traces (TraceQL or JSON pipeline) and render the result with type-specific visualization config.
+
+### Native dashboard presentation and raw logs
+
+`links_json` preserves dashboard navigation links. Panels accept `field_overrides_json`, `transformations_json`, `links_json`, and `data_links_json` as ordered JSON arrays. Use `jsonencode(...)`; malformed JSON and incorrect object/array shapes fail at plan time. The API validates the native field and transformation contracts. Reading or importing a dashboard preserves these fields, including field-level links, regex/type matchers, hidden fields, and thresholds.
+
+Section panels accept `collapsed = true`. Variables accept `regex`, `include_all`, and `all_value` alongside `internal` (hides the variable control). Omit `all_value` to use the API's default All behavior.
+
+For raw log lines, set `visualization.type = "logs"` and `logs_config_json = jsonencode({ columns = ["timestamp", "body", "service", "severity"], sort_order = "desc", row_limit = 1000, severity_coloring = true })`. Raw log panels require version 1 and exactly one query with `telemetry = "logs"` and `query_type = "log_ql"` or `"log_raw"`. `log_ql` uses a stream selector; `log_raw` uses the native JSON pipeline. Aggregated log queries belong in table or timeseries panels. `logs_config_json` belongs only on a logs visualization. Visualization `value_mappings_json` preserves native mappings as a JSON array.
 
 ## Example Usage
 

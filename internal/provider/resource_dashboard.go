@@ -51,9 +51,9 @@ func jsonStringsEqual(a, b string) bool {
 }
 
 var (
-	supportedVisualizationTypes  = []string{"timeseries", "stat", "bar", "table", "section", "markdown", "doughnut"}
+	supportedVisualizationTypes  = []string{"timeseries", "stat", "bar", "table", "section", "markdown", "doughnut", "logs"}
 	supportedTelemetries         = []string{"metrics", "logs", "traces"}
-	supportedQueryTypes          = []string{"promql", "log_ql", "log_json", "trace_ql", "trace_json"}
+	supportedQueryTypes          = []string{"promql", "log_ql", "log_json", "log_raw", "trace_ql", "trace_json"}
 	supportedLegendTypes         = []string{"auto", "custom"}
 	supportedLegendPlacements    = []string{"bottom", "left", "right"}
 	supportedBarOrientations     = []string{"vertical", "horizontal"}
@@ -62,7 +62,7 @@ var (
 	supportedPanelUnits          = []string{"", "percent", "seconds", "milliseconds", "nanoseconds", "bytes-iec", "bytes-si", "bytes/sec-iec", "bytes/sec-si"}
 	supportedTelemetryQueryTypes = map[string]map[string]bool{
 		"metrics": {"promql": true},
-		"logs":    {"log_ql": true, "log_json": true},
+		"logs":    {"log_ql": true, "log_json": true, "log_raw": true},
 		"traces":  {"trace_ql": true, "trace_json": true},
 	}
 )
@@ -77,6 +77,7 @@ func resourceDashboard() *schema.Resource {
 			StateContext: resourceDashboardImportState,
 		},
 		Schema: map[string]*schema.Schema{
+			"links_json": dashboardJSONSchema("array", "Dashboard navigation links."),
 			"region": {
 				Type:        schema.TypeString,
 				Required:    true,
@@ -151,8 +152,11 @@ func resourceDashboard() *schema.Resource {
 							Optional: true,
 							Elem:     &schema.Schema{Type: schema.TypeString},
 						},
-						"multiple": {Type: schema.TypeBool, Optional: true, Default: false},
-						"internal": {Type: schema.TypeBool, Optional: true, Default: false},
+						"multiple":    {Type: schema.TypeBool, Optional: true, Default: false},
+						"internal":    {Type: schema.TypeBool, Optional: true, Default: false},
+						"regex":       {Type: schema.TypeString, Optional: true},
+						"include_all": {Type: schema.TypeBool, Optional: true, Default: false},
+						"all_value":   {Type: schema.TypeString, Optional: true},
 						"current_values": {
 							Type:        schema.TypeList,
 							Optional:    true,
@@ -181,8 +185,13 @@ func resourceDashboard() *schema.Resource {
 							Computed:    true,
 							Description: "Server-assigned panel UUID (round-tripped to prevent churn on update)",
 						},
-						"name":          {Type: schema.TypeString, Required: true},
-						"datasource_id": {Type: schema.TypeString, Optional: true, Computed: true},
+						"name":                 {Type: schema.TypeString, Required: true},
+						"collapsed":            {Type: schema.TypeBool, Optional: true, Default: false},
+						"field_overrides_json": dashboardJSONSchema("array", "Ordered native field overrides, including regex/type matching, hidden fields, thresholds and field links."),
+						"transformations_json": dashboardJSONSchema("array", "Ordered native panel transformations."),
+						"links_json":           dashboardJSONSchema("array", "Panel navigation links."),
+						"data_links_json":      dashboardJSONSchema("array", "Panel data links."),
+						"datasource_id":        {Type: schema.TypeString, Optional: true, Computed: true},
 						"telemetry": {
 							Type:         schema.TypeString,
 							Optional:     true,
@@ -235,7 +244,9 @@ func resourceDashboard() *schema.Resource {
 										Required:     true,
 										ValidateFunc: validation.StringInSlice(supportedVisualizationTypes, false),
 									},
-									"full_width": {Type: schema.TypeBool, Optional: true, Default: false},
+									"full_width":          {Type: schema.TypeBool, Optional: true, Default: false},
+									"logs_config_json":    dashboardJSONSchema("object", "Raw logs display configuration. Use jsonencode({...})."),
+									"value_mappings_json": dashboardJSONSchema("array", "Native value mappings."),
 									"timeseries_config": {
 										Type:     schema.TypeList,
 										Optional: true,
@@ -407,6 +418,9 @@ func validateDashboardData(d dashboardGetter) error {
 		vizType := vm["type"].(string)
 		queries := pm["query"].([]interface{})
 		layout := pm["layout"].([]interface{})
+		if err := validateDashboardLogs(pm, vm); err != nil {
+			return fmt.Errorf("panel[%d] %q: %w", i, pm["name"], err)
+		}
 
 		if vizType == "section" {
 			if len(queries) > 0 {
@@ -518,6 +532,7 @@ func resourceDashboardRead(ctx context.Context, d *schema.ResourceData, m interf
 	d.Set("updated_at", dash.UpdatedAt)
 	d.Set("created_by", dash.CreatedBy)
 	d.Set("readonly", dash.Readonly)
+	d.Set("links_json", string(dash.Links))
 
 	if dash.Time != nil {
 		if dash.Time.RelativeTime != nil {
@@ -575,6 +590,7 @@ func resourceDashboardImportState(ctx context.Context, d *schema.ResourceData, m
 
 func buildDashboardRequest(d *schema.ResourceData) *client.DashboardRequest {
 	dash := &client.Dashboard{
+		Links:     dashboardJSONValue(d.Get("links_json")),
 		Name:      d.Get("name").(string),
 		Panels:    expandPanels(d.Get("panel").([]interface{})),
 		Variables: expandVariables(d.Get("variable").([]interface{})),
@@ -600,12 +616,17 @@ func expandPanels(input []interface{}) []*client.DashboardPanel {
 	for _, p := range input {
 		pm := p.(map[string]interface{})
 		panel := &client.DashboardPanel{
-			ID:           pm["id"].(string),
-			Name:         pm["name"].(string),
-			DatasourceID: pm["datasource_id"].(string),
-			Telemetry:    pm["telemetry"].(string),
-			Unit:         pm["unit"].(string),
-			Version:      pm["version"].(int),
+			Collapsed:       pm["collapsed"].(bool),
+			FieldOverrides:  dashboardJSONValue(pm["field_overrides_json"]),
+			Transformations: dashboardJSONValue(pm["transformations_json"]),
+			Links:           dashboardJSONValue(pm["links_json"]),
+			DataLinks:       dashboardJSONValue(pm["data_links_json"]),
+			ID:              pm["id"].(string),
+			Name:            pm["name"].(string),
+			DatasourceID:    pm["datasource_id"].(string),
+			Telemetry:       pm["telemetry"].(string),
+			Unit:            pm["unit"].(string),
+			Version:         pm["version"].(int),
 		}
 
 		if vizList := pm["visualization"].([]interface{}); len(vizList) > 0 {
@@ -641,8 +662,10 @@ func expandPanels(input []interface{}) []*client.DashboardPanel {
 
 func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisualization {
 	viz := &client.DashboardPanelVisualization{
-		Type:      m["type"].(string),
-		FullWidth: m["full_width"].(bool),
+		ValueMappings: dashboardJSONValue(m["value_mappings_json"]),
+		LogsConfig:    dashboardJSONValue(m["logs_config_json"]),
+		Type:          m["type"].(string),
+		FullWidth:     m["full_width"].(bool),
 	}
 	if l := m["timeseries_config"].([]interface{}); len(l) > 0 {
 		c := l[0].(map[string]interface{})
@@ -725,6 +748,9 @@ func expandVariables(input []interface{}) []*client.DashboardVariable {
 	for _, v := range input {
 		vm := v.(map[string]interface{})
 		dv := &client.DashboardVariable{
+			Regex:         vm["regex"].(string),
+			IncludeAll:    vm["include_all"].(bool),
+			AllValue:      vm["all_value"].(string),
 			DisplayName:   vm["display_name"].(string),
 			Target:        vm["target"].(string),
 			Type:          vm["type"].(string),
@@ -785,15 +811,20 @@ func flattenPanels(panels []*client.DashboardPanel) []interface{} {
 			continue
 		}
 		pm := map[string]interface{}{
-			"id":            p.ID,
-			"name":          p.Name,
-			"datasource_id": p.DatasourceID,
-			"telemetry":     p.Telemetry,
-			"unit":          p.Unit,
-			"version":       p.Version,
-			"visualization": flattenVisualization(p.Visualization),
-			"query":         flattenQueries(p.PopulatedQueries),
-			"layout":        flattenLayout(p.Layout),
+			"collapsed":            p.Collapsed,
+			"field_overrides_json": string(p.FieldOverrides),
+			"transformations_json": string(p.Transformations),
+			"links_json":           string(p.Links),
+			"data_links_json":      string(p.DataLinks),
+			"id":                   p.ID,
+			"name":                 p.Name,
+			"datasource_id":        p.DatasourceID,
+			"telemetry":            p.Telemetry,
+			"unit":                 p.Unit,
+			"version":              p.Version,
+			"visualization":        flattenVisualization(p.Visualization),
+			"query":                flattenQueries(p.PopulatedQueries),
+			"layout":               flattenLayout(p.Layout),
 		}
 		out = append(out, pm)
 	}
@@ -843,8 +874,10 @@ func flattenVisualization(viz *client.DashboardPanelVisualization) []interface{}
 		return []interface{}{}
 	}
 	m := map[string]interface{}{
-		"type":       viz.Type,
-		"full_width": viz.FullWidth,
+		"type":                viz.Type,
+		"full_width":          viz.FullWidth,
+		"logs_config_json":    string(viz.LogsConfig),
+		"value_mappings_json": string(viz.ValueMappings),
 	}
 	if viz.TimeseriesConfig != nil {
 		m["timeseries_config"] = []interface{}{
@@ -927,6 +960,9 @@ func flattenVariables(variables []*client.DashboardVariable) []interface{} {
 		current := coerceToStringSlice(v.CurrentValues)
 		out = append(out, map[string]interface{}{
 			"display_name":   v.DisplayName,
+			"regex":          v.Regex,
+			"include_all":    v.IncludeAll,
+			"all_value":      v.AllValue,
 			"target":         v.Target,
 			"type":           v.Type,
 			"source":         v.Source,

@@ -1408,6 +1408,7 @@ func (c *Client) DeleteRemappingTracesMap(id, region string) error {
 // Dashboard types and methods
 
 type Dashboard struct {
+	Links     json.RawMessage      `json:"links,omitempty"`
 	Panels    []*DashboardPanel    `json:"panels"`
 	Variables []*DashboardVariable `json:"variables"`
 	Time      *DashboardTime       `json:"time,omitempty"`
@@ -1426,6 +1427,11 @@ type DashboardTime struct {
 }
 
 type DashboardPanel struct {
+	Collapsed        bool                          `json:"collapsed,omitempty"`
+	FieldOverrides   json.RawMessage               `json:"field_overrides,omitempty"`
+	Transformations  json.RawMessage               `json:"transformations,omitempty"`
+	Links            json.RawMessage               `json:"links,omitempty"`
+	DataLinks        json.RawMessage               `json:"data_links,omitempty"`
 	Visualization    *DashboardPanelVisualization  `json:"visualization"`
 	PopulatedQueries []*DashboardPanelQueryDetails `json:"queries"`
 	Layout           map[string]any                `json:"layout"`
@@ -1440,6 +1446,8 @@ type DashboardPanel struct {
 }
 
 type DashboardPanelVisualization struct {
+	ValueMappings    json.RawMessage            `json:"value_mappings,omitempty"`
+	LogsConfig       json.RawMessage            `json:"logs_config,omitempty"`
 	Type             string                     `json:"type"`
 	FullWidth        bool                       `json:"full_width"`
 	TableConfig      interface{}                `json:"table_config,omitempty"`
@@ -1495,6 +1503,9 @@ type DashboardPanelLegendSort struct {
 }
 
 type DashboardVariable struct {
+	Regex         string        `json:"regex,omitempty"`
+	IncludeAll    bool          `json:"include_all,omitempty"`
+	AllValue      string        `json:"all_value,omitempty"`
 	Values        []interface{} `json:"values"`
 	Matches       []string      `json:"matches,omitempty"`
 	DisplayName   string        `json:"display_name"`
