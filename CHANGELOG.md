@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-06
+
 ### Added
 
 - **Coverage sweep** — control-plane IaC parity matrix in `docs/coverage.md` (Last9 API × TF × Datadog × l9iac)
@@ -26,6 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **last9_drop_rule** / **last9_forward_rule** — migrated from legacy list-merge `logs_settings` APIs to individual REST on `/otel_settings/drop` and `/otel_settings/forward`. Import ID remains `region:cluster_id:<id>` where `<id>` is now the otel setting UUID (not the rule name). Existing state from the list-merge era must be re-imported.
+
+### Fixed
+
+- **last9_entity** / **last9_alert** — notification channels are now actually bound to alerts (ENG-1907). Previously `notification_channels` was sent in the alert-rules request body, which the API silently ignores: `terraform apply` succeeded and `plan` showed no drift, but nothing was attached, so alerts fired without paging anyone. The provider now:
+  - attaches channels through the notification binding API (`POST /notification_settings/{id}/attach`)
+  - detaches channels removed from config, including going to `channels = []`
+  - reads live bindings back on refresh, so a missing or out-of-band binding shows up as drift
+  - only reconciles the severities you declare, keeps `notification_channels` block order stable on refresh, and surfaces channel-lookup errors instead of hiding them
+- **last9_synthetic_check** — `paused` is honored on create.
+- **Provider** — secrets are redacted from `TF_LOG` request/response body dumps.
+- Review regressions in `last9_user`, physical indexes, and synthetics.
+
+### Deprecated
+
+- **last9_alert** — `notification_channels` is deprecated and is now a no-op. The Last9 API binds channels per `(entity, severity)`, not per alert rule. Manage channels on the alert group with `last9_entity.notification_channels` instead.
+
+### Upgrade notes
+
+- If you set `notification_channels` on `last9_alert`, move the channels to a `notification_channels { severity = "...", channels = [...] }` block on the parent `last9_entity`, then run `terraform plan`. Channels that were never really attached before will now show as changes — that is the fix taking effect.
+- A declared `notification_channels` block on `last9_entity` is fully authoritative for that severity: channels bound at that severity via the UI or any other way are detached on the next apply. Omit the block for severities you manage elsewhere.
 
 ### Explicitly out of scope
 
