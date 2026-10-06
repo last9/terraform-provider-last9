@@ -23,6 +23,25 @@ resource "last9_cold_storage_backup" "all_logs" {
 }
 ```
 
+## Schema
+
+### Required
+
+- `bucket_name` (String) Cold storage bucket name (the `name` of a `last9_cold_storage_bucket`). Sent as `properties.bucket_name`.
+- `granularity` (String) Backup granularity. Valid values: `index`, `service`.
+- `name` (String) Name of the backup rule.
+- `region` (String) Last9 region. Sent as the `region` query parameter and used in the resource ID. Changing this forces a new resource.
+
+### Optional
+
+- `enabled` (Boolean) Whether the backup rule is enabled. Sent as `properties.enabled`. Default: `true`.
+- `targets` (List of String) Services to back up. Required when `granularity` is `service`; must be empty when `granularity` is `index`.
+
+### Read-Only
+
+- `id` (String) The ID of this resource, in the format `region:id`.
+- `status` (String) Status returned by the API.
+
 ## Import
 
 ```shell
