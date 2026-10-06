@@ -43,7 +43,7 @@ resource "last9_alert" "high_error_rate" {
 }
 ```
 
-### With Default Notification Channels
+### Notification Channels
 
 ```terraform
 resource "last9_entity" "api_alerts" {
@@ -53,10 +53,24 @@ resource "last9_entity" "api_alerts" {
   external_ref = "api-service-prod"
   ui_readonly  = true
 
-  # Default notification channels for all alerts in this group
-  notification_channels = ["slack-platform-alerts", "pagerduty-oncall"]
+  # Notification channels are bound per severity. Every last9_alert in this
+  # group at a given severity shares the exact same bindings — the Last9 API
+  # has no per-alert-rule notification setting, only per-(entity, severity).
+  notification_channels {
+    severity = "breach"
+    channels = ["slack-platform-alerts", "pagerduty-oncall"]
+  }
+
+  notification_channels {
+    severity = "threat"
+    channels = ["slack-platform-alerts"]
+  }
 }
 ```
+
+~> **Note** Manage notification channels here, on the alert group, not on individual `last9_alert` resources. This matches the Last9 UI, which only lets you edit notification channels at the alert-group level ("Inherited from the alert group"). `last9_alert.notification_channels` is deprecated and a no-op — see its own docs for why two resources can't safely manage the same entity/severity.
+
+~> **Note** A `notification_channels` block only reconciles the severity it names, and declaring one makes this resource **fully authoritative** for that severity's bindings — like any other Terraform-managed list. It will attach every channel you list, and detach anything else bound at that severity (added via the UI, `last9_alert.notification_channels`, or any other means) on the next apply. If a severity's channels are managed elsewhere, simply omit that severity's block here entirely — this resource never touches, reports on, or reconciles a severity it has no block for. To manage a severity but intentionally keep it empty, add a block with `channels = []`. `terraform import` seeds a block for every severity that currently has a live binding, so an imported entity starts out managing everything already bound to it.
 
 ### Notify-Once (Suppress Repeat Notifications)
 
@@ -107,7 +121,9 @@ resource "last9_entity" "api_alerts" {
 - `tier` (String) Tier (e.g., `critical`, `high`, `medium`, `low`).
 - `workspace` (String) Workspace.
 - `labels` (Map of String) Key-value labels for grouping and filtering.
-- `notification_channels` (List of String) Default notification channel IDs/names for alerts in this group.
+- `notification_channels` (Block List) Notification channel bindings for this alert group, one block per severity. See [Notification Channels](#notification-channels) above. Each block:
+  - `severity` (String, Required) `breach` or `threat`.
+  - `channels` (List of String, Required) Notification channel IDs or names to bind at this severity.
 - `ui_readonly` (Boolean) When `true`, prevents edits via UI. Recommended for IaC-managed resources. Default: `false`.
 - `renotify_enabled` (Boolean) Controls repeat notifications while an alert stays firing. `false` = notify-once (first + resolved only). `true` = re-notify per `renotify_interval_seconds`. Omit to inherit the tenant default (re-notify enabled, 1 hour interval).
 - `renotify_interval_seconds` (Number) Seconds between repeat notifications while firing. Must be a positive integer (≥ 1). Ignored when `renotify_enabled` is `false`. Omit to inherit the tenant default.

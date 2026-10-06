@@ -1,5 +1,10 @@
 # Example: Creating an Entity (Alert Group) with Loss of Signal Alert
-# This demonstrates all the new fields added to the Terraform provider
+# This demonstrates all the new fields added to the Terraform provider.
+#
+# Notification channels are configured on last9_entity, not on individual
+# last9_alert resources: every alert rule in an alert group shares the same
+# channel bindings at a given severity (matching the Last9 UI, which only
+# lets you edit channels at the alert-group level).
 
 terraform {
   required_providers {
@@ -95,11 +100,24 @@ resource "last9_entity" "production_api" {
     url  = "https://github.com/example/api-service"
   }
 
-  # Notification channels for this entity
-  notification_channels = [
-    "testing-integrations",
-    "PD Test"
-  ]
+  # Notification channels are configured HERE, on the entity (alert
+  # group), not on individual last9_alert resources below. The Last9 API
+  # binds a channel to an (entity, severity) pair — every alert rule on
+  # this entity shares the exact same bindings at a given severity, which
+  # matches the Last9 UI itself: it only lets you edit notification
+  # channels at the alert-group level ("Inherited from the alert group").
+  # last9_alert.notification_channels is deprecated and a no-op: only
+  # last9_entity can safely add AND remove a channel, since it's the one
+  # true owner of the binding.
+  notification_channels {
+    severity = "breach"
+    channels = ["testing-integrations", "PD Test"]
+  }
+
+  notification_channels {
+    severity = "threat"
+    channels = ["PD Test"]
+  }
 }
 
 # Query existing notification destinations
@@ -142,11 +160,9 @@ resource "last9_alert" "loss_of_signal" {
 
   group_timeseries_notifications = true
 
-  # Notification channels specific to this alert
-  notification_channels = [
-    data.last9_notification_destination.slack_platform.id,
-    data.last9_notification_destination.pagerduty_oncall.id
-  ]
+  # Notification channels are managed on last9_entity.production_api above,
+  # not here -- this alert's "breach" severity inherits both channels
+  # configured there.
 }
 
 # High Error Rate Alert
@@ -174,9 +190,7 @@ resource "last9_alert" "high_error_rate" {
     }
   }
 
-  notification_channels = [
-    data.last9_notification_destination.slack_platform.id
-  ]
+  # Notification channels are managed on last9_entity.production_api above.
 }
 
 # Low Availability Alert
@@ -202,9 +216,8 @@ resource "last9_alert" "low_availability" {
     }
   }
 
-  notification_channels = [
-    data.last9_notification_destination.pagerduty_oncall.id
-  ]
+  # Notification channels are managed on last9_entity.production_api above --
+  # this alert's "threat" severity inherits the PD Test channel configured there.
 }
 
 # Outputs

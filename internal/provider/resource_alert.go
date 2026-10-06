@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -12,6 +13,64 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+// toStringSlice converts a schema.TypeList's raw []interface{} value (as
+// returned by d.Get/d.GetChange for a list-of-string attribute) to []string.
+func toStringSlice(raw []interface{}) []string {
+	out := make([]string, len(raw))
+	for i, v := range raw {
+		out[i] = v.(string)
+	}
+	return out
+}
+
+// resolveNotificationChannel looks up a notification_channels entry. The API
+// (and examples/entity-with-alerts/main.tf, which passes
+// data.last9_notification_destination.*.id) accepts either the channel's
+// numeric ID or its display name, so a value that parses as an integer is
+// resolved by ID and everything else by name.
+func resolveNotificationChannel(apiClient *client.Client, value string) (*client.NotificationDestination, error) {
+	if id, err := strconv.Atoi(value); err == nil {
+		return apiClient.GetNotificationDestination(id)
+	}
+	return apiClient.FindNotificationDestinationByName(value)
+}
+
+// resolvedChannel is a notification_channels entry resolved to the master
+// channel's canonical name and attach ID.
+type resolvedChannel struct {
+	value string // the original config string ("1" or "Channel A")
+	name  string // canonical display name, used to match live binding rows
+	id    int    // master channel ID, used for AttachNotificationSettings
+}
+
+// resolveChannels resolves each notification_channels entry (an ID or a
+// name) to the underlying channel's canonical name and ID. Matching by name
+// rather than ID is required on the live-binding side: a per-entity binding
+// row (as returned by GetEntityNotificationBindings) carries only its own
+// row ID and the channel's Name, not the master channel's ID (attach and
+// detach are genuinely different ID spaces — see DetachNotificationSettings),
+// so Name is the only field that reliably joins a binding row back to a
+// channel resolved from config. Resolving here still means "1" and "Channel
+// A" compare equal when they name the same channel, since both resolve to
+// the same canonical Name.
+//
+// Any resolution failure — including client.ErrNotificationChannelNotFound
+// — is propagated rather than skipped: wantChannels is always the user's
+// current desired config, and a channel it names that can't be resolved
+// (deleted, or a transient API failure) is something the apply must fail
+// on rather than silently drop from the attach set.
+func resolveChannels(apiClient *client.Client, values []string) ([]resolvedChannel, error) {
+	resolved := make([]resolvedChannel, 0, len(values))
+	for _, v := range values {
+		dest, err := resolveNotificationChannel(apiClient, v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve notification channel %q: %w", v, err)
+		}
+		resolved = append(resolved, resolvedChannel{value: v, name: dest.Name, id: dest.ID})
+	}
+	return resolved, nil
+}
 
 // generateKPIName creates a unique KPI name from the rule name plus a random token
 func generateKPIName(ruleName string) string {
@@ -141,10 +200,18 @@ func resourceAlert() *schema.Resource {
 				Description: "Group timeseries notifications",
 			},
 			"notification_channels": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				Description: "Notification channel IDs or names to send alerts to",
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				Type:     schema.TypeList,
+				Optional: true,
+				Deprecated: "Manage notification channels on last9_entity.notification_channels " +
+					"instead. This field is now a no-op: it neither attaches nor detaches " +
+					"anything and its value is not read back from the API. It was previously " +
+					"attach-only, but that could conflict with last9_entity.notification_channels " +
+					"managing the same entity/severity -- when both resources touch the same " +
+					"severity, the entity's drift detection cannot distinguish a channel this " +
+					"field attached from one added by any other means, and would try to detach " +
+					"it. There is no way to make both resources coexist safely at the same " +
+					"entity/severity, so channel management now lives solely on last9_entity.",
+				Elem: &schema.Schema{Type: schema.TypeString},
 			},
 		},
 	}
@@ -192,15 +259,9 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 		},
 	}
 
-	// Handle notification channels
-	if v, ok := d.GetOk("notification_channels"); ok {
-		channelsList := v.([]interface{})
-		channels := make([]string, len(channelsList))
-		for i, ch := range channelsList {
-			channels[i] = ch.(string)
-		}
-		req.NotificationChannels = channels
-	}
+	// notification_channels is deprecated and a no-op (see schema
+	// description) -- channel management lives on last9_entity now. Not
+	// read here at all: it makes no API call, attach or otherwise.
 
 	// Handle static threshold alerts.
 	// Use GetRawConfig to distinguish explicit 0 from omitted — d.GetOk returns false
@@ -258,6 +319,7 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 
 	d.SetId(alert.ID)
+
 	return resourceAlertRead(ctx, d, m)
 }
 
@@ -279,7 +341,10 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	// Note: mute and is_disabled fields are intentionally not read from API
 	// The API may return different values than what was sent, causing drift
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
-	d.Set("notification_channels", alert.NotificationChannels)
+
+	// notification_channels is deprecated and a no-op (see schema
+	// description) -- left exactly as configured, never read from or
+	// written by the API. Channel management lives on last9_entity now.
 
 	// Parse condition for static alerts to extract threshold values
 	if alert.Condition != "" && alert.EvalWindow > 0 {
