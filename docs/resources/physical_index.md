@@ -42,7 +42,7 @@ resource "last9_physical_index" "payments" {
 - `cluster_id` (String) Cluster ID. If not set, the provider uses the default cluster for the region. Changing this forces a new resource.
 - `description` (String) Description of the physical index.
 - `retain` (Boolean) Maps to the API `properties.retain` field. Default: `false`.
-- `retention_period` (Number) Maps to the API `properties.retention_period` field. If not set, the value from the API is kept in state.
+- `retention_period` (Number) Maps to the API `properties.retention_period` field. Omitted from the request when not set.
 
 ### Read-Only
 
