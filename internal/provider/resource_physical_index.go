@@ -178,9 +178,13 @@ func buildPhysicalIndexRequest(d *schema.ResourceData) *client.PhysicalIndexRequ
 		Filters:     expandOTelFilters(d.Get("filters").([]interface{})),
 		Retain:      d.Get("retain").(bool),
 	}
-	if v, ok := d.GetOkExists("retention_period"); ok {
-		rp := v.(int)
-		props.RetentionPeriod = &rp
+	// After Diff/Apply, d.Get returns 0 for an omitted optional int. Raw config
+	// retains the distinction needed to send null for removal.
+	if rawConfig := d.GetRawConfig(); !rawConfig.IsNull() {
+		if raw := rawConfig.GetAttr("retention_period"); raw.IsKnown() && !raw.IsNull() {
+			rp := d.Get("retention_period").(int)
+			props.RetentionPeriod = &rp
+		}
 	}
 	if v, ok := d.GetOk("bucket_name"); ok && v.(string) != "" {
 		bn := v.(string)

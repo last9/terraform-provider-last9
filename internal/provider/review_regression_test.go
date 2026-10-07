@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -368,6 +369,7 @@ func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
 		name      string
 		config    map[string]interface{}
 		wantValue interface{}
+		rawValue  cty.Value
 	}{
 		{
 			name: "removed",
@@ -375,6 +377,7 @@ func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
 				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}},
 			},
 			wantValue: nil,
+			rawValue:  cty.NullVal(cty.Number),
 		},
 		{
 			name: "configured zero",
@@ -382,6 +385,15 @@ func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
 				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 0,
 			},
 			wantValue: float64(0),
+			rawValue:  cty.NumberIntVal(0),
+		},
+		{
+			name: "configured positive",
+			config: map[string]interface{}{
+				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 14,
+			},
+			wantValue: float64(14),
+			rawValue:  cty.NumberIntVal(14),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -400,9 +412,20 @@ func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 			})
-			d := schema.TestResourceDataRaw(t, resourcePhysicalIndex().Schema, tc.config)
-			d.SetId("us-east-1:cluster:logs")
-			if ds := resourcePhysicalIndexUpdate(context.Background(), d, c); ds.HasError() {
+			resource := resourcePhysicalIndex()
+			stateData := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
+				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 7,
+			})
+			stateData.SetId("us-east-1:cluster:logs")
+			diff, err := resource.Diff(context.Background(), stateData.State(), terraform.NewResourceConfigRaw(tc.config), c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff == nil || diff.Empty() {
+				t.Fatal("retention change must produce an update")
+			}
+			diff.RawConfig = cty.ObjectVal(map[string]cty.Value{"retention_period": tc.rawValue})
+			if _, ds := resource.Apply(context.Background(), stateData.State(), diff, c); ds.HasError() {
 				t.Fatal(ds)
 			}
 			properties, ok := put["properties"].(map[string]interface{})
