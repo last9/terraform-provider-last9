@@ -409,7 +409,7 @@ type PhysicalIndexProperties struct {
 	Destination     string              `json:"destination,omitempty"`
 	BucketName      *string             `json:"bucket_name,omitempty"`
 	Retain          bool                `json:"retain"`
-	RetentionPeriod *int                `json:"retention_period,omitempty"`
+	RetentionPeriod *int                `json:"retention_period"`
 }
 
 type PhysicalIndexRequest struct {

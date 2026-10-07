@@ -178,7 +178,7 @@ func buildPhysicalIndexRequest(d *schema.ResourceData) *client.PhysicalIndexRequ
 		Filters:     expandOTelFilters(d.Get("filters").([]interface{})),
 		Retain:      d.Get("retain").(bool),
 	}
-	if v, ok := d.GetOk("retention_period"); ok {
+	if v, ok := d.GetOkExists("retention_period"); ok {
 		rp := v.(int)
 		props.RetentionPeriod = &rp
 	}

@@ -364,21 +364,55 @@ func TestReviewChangeboardRemovingGranularityPlansEmptyUpdate(t *testing.T) {
 }
 
 func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
-	resource := resourcePhysicalIndex()
-	d := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
-		"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 7,
-	})
-	d.SetId("us-east-1:cluster:logs")
-	state := d.State()
-	config := map[string]interface{}{
-		"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}},
-	}
-	diff, err := resource.Diff(context.Background(), state, terraform.NewResourceConfigRaw(config), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diff == nil || diff.Attributes["retention_period"] == nil {
-		t.Fatal("removing retention_period must plan an API update")
+	for _, tc := range []struct {
+		name      string
+		config    map[string]interface{}
+		wantValue interface{}
+	}{
+		{
+			name: "removed",
+			config: map[string]interface{}{
+				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}},
+			},
+			wantValue: nil,
+		},
+		{
+			name: "configured zero",
+			config: map[string]interface{}{
+				"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 0,
+			},
+			wantValue: float64(0),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var put map[string]interface{}
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPut:
+					if err := json.NewDecoder(r.Body).Decode(&put); err != nil {
+						t.Error(err)
+					}
+					fmt.Fprint(w, `{"id":"logs"}`)
+				case http.MethodGet:
+					fmt.Fprint(w, `{"id":"logs","name":"logs","properties":{"telemetry":"logs","filters":[{"key":"service.name","operator":"equals","value":"api"}],"retain":false},"status":"active"}`)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+			d := schema.TestResourceDataRaw(t, resourcePhysicalIndex().Schema, tc.config)
+			d.SetId("us-east-1:cluster:logs")
+			if ds := resourcePhysicalIndexUpdate(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			properties, ok := put["properties"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("PUT is missing properties: %#v", put)
+			}
+			if got, ok := properties["retention_period"]; !ok || got != tc.wantValue {
+				t.Fatalf("retention_period must be present as %#v: %#v", tc.wantValue, put)
+			}
+		})
 	}
 }
 
