@@ -19,6 +19,7 @@ func resourceColdStorageBackup() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
+		CustomizeDiff: validateColdStorageBackup,
 		Schema: map[string]*schema.Schema{
 			"region": {
 				Type:     schema.TypeString,
@@ -56,6 +57,17 @@ func resourceColdStorageBackup() *schema.Resource {
 			},
 		},
 	}
+}
+
+func validateColdStorageBackup(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	targets := d.Get("targets").([]interface{})
+	if d.Get("granularity").(string) == "service" && len(targets) == 0 {
+		return fmt.Errorf("targets is required when granularity is service")
+	}
+	if d.Get("granularity").(string) == "index" && len(targets) > 0 {
+		return fmt.Errorf("targets must be empty when granularity is index")
+	}
+	return nil
 }
 
 func resourceColdStorageBackupCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {

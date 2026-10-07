@@ -213,6 +213,172 @@ func TestReviewDatasourceDefaultWireContract(t *testing.T) {
 	}
 }
 
+func TestReviewColdStorageBucketValidatesAuthentication(t *testing.T) {
+	base := map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket",
+	}
+	for name, tc := range map[string]struct {
+		values map[string]interface{}
+		valid  bool
+	}{
+		"credentials require both keys": {map[string]interface{}{"auth_type": "credentials", "aws_access_key": "key"}, false},
+		"credentials reject role":       {map[string]interface{}{"auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret", "aws_role": "role"}, false},
+		"role requires role":            {map[string]interface{}{"auth_type": "role"}, false},
+		"role rejects credentials":      {map[string]interface{}{"auth_type": "role", "aws_role": "role", "aws_access_key": "key", "aws_secret_key": "secret"}, false},
+		"valid credentials":             {map[string]interface{}{"auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret"}, true},
+		"valid role":                    {map[string]interface{}{"auth_type": "role", "aws_role": "role"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := make(map[string]interface{}, len(base)+len(tc.values))
+			for k, v := range base {
+				config[k] = v
+			}
+			for k, v := range tc.values {
+				config[k] = v
+			}
+			_, err := resourceColdStorageBucket().Diff(context.Background(), nil, terraform.NewResourceConfigRaw(config), nil)
+			if (err == nil) != tc.valid {
+				t.Fatalf("validation error = %v, valid = %v", err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestReviewColdStorageBackupValidatesTargets(t *testing.T) {
+	base := map[string]interface{}{"region": "us-east-1", "name": "backup", "bucket_name": "bucket"}
+	for name, tc := range map[string]map[string]interface{}{
+		"service requires targets": {"granularity": "service"},
+		"index rejects targets":    {"granularity": "index", "targets": []interface{}{"index-a"}},
+		"service accepts targets":  {"granularity": "service", "targets": []interface{}{"service-a"}},
+		"index accepts no targets": {"granularity": "index"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := make(map[string]interface{}, len(base)+len(tc))
+			for k, v := range base {
+				config[k] = v
+			}
+			for k, v := range tc {
+				config[k] = v
+			}
+			_, err := resourceColdStorageBackup().Diff(context.Background(), nil, terraform.NewResourceConfigRaw(config), nil)
+			valid := name == "service accepts targets" || name == "index accepts no targets"
+			if (err == nil) != valid {
+				t.Fatalf("validation error = %v, valid = %v", err, valid)
+			}
+		})
+	}
+}
+
+func TestReviewDataSourcesRejectAmbiguousSelectors(t *testing.T) {
+	for name, tc := range map[string]map[string]interface{}{
+		"cluster":    {"region": "us-east-1", "id": "cluster", "name": "cluster"},
+		"datasource": {"id": "datasource", "name": "datasource"},
+		"user":       {"id": "user", "email": "user@example.test"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if diags := New().ValidateDataSource("last9_"+strings.ReplaceAll(name, " ", "_"), terraform.NewResourceConfigRaw(tc)); !diags.HasError() {
+				t.Fatal("ambiguous selectors were accepted")
+			}
+		})
+	}
+}
+
+func TestReviewChangeboardEmptyFieldsSerializeForRemoval(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceChangeboard().Schema, map[string]interface{}{
+		"name": "board", "owner_id": "owner", "owner_type": "team",
+	})
+	var got map[string]interface{}
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PUT":
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+				t.Error(err)
+			}
+			fmt.Fprint(w, `{}`)
+		case "GET":
+			fmt.Fprint(w, `{"id":"board","name":"board","owner_id":"owner","owner_type":"team","filters":[],"groups":[],"relationships":[],"properties":{"granularity":""}}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	d.SetId("board")
+	if ds := resourceChangeboardUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if relationships, ok := got["relationships"].([]interface{}); !ok || len(relationships) != 0 {
+		t.Fatalf("relationships must serialize empty to clear remote state: %#v", got)
+	}
+	properties, ok := got["properties"].(map[string]interface{})
+	if !ok || properties["granularity"] != "" {
+		t.Fatalf("granularity must serialize empty to clear remote state: %#v", got)
+	}
+}
+
+func TestReviewChangeboardRemovingGranularityPlansEmptyUpdate(t *testing.T) {
+	resource := resourceChangeboard()
+	d := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
+		"name": "board", "owner_id": "owner", "owner_type": "team", "granularity": "daily",
+	})
+	d.SetId("board")
+	diff, err := resource.Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(map[string]interface{}{
+		"name": "board", "owner_id": "owner", "owner_type": "team",
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff == nil || diff.Attributes["granularity"] == nil {
+		t.Fatal("removing granularity must plan an API update")
+	}
+}
+
+func TestReviewPhysicalIndexRemovingRetentionSerializesNull(t *testing.T) {
+	resource := resourcePhysicalIndex()
+	d := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}}, "retention_period": 7,
+	})
+	d.SetId("us-east-1:cluster:logs")
+	state := d.State()
+	config := map[string]interface{}{
+		"region": "us-east-1", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}},
+	}
+	diff, err := resource.Diff(context.Background(), state, terraform.NewResourceConfigRaw(config), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff == nil || diff.Attributes["retention_period"] == nil {
+		t.Fatal("removing retention_period must plan an API update")
+	}
+}
+
+func TestReviewColdStorageBucketDefaultFalseIsSerialized(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "role", "aws_role": "role", "default": false,
+	})
+	d.SetId("us-east-1:bucket-1")
+	var put map[string]interface{}
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PUT":
+			if err := json.NewDecoder(r.Body).Decode(&put); err != nil {
+				t.Error(err)
+			}
+			fmt.Fprint(w, `{}`)
+		case "GET":
+			fmt.Fprint(w, `{"id":"bucket-1","name":"bucket","properties":{"default":false,"aws_region":"us-east-1","aws_bucket":"bucket","auth_type":"role","aws_role":"role"},"status":"active"}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	if ds := resourceColdStorageBucketUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if got, ok := put["properties"].(map[string]interface{})["default"].(bool); !ok || got {
+		t.Fatalf("default=false must be sent to the bucket PUT endpoint: %#v", put)
+	}
+}
+
 func TestReviewSyntheticCreateHonorsPaused(t *testing.T) {
 	for _, status := range []string{"active", "paused"} {
 		t.Run(status, func(t *testing.T) {

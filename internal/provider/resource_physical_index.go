@@ -66,7 +66,6 @@ func resourcePhysicalIndex() *schema.Resource {
 			"retention_period": {
 				Type:     schema.TypeInt,
 				Optional: true,
-				Computed: true,
 			},
 			"bucket_name": {
 				Type:     schema.TypeString,
