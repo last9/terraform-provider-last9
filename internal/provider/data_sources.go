@@ -297,7 +297,6 @@ func dataSourceClusterRead(ctx context.Context, d *schema.ResourceData, m interf
 	d.SetId(found.ID)
 	_ = d.Set("id", found.ID)
 	_ = d.Set("name", found.Name)
-	_ = d.Set("region", found.Region)
 	_ = d.Set("default", found.IsDefault)
 	return nil
 }
@@ -370,11 +369,8 @@ func dataSourceDatasourceRead(ctx context.Context, d *schema.ResourceData, m int
 				break
 			}
 		}
-		if found == nil && len(list) > 0 {
-			found = &list[0]
-		}
 		if found == nil {
-			return diag.FromErr(fmt.Errorf("no datasources found"))
+			return diag.FromErr(fmt.Errorf("no default datasource found"))
 		}
 	}
 
@@ -396,6 +392,7 @@ func dataSourceUser() *schema.Resource {
 				Optional:      true,
 				Computed:      true,
 				ConflictsWith: []string{"email"},
+				AtLeastOneOf:  []string{"id", "email"},
 				Description:   "User ID",
 			},
 			"email": {
@@ -403,6 +400,7 @@ func dataSourceUser() *schema.Resource {
 				Optional:      true,
 				Computed:      true,
 				ConflictsWith: []string{"id"},
+				AtLeastOneOf:  []string{"id", "email"},
 				Description:   "User email",
 			},
 			"name": {

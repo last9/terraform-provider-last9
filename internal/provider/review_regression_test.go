@@ -159,7 +159,7 @@ func TestReviewSyntheticMaskedHeadersPreserveConfiguredValue(t *testing.T) {
 	}
 }
 
-func TestReviewSnoozePlansRepairAfterRemoteClear(t *testing.T) {
+func TestReviewSnoozePreservesConfiguredUntilAfterRemoteClear(t *testing.T) {
 	for _, remote := range []int{1893456000, 0} {
 		t.Run(fmt.Sprint(remote), func(t *testing.T) {
 			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -177,11 +177,8 @@ func TestReviewSnoozePlansRepairAfterRemoteClear(t *testing.T) {
 				t.Fatal(e)
 			}
 			change := diff != nil && diff.Attributes["until"] != nil
-			if remote == 0 && !change {
-				t.Fatal("remote snooze cleared, but plan contains no until repair")
-			}
-			if remote == 1893456000 && change {
-				t.Fatal("unchanged control must not repair until")
+			if change {
+				t.Fatalf("refresh changed configured until after API returned %d", remote)
 			}
 		})
 	}
