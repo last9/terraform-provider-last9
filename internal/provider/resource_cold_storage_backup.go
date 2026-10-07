@@ -60,17 +60,27 @@ func resourceColdStorageBackup() *schema.Resource {
 }
 
 func validateColdStorageBackup(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
-	targets := d.Get("targets").([]interface{})
-	if d.Get("granularity").(string) == "service" && len(targets) == 0 {
+	return validateColdStorageBackupValues(d.Get, d.NewValueKnown)
+}
+
+func validateColdStorageBackupValues(get func(string) interface{}, known func(string) bool) error {
+	if !known("granularity") || !known("targets") {
+		return nil
+	}
+	targets := get("targets").([]interface{})
+	if get("granularity").(string) == "service" && len(targets) == 0 {
 		return fmt.Errorf("targets is required when granularity is service")
 	}
-	if d.Get("granularity").(string) == "index" && len(targets) > 0 {
+	if get("granularity").(string) == "index" && len(targets) > 0 {
 		return fmt.Errorf("targets must be empty when granularity is index")
 	}
 	return nil
 }
 
 func resourceColdStorageBackupCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	if err := validateColdStorageBackupValues(d.Get, func(string) bool { return true }); err != nil {
+		return diag.FromErr(err)
+	}
 	c := m.(*client.Client)
 	region := d.Get("region").(string)
 
@@ -111,6 +121,9 @@ func resourceColdStorageBackupRead(ctx context.Context, d *schema.ResourceData, 
 }
 
 func resourceColdStorageBackupUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	if err := validateColdStorageBackupValues(d.Get, func(string) bool { return true }); err != nil {
+		return diag.FromErr(err)
+	}
 	c := m.(*client.Client)
 	region, id, err := parseRegionID(d.Id())
 	if err != nil {

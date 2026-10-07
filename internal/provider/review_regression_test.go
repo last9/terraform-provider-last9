@@ -269,6 +269,37 @@ func TestReviewColdStorageBackupValidatesTargets(t *testing.T) {
 	}
 }
 
+func TestReviewUnknownColdStorageInputsCanPlan(t *testing.T) {
+	const unknown = "74D93920-ED26-11E3-AC10-0800200C9A66"
+	for _, tc := range []struct {
+		name     string
+		resource *schema.Resource
+		config   map[string]interface{}
+	}{
+		{"role ARN from new IAM role", resourceColdStorageBucket(), map[string]interface{}{
+			"region": "us-east-1", "name": "archive", "aws_region": "us-east-1", "aws_bucket": "synthetic-archive", "auth_type": "role", "aws_role": unknown,
+		}},
+		{"credentials from new access key", resourceColdStorageBucket(), map[string]interface{}{
+			"region": "us-east-1", "name": "archive", "aws_region": "us-east-1", "aws_bucket": "synthetic-archive", "auth_type": "credentials", "aws_access_key": unknown, "aws_secret_key": unknown,
+		}},
+		{"service targets from computed list", resourceColdStorageBackup(), map[string]interface{}{
+			"region": "us-east-1", "name": "backup", "bucket_name": "archive", "granularity": "service", "targets": unknown,
+		}},
+		{"known role", resourceColdStorageBucket(), map[string]interface{}{
+			"region": "us-east-1", "name": "archive", "aws_region": "us-east-1", "aws_bucket": "synthetic-archive", "auth_type": "role", "aws_role": "arn:aws:iam::123456789012:role/synthetic",
+		}},
+		{"known targets", resourceColdStorageBackup(), map[string]interface{}{
+			"region": "us-east-1", "name": "backup", "bucket_name": "archive", "granularity": "service", "targets": []interface{}{"api"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.resource.Diff(context.Background(), nil, terraform.NewResourceConfigRaw(tc.config), nil); err != nil {
+				t.Fatalf("valid configuration must plan with apply-time inputs: %v", err)
+			}
+		})
+	}
+}
+
 func TestReviewDataSourcesRejectAmbiguousSelectors(t *testing.T) {
 	for name, tc := range map[string]map[string]interface{}{
 		"cluster":    {"region": "us-east-1", "id": "cluster", "name": "cluster"},
