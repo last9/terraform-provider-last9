@@ -331,6 +331,28 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to read alert: %w", err))
 	}
+	needsKPIState := d.Get("kpi_id").(string) == "" || d.Get("kpi_name").(string) == "" || d.Get("query").(string) == ""
+	if needsKPIState && len(alert.ExpressionArgs) == 0 {
+		return diag.FromErr(fmt.Errorf("cannot recover KPI metadata for alert %s: API returned no expression_args", d.Id()))
+	}
+	if len(alert.ExpressionArgs) > 0 && (len(alert.ExpressionArgs) == 1 || needsKPIState) {
+		kpiRef := alert.ExpressionArgs[alert.Indicator]
+		if len(alert.ExpressionArgs) != 1 || alert.Indicator == "" || kpiRef == nil || kpiRef.ID == "" {
+			return diag.FromErr(fmt.Errorf("alert %s must reference a single KPI with a non-empty ID and primary indicator", d.Id()))
+		}
+		d.Set("kpi_id", kpiRef.ID)
+		d.Set("kpi_name", alert.Indicator)
+		if d.Get("query").(string) == "" {
+			kpi, err := apiClient.GetKPI(entityID, kpiRef.ID)
+			if err != nil {
+				return diag.FromErr(fmt.Errorf("failed to read KPI for imported alert: %w", err))
+			}
+			if kpi.Definition.Query == "" {
+				return diag.FromErr(fmt.Errorf("KPI %s for imported alert has no query", kpiRef.ID))
+			}
+			d.Set("query", kpi.Definition.Query)
+		}
+	}
 
 	d.Set("entity_id", entityID)
 	d.Set("name", alert.Name)
@@ -386,6 +408,9 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 
 	// Track if we need to create a new KPI (name or query changed)
 	needsNewKPI := d.HasChange("name") || d.HasChange("query")
+	if !needsNewKPI && (oldKPIID == "" || oldKPIName == "") {
+		return diag.FromErr(fmt.Errorf("alert %s has no KPI ID or name; refresh or re-import the alert before updating it", d.Id()))
+	}
 	var newKPI *client.KPI
 
 	if needsNewKPI {
