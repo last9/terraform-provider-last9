@@ -596,6 +596,10 @@ func (c *Client) GetDefaultCluster(region string) (*Cluster, error) {
 }
 
 // Types
+type AlertExpressionArg struct {
+	ID string `json:"id"`
+}
+
 type Alert struct {
 	ID                           string          `json:"id"`
 	Name                         string          `json:"rule_name"`
@@ -612,6 +616,8 @@ type Alert struct {
 	Properties                   AlertProperties `json:"properties"`
 	GroupTimeseriesNotifications bool            `json:"group_timeseries_notifications"`
 	NotificationChannels         []string        `json:"notification_channels,omitempty"`
+
+	ExpressionArgs map[string]*AlertExpressionArg `json:"expression_args,omitempty"`
 }
 
 type AlertProperties struct {
