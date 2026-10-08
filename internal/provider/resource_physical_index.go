@@ -71,6 +71,10 @@ func resourcePhysicalIndex() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 			},
+			"destination": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 			"status": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -125,6 +129,7 @@ func resourcePhysicalIndexRead(ctx context.Context, d *schema.ResourceData, m in
 	if resp.Properties.BucketName != nil {
 		_ = d.Set("bucket_name", *resp.Properties.BucketName)
 	}
+	_ = d.Set("destination", resp.Properties.Destination)
 	_ = d.Set("status", resp.Status)
 	return nil
 }
@@ -177,6 +182,7 @@ func buildPhysicalIndexRequest(d *schema.ResourceData) *client.PhysicalIndexRequ
 		Telemetry:   d.Get("telemetry").(string),
 		Filters:     expandOTelFilters(d.Get("filters").([]interface{})),
 		Retain:      d.Get("retain").(bool),
+		Destination: d.Get("destination").(string),
 	}
 	// After Diff/Apply, d.Get returns 0 for an omitted optional int. Raw config
 	// retains the distinction needed to send null for removal.

@@ -115,6 +115,47 @@ func TestReviewPhysicalIndexRejectedDeletePreservesState(t *testing.T) {
 	}
 }
 
+func TestReviewPhysicalIndexUpdatePreservesDestination(t *testing.T) {
+	var updateDestination string
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprint(w, `{"id":"logs","name":"logs","properties":{"description":"before","telemetry":"logs","filters":[{"key":"service.name","operator":"equals","value":"api"}],"destination":"logs","retain":false},"status":"active"}`)
+		case http.MethodPut:
+			var request client.PhysicalIndexRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			updateDestination = request.Properties.Destination
+			if updateDestination == "" {
+				http.Error(w, `{"error":"physical index destination cannot be updated"}`, http.StatusBadRequest)
+				return
+			}
+			fmt.Fprint(w, `{"id":"logs"}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	d := schema.TestResourceDataRaw(t, resourcePhysicalIndex().Schema, map[string]interface{}{
+		"region": "us-east-1", "cluster_id": "cluster", "name": "logs", "telemetry": "logs", "filters": []interface{}{map[string]interface{}{"key": "service.name", "operator": "equals", "value": "api"}},
+	})
+	d.SetId("us-east-1:cluster:logs")
+	if ds := resourcePhysicalIndexRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if got := d.Get("destination").(string); got != "logs" {
+		t.Fatalf("destination after read = %q, want logs", got)
+	}
+	_ = d.Set("description", "after")
+	if ds := resourcePhysicalIndexUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if updateDestination != "logs" {
+		t.Fatalf("update destination = %q, want logs", updateDestination)
+	}
+}
+
 func TestReviewSyntheticMaskedHeadersPreserveConfiguredValue(t *testing.T) {
 	const configured = `{"url":"https://example.test","headers":{"Authorization":"Bearer synthetic-fixture"}}`
 	for _, masked := range []bool{false, true} {
