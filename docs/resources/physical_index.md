@@ -46,6 +46,7 @@ resource "last9_physical_index" "payments" {
 
 ### Read-Only
 
+- `destination` (String) Destination returned by the API. The provider preserves it in update requests.
 - `id` (String) The ID of this resource, in the format `region:cluster_id:id`.
 - `status` (String) Status returned by the API.
 

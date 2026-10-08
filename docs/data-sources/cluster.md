@@ -7,7 +7,7 @@ description: |-
 
 # last9_cluster (Data Source)
 
-Resolves a cluster for a region. If neither `id` nor `name` is set, returns the default cluster.
+Resolves a cluster in the configured region. Set at most one of `id` and `name`; if neither is set, returns the default cluster for that region.
 
 ```terraform
 data "last9_cluster" "default" {
@@ -19,12 +19,12 @@ data "last9_cluster" "default" {
 
 ### Required
 
-- `region` (String) Region to look up clusters in.
+- `region` (String) Region used to look up the cluster and its default cluster.
 
 ### Optional
 
-- `id` (String) Cluster ID to look up. Takes precedence over `name`. If neither `id` nor `name` is set, the default cluster for the region is returned.
-- `name` (String) Cluster name to look up.
+- `id` (String) Cluster ID to look up. Cannot be set with `name`.
+- `name` (String) Cluster name to look up. Cannot be set with `id`.
 
 ### Read-Only
 

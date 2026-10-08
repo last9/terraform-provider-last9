@@ -7,6 +7,8 @@ description: |-
 
 # last9_datasource (Data Source)
 
+Looks up a datasource by `id` or `name`. Set at most one selector. With neither selector, the datasource marked as default is returned; the data source returns an error when no default datasource exists.
+
 ```terraform
 data "last9_datasource" "default" {}
 ```
@@ -15,8 +17,8 @@ data "last9_datasource" "default" {}
 
 ### Optional
 
-- `id` (String) Datasource ID to look up. Takes precedence over `name`.
-- `name` (String) Datasource name to look up. If neither `id` nor `name` is set, the datasource marked as default is returned, or the first datasource if none is marked as default.
+- `id` (String) Datasource ID to look up. Cannot be set with `name`.
+- `name` (String) Datasource name to look up. Cannot be set with `id`.
 
 ### Read-Only
 

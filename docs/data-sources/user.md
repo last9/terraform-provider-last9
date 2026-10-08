@@ -17,8 +17,8 @@ data "last9_user" "alice" {
 
 ### Optional
 
-- `email` (String) User email to look up. The match is case-insensitive. One of `id` or `email` must be set.
-- `id` (String) User ID to look up. Takes precedence over `email`.
+- `email` (String) User email to look up. The match is case-insensitive. Exactly one of `id` or `email` must be set.
+- `id` (String) User ID to look up. Exactly one of `id` or `email` must be set.
 
 ### Read-Only
 

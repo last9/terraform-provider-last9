@@ -17,8 +17,6 @@ resource "last9_changeboard" "payments" {
   description = "Payment path services"
   owner_id    = var.org_id
   owner_type  = "organization"
-  granularity = "1h"
-
   filter {
     filter_type = "team"
     key         = "team"
@@ -50,7 +48,7 @@ resource "last9_changeboard" "payments" {
 
 - `description` (String) Changeboard description.
 - `filter` (Block List) Entity filters defining which entities belong to this changeboard. Sent as the API `filters` list. (see [below for nested schema](#nestedblock--filter))
-- `granularity` (String) Changeboard time granularity, such as `1h`. Sent as `properties.granularity`. If not set, the value from the API is kept in state.
+- `granularity` (String) Changeboard time granularity. Sent as `properties.granularity`. If not set, the value from the API is kept in state.
 - `group` (Block List) Entity grouping dimensions. Sent as the API `groups` list. (see [below for nested schema](#nestedblock--group))
 - `relationship` (Block List) Hierarchy of entity types (`id` = entity type, one nesting level). Sent as the API `relationships` list. (see [below for nested schema](#nestedblock--relationship))
 

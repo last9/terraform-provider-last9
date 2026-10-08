@@ -11,6 +11,8 @@ Configures an S3 bucket used for log cold storage via `/otel_settings/cold_stora
 
 Auth is either IAM `role` (recommended) or static `credentials`.
 
+With `auth_type = "role"`, set `aws_role` and do not set `aws_access_key` or `aws_secret_key`. With `auth_type = "credentials"`, set both `aws_access_key` and `aws_secret_key` and do not set `aws_role`. Values that are unknown during planning are deferred until apply, when these requirements are enforced.
+
 ## Example Usage
 
 ```terraform
@@ -37,9 +39,9 @@ resource "last9_cold_storage_bucket" "archive" {
 
 ### Optional
 
-- `aws_access_key` (String, Sensitive) AWS access key for `credentials` auth. Sent as `properties.aws_access_key`. The value in state is kept when the API does not return it.
-- `aws_role` (String) IAM role ARN for `role` auth. Sent as `properties.aws_role`.
-- `aws_secret_key` (String, Sensitive) AWS secret key for `credentials` auth. Sent as `properties.aws_secret_key`. The value in state is kept when the API does not return it.
+- `aws_access_key` (String, Sensitive) Required with `auth_type = "credentials"`; must not be set with `auth_type = "role"`. Sent as `properties.aws_access_key`. The value in state is kept when the API does not return it.
+- `aws_role` (String) Required with `auth_type = "role"`; must not be set with `auth_type = "credentials"`. Sent as `properties.aws_role`.
+- `aws_secret_key` (String, Sensitive) Required with `auth_type = "credentials"`; must not be set with `auth_type = "role"`. Sent as `properties.aws_secret_key`. The value in state is kept when the API does not return it.
 - `default` (Boolean) When `true`, the provider marks this bucket as the default bucket after create, or after update when the value changes. Default: `false`.
 - `retention_period` (Number) Maps to the API `properties.retention_period` field. Omitted from the request when not set.
 
