@@ -38,7 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - only reconciles the severities you declare, keeps `notification_channels` block order stable on refresh, and surfaces channel-lookup errors instead of hiding them
 - **last9_synthetic_check** — `paused` is honored on create.
 - **Provider** — secrets are redacted from `TF_LOG` request/response body dumps.
-- Review regressions in `last9_user`, physical indexes, and synthetics.
+- **Data sources** — ambiguous selectors are rejected; datasource lookup no longer returns an arbitrary datasource when no default exists; cluster lookup retains the configured region.
+- **last9_user** — an ID or email selector is required.
+- **last9_cold_storage_bucket** / **last9_cold_storage_backup** — invalid authentication and target combinations are rejected, while values that are unknown during planning are deferred until apply.
+- **last9_alert_snooze** — refresh preserves the configured `until` value.
+- **last9_changeboard** — omitting `granularity` retains the API default instead of planning a perpetual update.
+- **last9_physical_index** — updates preserve the API-provided destination; removing `retention_period` sends `null` to the API.
 
 ### Deprecated
 
@@ -46,7 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
-- If you set `notification_channels` on `last9_alert`, move the channels to a `notification_channels { severity = "...", channels = [...] }` block on the parent `last9_entity`, then run `terraform plan`. Channels that were never really attached before will now show as changes — that is the fix taking effect.
+- If you set `notification_channels` on `last9_alert`, move the channels to a block on the parent `last9_entity`, then run `terraform plan`:
+
+  ```terraform
+  notification_channels {
+    severity = "..."
+    channels = [...]
+  }
+  ```
+
+  Channels that were never really attached before will now show as changes — that is the fix taking effect.
 - A declared `notification_channels` block on `last9_entity` is fully authoritative for that severity: channels bound at that severity via the UI or any other way are detached on the next apply. Omit the block for severities you manage elsewhere.
 
 ### Explicitly out of scope
