@@ -133,6 +133,7 @@ resource "last9_alert" "service_down" {
 - `expression` (String) Alert expression (computed from KPI).
 - `kpi_id` (String) ID of the automatically created KPI.
 - `kpi_name` (String) Name of the automatically created KPI.
+- `owned_kpi_id` (String) KPI created by this resource and eligible for cleanup. Imported or recovered references do not establish ownership.
 
 ### Properties
 
@@ -173,3 +174,5 @@ Import using format `entity_id:alert_id`:
 ```shell
 terraform import last9_alert.example <entity_id>:<alert_id>
 ```
+
+Import recovers the KPI reference for alert updates, but replacing or destroying the imported alert leaves that KPI intact. State created by older provider versions has no ownership marker, so its KPI is also retained; ownership cannot be inferred safely from an ID or name. KPIs created by this version are tracked and cleaned up on replacement or destroy while the alert still references that KPI.

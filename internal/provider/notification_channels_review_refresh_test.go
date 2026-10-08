@@ -57,6 +57,9 @@ func TestResourceAlertRead_LeavesNotificationChannelsUntouched(t *testing.T) {
 			}
 			d := schema.TestResourceDataRaw(t, resourceAlert().Schema, map[string]interface{}{"entity_id": "entity-1", "name": "Synthetic", "severity": "breach", "notification_channels": raw})
 			d.SetId("alert-a")
+			d.Set("kpi_id", "kpi-1")
+			d.Set("kpi_name", "Synthetic-kpi")
+			d.Set("query", "up")
 
 			if diags := resourceAlertRead(context.Background(), d, c); diags.HasError() {
 				t.Fatal(diags)
