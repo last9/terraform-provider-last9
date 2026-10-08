@@ -182,6 +182,172 @@ func TestResourceAlertRefreshPreservesKnownStateForMultipleIndicators(t *testing
 	}
 }
 
+func TestResourceAlertImportedKPIDestroyPreservesSharedDependency(t *testing.T) {
+	ctx := context.Background()
+	var deleted []string
+	api := reviewClient(t, func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/alert-rules/alert-1"):
+			fmt.Fprint(w, `{"id":"alert-1","rule_name":"CPU","primary_indicator":"shared_cpu","expression_args":{"shared_cpu":{"id":"kpi-shared"}},"severity":"breach"}`)
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/kpis/kpi-shared"):
+			fmt.Fprint(w, `{"id":"kpi-shared","name":"shared_cpu","definition":{"query":"avg(cpu_usage)"}}`)
+		case req.Method == http.MethodDelete:
+			deleted = append(deleted, req.URL.Path)
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	r := resourceAlert()
+	d := schema.TestResourceDataRaw(t, r.Schema, nil)
+	d.SetId("entity-1:alert-1")
+	imported, err := r.Importer.StateContext(ctx, d, api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, diags := r.RefreshWithoutUpgrade(ctx, imported[0].State(), api)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+	if state.Attributes["owned_kpi_id"] != "" {
+		t.Fatal("imported KPI reference acquired cleanup ownership")
+	}
+	_, diags = r.Apply(ctx, state, &terraform.InstanceDiff{Destroy: true}, api)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+	if len(deleted) != 1 || !strings.HasSuffix(deleted[0], "/alert-rules/alert-1") {
+		t.Fatalf("destroying imported alert must only delete alert, got %v", deleted)
+	}
+}
+
+func TestResourceAlertKPICleanupTracksCreatedIdentity(t *testing.T) {
+	for _, source := range []string{"created", "imported", "legacy", "repointed", "multiple_indicators"} {
+		for _, replace := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replace=%v", source, replace), func(t *testing.T) {
+				ctx := context.Background()
+				id, name, query := "kpi-shared", "shared_cpu", "avg(cpu_usage)"
+				var deleted []string
+				created := 0
+				multiple := false
+				api := reviewClient(t, func(w http.ResponseWriter, req *http.Request) {
+					switch {
+					case req.Method == http.MethodDelete:
+						deleted = append(deleted, req.URL.Path)
+						fmt.Fprint(w, `{}`)
+					case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/kpis"):
+						var payload struct {
+							Name       string
+							Definition struct{ Query string }
+						}
+						if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+							t.Error(err)
+						}
+						created++
+						id, name, query = fmt.Sprintf("kpi-created-%d", created), payload.Name, payload.Definition.Query
+						fmt.Fprintf(w, `{"id":%q,"name":%q,"definition":{"query":%q}}`, id, name, query)
+					case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/kpis/"):
+						fmt.Fprintf(w, `{"id":%q,"name":%q,"definition":{"query":%q}}`, id, name, query)
+					case strings.Contains(req.URL.Path, "/alert-rules"):
+						args := fmt.Sprintf(`{%q:{"id":%q}}`, name, id)
+						if multiple && req.Method == http.MethodGet {
+							args = fmt.Sprintf(`{%q:{"id":%q},"other":{"id":"kpi-shared"}}`, name, id)
+						}
+						fmt.Fprintf(w, `{"id":"alert-1","rule_name":"CPU","primary_indicator":%q,"expression_args":%s,"severity":"breach"}`, name, args)
+					default:
+						t.Errorf("unexpected request %s %s", req.Method, req.URL.Path)
+						w.WriteHeader(http.StatusNotFound)
+					}
+				})
+				r := resourceAlert()
+				config := map[string]interface{}{"entity_id": "entity-1", "name": "CPU", "query": query}
+				var state *terraform.InstanceState
+				if source == "created" || source == "repointed" || source == "multiple_indicators" {
+					diff, err := r.Diff(ctx, nil, terraform.NewResourceConfigRaw(config), api)
+					if err != nil {
+						t.Fatal(err)
+					}
+					diff.RawConfig, err = schema.JSONMapToStateValue(config, r.CoreConfigSchema())
+					if err != nil {
+						t.Fatal(err)
+					}
+					applied, diags := r.Apply(ctx, nil, diff, api)
+					if diags.HasError() {
+						t.Fatal(diags)
+					}
+					state = applied
+					if state.Attributes["owned_kpi_id"] != id {
+						t.Fatal("successful provider create did not record KPI ownership")
+					}
+				} else if source == "imported" {
+					d := schema.TestResourceDataRaw(t, r.Schema, nil)
+					d.SetId("entity-1:alert-1")
+					imported, err := r.Importer.StateContext(ctx, d, api)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state = imported[0].State()
+				} else {
+					d := schema.TestResourceDataRaw(t, r.Schema, config)
+					d.SetId("alert-1")
+					d.Set("kpi_id", id)
+					d.Set("kpi_name", name)
+					state = d.State()
+				}
+				if source == "repointed" {
+					id, name = "kpi-shared", "shared_cpu"
+				}
+				multiple = source == "multiple_indicators"
+				refreshed, diags := r.RefreshWithoutUpgrade(ctx, state, api)
+				if diags.HasError() {
+					t.Fatal(diags)
+				}
+				state = refreshed
+				multiple = false
+				oldID := id
+				if source != "created" && state.Attributes["owned_kpi_id"] != "" {
+					t.Fatalf("reference incorrectly grants ownership: %v", state.Attributes)
+				}
+				if replace {
+					config["query"] = "sum(cpu_usage)"
+					diff, err := r.Diff(ctx, state, terraform.NewResourceConfigRaw(config), api)
+					if err != nil {
+						t.Fatal(err)
+					}
+					diff.RawConfig, err = schema.JSONMapToStateValue(config, r.CoreConfigSchema())
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, diags = r.Apply(ctx, state, diff, api)
+					if diags.HasError() {
+						t.Fatal(diags)
+					}
+				}
+				_, diags = r.Apply(ctx, state, &terraform.InstanceDiff{Destroy: true}, api)
+				if diags.HasError() {
+					t.Fatal(diags)
+				}
+				alertDeleted, oldDeleted, newDeleted := false, false, false
+				for _, path := range deleted {
+					alertDeleted = alertDeleted || strings.HasSuffix(path, "/alert-rules/alert-1")
+					oldDeleted = oldDeleted || strings.HasSuffix(path, "/kpis/"+oldID)
+					newDeleted = newDeleted || strings.HasSuffix(path, "/kpis/"+id)
+				}
+				if !alertDeleted {
+					t.Fatalf("alert deletion control missing: %v", deleted)
+				}
+				if oldDeleted != (source == "created") {
+					t.Fatalf("old KPI cleanup violated ownership: source=%s deleted=%v", source, deleted)
+				}
+				if replace && !newDeleted {
+					t.Fatalf("provider-created replacement KPI was not cleaned up: %v", deleted)
+				}
+			})
+		}
+	}
+}
+
 // TestAccAlertIntegration_fullLifecycle tests the complete create -> update -> delete cycle
 // for alerts, including automatic KPI creation and cleanup
 func TestAccAlertIntegration_fullLifecycle(t *testing.T) {
@@ -352,7 +518,8 @@ func TestAccAlertIntegration_import(t *testing.T) {
 					return fmt.Sprintf("%s:%s", entityID, alertID), nil
 				},
 				// is_disabled is intentionally not read from API to avoid drift
-				ImportStateVerifyIgnore: []string{"is_disabled"},
+				// Import recovers references but never inherits provider-created KPI ownership.
+				ImportStateVerifyIgnore: []string{"is_disabled", "owned_kpi_id"},
 			},
 		},
 	})

@@ -119,6 +119,11 @@ func resourceAlert() *schema.Resource {
 				Computed:    true,
 				Description: "Name of the automatically created KPI for this alert",
 			},
+			"owned_kpi_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "KPI created by this resource and eligible for cleanup; imported or recovered references do not establish ownership",
+			},
 			"indicator": {
 				Type:        schema.TypeString,
 				Computed:    true,
@@ -319,6 +324,7 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 
 	d.SetId(alert.ID)
+	d.Set("owned_kpi_id", kpi.ID)
 
 	return resourceAlertRead(ctx, d, m)
 }
@@ -330,6 +336,12 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	alert, err := apiClient.GetAlert(entityID, d.Id())
 	if err != nil {
 		return diag.FromErr(fmt.Errorf("failed to read alert: %w", err))
+	}
+	if ownedID := d.Get("owned_kpi_id").(string); ownedID != "" {
+		ref := alert.ExpressionArgs[alert.Indicator]
+		if len(alert.ExpressionArgs) != 1 || ref == nil || ref.ID != ownedID {
+			d.Set("owned_kpi_id", "")
+		}
 	}
 	needsKPIState := d.Get("kpi_id").(string) == "" || d.Get("kpi_name").(string) == "" || d.Get("query").(string) == ""
 	if needsKPIState && len(alert.ExpressionArgs) == 0 {
@@ -545,7 +557,7 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	// If we created a new KPI, delete the old one and update state
 	if newKPI != nil {
 		// Delete old KPI (ignore errors - it may already be gone)
-		if oldKPIID != "" && oldKPIName != "" {
+		if oldKPIID != "" && oldKPIID == d.Get("owned_kpi_id").(string) {
 			apiClient.DeleteKPI(entityID, oldKPIID)
 		}
 
@@ -553,6 +565,7 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 		d.Set("kpi_id", newKPI.ID)
 		d.Set("kpi_name", newKPI.Name)
 		d.Set("indicator", newKPI.Name)
+		d.Set("owned_kpi_id", newKPI.ID)
 	}
 
 	return resourceAlertRead(ctx, d, m)
@@ -570,7 +583,7 @@ func resourceAlertDelete(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 
 	// Delete the associated KPI (ignore errors - it may already be gone)
-	if kpiID != "" {
+	if kpiID != "" && kpiID == d.Get("owned_kpi_id").(string) {
 		apiClient.DeleteKPI(entityID, kpiID)
 	}
 
