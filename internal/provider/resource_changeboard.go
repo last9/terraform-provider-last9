@@ -111,6 +111,7 @@ func resourceChangeboard() *schema.Resource {
 			"granularity": {
 				Type:        schema.TypeString,
 				Optional:    true,
+				Computed:    true,
 				Description: "Changeboard time granularity",
 			},
 			"created_at": {

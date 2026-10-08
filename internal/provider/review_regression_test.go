@@ -344,20 +344,31 @@ func TestReviewChangeboardEmptyFieldsSerializeForRemoval(t *testing.T) {
 	}
 }
 
-func TestReviewChangeboardRemovingGranularityPlansEmptyUpdate(t *testing.T) {
+func TestReviewChangeboardOmittedGranularityKeepsAPIDefault(t *testing.T) {
 	resource := resourceChangeboard()
 	d := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
-		"name": "board", "owner_id": "owner", "owner_type": "team", "granularity": "daily",
+		"name": "board", "owner_id": "owner", "owner_type": "team",
 	})
 	d.SetId("board")
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, `{"id":"board","name":"board","owner_id":"owner","owner_type":"team","filters":[],"groups":[],"relationships":[],"properties":{"granularity":"entity"}}`)
+	})
+	if ds := resourceChangeboardRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
 	diff, err := resource.Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(map[string]interface{}{
 		"name": "board", "owner_id": "owner", "owner_type": "team",
 	}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff == nil || diff.Attributes["granularity"] == nil {
-		t.Fatal("removing granularity must plan an API update")
+	if diff != nil && diff.Attributes["granularity"] != nil {
+		t.Fatalf("omitted granularity must retain API default, got %#v", diff.Attributes["granularity"])
 	}
 }
 
