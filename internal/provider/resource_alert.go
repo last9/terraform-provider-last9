@@ -219,6 +219,7 @@ func resourceAlert() *schema.Resource {
 				Type:        schema.TypeList,
 				Optional:    true,
 				Computed:    true,
+				ConfigMode:  schema.SchemaConfigModeAttr,
 				MaxItems:    1,
 				Description: "Weekly alert mute schedule. Omit to preserve an existing schedule; set to [] to clear it.",
 				Elem: &schema.Resource{Schema: map[string]*schema.Schema{
@@ -236,6 +237,7 @@ func resourceAlert() *schema.Resource {
 					"windows": {
 						Type:        schema.TypeList,
 						Required:    true,
+						ConfigMode:  schema.SchemaConfigModeAttr,
 						MinItems:    1,
 						MaxItems:    20,
 						Description: "Weekly mute windows.",
@@ -243,6 +245,7 @@ func resourceAlert() *schema.Resource {
 							"weekdays": {
 								Type:        schema.TypeList,
 								Required:    true,
+								ConfigMode:  schema.SchemaConfigModeAttr,
 								MinItems:    1,
 								MaxItems:    7,
 								Description: "Weekdays: sun, mon, tue, wed, thu, fri, sat.",
