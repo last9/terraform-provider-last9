@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -26,7 +28,7 @@ func parityDashboardData(t *testing.T) *schema.ResourceData {
 			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
 			"visualization": []interface{}{map[string]interface{}{
 				"type": "logs", "logs_config_json": `{"columns":["timestamp","body","service","severity"],"sort_order":"desc","row_limit":1000,"severity_coloring":false}`,
-				"value_mappings_json": `[{"type":"value","value":500,"text":"Error"}]`,
+				"value_mappings_json": `[{"type":"value","value":"500","text":"Error"}]`,
 			}},
 			"query": []interface{}{map[string]interface{}{"name": "A", "expr": `{env=~"$env"}`, "telemetry": "logs", "query_type": "log_ql"}},
 		}, map[string]interface{}{"name": "Details", "collapsed": true, "visualization": []interface{}{map[string]interface{}{"type": "section"}}}},
@@ -41,7 +43,18 @@ func parityAPI(t *testing.T, stored *map[string]interface{}) http.HandlerFunc {
 			return
 		}
 		if r.Method == http.MethodPost || r.Method == http.MethodPut {
-			if err := json.NewDecoder(r.Body).Decode(stored); err != nil {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if err := validateParityAPIValueMappings(body); err != nil {
+				t.Errorf("API rejected invalid value_mappings shape: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if err := json.NewDecoder(bytes.NewReader(body)).Decode(stored); err != nil {
 				t.Error(err)
 			}
 			dashboard := (*stored)["dashboard"].(map[string]interface{})
@@ -52,6 +65,23 @@ func parityAPI(t *testing.T, stored *map[string]interface{}) http.HandlerFunc {
 			t.Error(err)
 		}
 	}
+}
+
+func validateParityAPIValueMappings(body []byte) error {
+	var payload struct {
+		Dashboard struct {
+			Panels []struct {
+				Visualization struct {
+					ValueMappings []struct {
+						Type  string `json:"type"`
+						Value string `json:"value"`
+						Text  string `json:"text"`
+					} `json:"value_mappings"`
+				} `json:"visualization"`
+			} `json:"panels"`
+		} `json:"dashboard"`
+	}
+	return json.Unmarshal(body, &payload)
 }
 
 func assertParityRequest(t *testing.T, data *schema.ResourceData) {
@@ -141,6 +171,25 @@ func TestDashboardParityJSONValidation(t *testing.T) {
 				t.Fatalf("%s accepted %s", kind, value)
 			}
 		}
+	}
+}
+
+func TestDashboardParityAPIRequiresStringValueMappingValue(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "string value", value: `"500"`},
+		{name: "numeric value", value: `500`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"dashboard":{"panels":[{"visualization":{"value_mappings":[{"type":"value","value":` + tc.value + `,"text":"Error"}]}}]}}`)
+			err := validateParityAPIValueMappings(body)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateParityAPIValueMappings error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 
