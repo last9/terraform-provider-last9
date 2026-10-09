@@ -30,7 +30,10 @@ func TestDashboardMetadataOmissionPreservesServerValues(t *testing.T) {
 			if err := json.Unmarshal(payload["dashboard"], &dashboard); err != nil {
 				t.Error(err)
 			}
+			assertDashboardNestedOrder(t, dashboard)
 			dashboard["id"] = "dashboard-1"
+			panels := dashboard["panels"].([]interface{})
+			panels[0].(map[string]interface{})["id"] = "stat-panel"
 			writeDashboardMetadataResponse(t, w, dashboard, metadata)
 		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/dashboards/dashboard-1"):
 			writeDashboardMetadataResponse(t, w, dashboard, metadata)
@@ -43,6 +46,7 @@ func TestDashboardMetadataOmissionPreservesServerValues(t *testing.T) {
 			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 				t.Error(err)
 			}
+			assertDashboardNestedOrder(t, payload.Dashboard)
 			if len(payload.Metadata) == 0 || string(payload.Metadata) == "null" {
 				t.Errorf("update %d erased metadata instead of preserving it: %s", updates, payload.Metadata)
 			} else {
@@ -150,12 +154,62 @@ resource "last9_dashboard" "test" {
   region = "us-east-1"
   name = %q
   panel {
-    name = "Section"
+    key = "stat-panel"
+    position = 0
+    name = "Panel"
+    layout {
+      x = 0
+      y = 0
+      w = 6
+      h = 4
+    }
     visualization {
-      type = "section"
+      type = "stat"
+      stat_config {
+        threshold {
+          position = 0
+          value = 90
+          color = "red"
+        }
+        threshold {
+          position = 1
+          value = 10
+          color = "green"
+        }
+      }
+    }
+    query {
+      position = 0
+      name = "A"
+      expr = "up"
+      telemetry = "metrics"
+      query_type = "promql"
+    }
+    query {
+      position = 1
+      name = "B"
+      expr = "down"
+      telemetry = "metrics"
+      query_type = "promql"
     }
   }
   %s
 }
 `, name, metadata)
+}
+
+func assertDashboardNestedOrder(t *testing.T, dashboard map[string]any) {
+	t.Helper()
+	panels := dashboard["panels"].([]interface{})
+	panel := panels[0].(map[string]interface{})
+	queries := panel["queries"].([]interface{})
+	if len(queries) != 2 || queries[0].(map[string]interface{})["name"] != "A" || queries[1].(map[string]interface{})["name"] != "B" {
+		t.Errorf("query order was not preserved: %#v", queries)
+	}
+	visualization := panel["visualization"].(map[string]interface{})
+	stat := visualization["stat_config"].(map[string]interface{})
+	thresholds := stat["thresholds"].([]interface{})
+	if len(thresholds) != 2 || thresholds[0].(map[string]interface{})["value"] != float64(90) || thresholds[1].(map[string]interface{})["value"] != float64(10) {
+		t.Errorf("threshold order was not preserved: %#v", thresholds)
+	}
 }

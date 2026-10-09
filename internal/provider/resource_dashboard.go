@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -68,7 +69,7 @@ var (
 )
 
 func resourceDashboard() *schema.Resource {
-	return &schema.Resource{
+	r := &schema.Resource{
 		CreateContext: resourceDashboardCreate,
 		ReadContext:   resourceDashboardRead,
 		UpdateContext: resourceDashboardUpdate,
@@ -176,11 +177,24 @@ func resourceDashboard() *schema.Resource {
 				},
 			},
 			"panel": {
-				Type:     schema.TypeList,
-				Required: true,
-				MinItems: 1,
+				Type:       schema.TypeSet,
+				ConfigMode: schema.SchemaConfigModeBlock,
+				Required:   true,
+				MinItems:   1,
+				Set:        dashboardPanelKeyHash,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
+						"key": {
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "Stable Terraform identity for this panel. Keep unchanged when editing or moving the panel.",
+						},
+						"position": {
+							Type:         schema.TypeInt,
+							Required:     true,
+							ValidateFunc: validation.IntAtLeast(0),
+							Description:  "Zero-based order in the dashboard panel array, including section panels.",
+						},
 						"id": {
 							Type:        schema.TypeString,
 							Computed:    true,
@@ -212,9 +226,10 @@ func resourceDashboard() *schema.Resource {
 							Description: "Panel schema version. Defaults to 1. The API only persists query.telemetry and query.query_type when version >= 1; if you set this to 0, those fields will be silently dropped server-side. Leave as default unless you have a specific reason.",
 						},
 						"layout": {
-							Type:     schema.TypeList,
+							Type:     schema.TypeSet,
 							Optional: true,
 							MaxItems: 1,
+							Set:      dashboardConstantSetHash("layout"),
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"x": {Type: schema.TypeInt, Required: true},
@@ -235,9 +250,17 @@ func resourceDashboard() *schema.Resource {
 							},
 						},
 						"visualization": {
-							Type:     schema.TypeList,
-							Required: true,
-							MaxItems: 1,
+							Type:       schema.TypeSet,
+							ConfigMode: schema.SchemaConfigModeBlock,
+							Required:   true,
+							MaxItems:   1,
+							Set: func(v interface{}) int {
+								visualization, ok := v.(map[string]interface{})
+								if !ok {
+									return schema.HashString(fmt.Sprintf("invalid-visualization-%T", v))
+								}
+								return schema.HashString(fmt.Sprint(visualization["type"]))
+							},
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"type": {
@@ -249,9 +272,10 @@ func resourceDashboard() *schema.Resource {
 									"logs_config_json":    dashboardJSONSchema("object", "Raw logs display configuration. Use jsonencode({...})."),
 									"value_mappings_json": dashboardJSONSchema("array", "Native value mappings."),
 									"timeseries_config": {
-										Type:     schema.TypeList,
+										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
+										Set:      dashboardConstantSetHash("timeseries"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"display_type": {
@@ -263,9 +287,10 @@ func resourceDashboard() *schema.Resource {
 										},
 									},
 									"bar_config": {
-										Type:     schema.TypeList,
+										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
+										Set:      dashboardConstantSetHash("bar"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"orientation": {
@@ -278,18 +303,21 @@ func resourceDashboard() *schema.Resource {
 										},
 									},
 									"stat_config": {
-										Type:     schema.TypeList,
+										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
+										Set:      dashboardConstantSetHash("stat"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"threshold": {
-													Type:     schema.TypeList,
+													Type:     schema.TypeSet,
 													Optional: true,
+													Set:      dashboardThresholdKeyHash,
 													Elem: &schema.Resource{
 														Schema: map[string]*schema.Schema{
-															"value": {Type: schema.TypeFloat, Required: true},
-															"color": {Type: schema.TypeString, Required: true},
+															"position": {Type: schema.TypeInt, Required: true, ValidateFunc: validation.IntAtLeast(0)},
+															"value":    {Type: schema.TypeFloat, Required: true},
+															"color":    {Type: schema.TypeString, Required: true},
 														},
 													},
 												},
@@ -297,9 +325,10 @@ func resourceDashboard() *schema.Resource {
 										},
 									},
 									"markdown_config": {
-										Type:     schema.TypeList,
+										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
+										Set:      dashboardConstantSetHash("markdown"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"content": {
@@ -324,13 +353,15 @@ func resourceDashboard() *schema.Resource {
 							},
 						},
 						"query": {
-							Type:     schema.TypeList,
+							Type:     schema.TypeSet,
 							Optional: true,
+							Set:      dashboardQueryKeyHash,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"name": {Type: schema.TypeString, Required: true},
-									"expr": {Type: schema.TypeString, Required: true},
-									"type": {Type: schema.TypeString, Optional: true, Default: "range"},
+									"position": {Type: schema.TypeInt, Required: true, ValidateFunc: validation.IntAtLeast(0)},
+									"name":     {Type: schema.TypeString, Required: true},
+									"expr":     {Type: schema.TypeString, Required: true},
+									"type":     {Type: schema.TypeString, Optional: true, Default: "range"},
 									"unit": {
 										Type:         schema.TypeString,
 										Optional:     true,
@@ -397,6 +428,14 @@ func resourceDashboard() *schema.Resource {
 		},
 		CustomizeDiff: validateDashboard,
 	}
+	r.SchemaVersion = 1
+	legacy := dashboardLegacyPanelSchema(r.Schema)
+	r.StateUpgraders = []schema.StateUpgrader{{
+		Version: 0,
+		Type:    (&schema.Resource{Schema: legacy}).CoreConfigSchema().ImpliedType(),
+		Upgrade: upgradeDashboardPanelStateV0,
+	}}
+	return r
 }
 
 type dashboardGetter interface {
@@ -408,17 +447,76 @@ func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{
 }
 
 func validateDashboardData(d dashboardGetter) error {
-	panels := d.Get("panel").([]interface{})
+	panels := dashboardPanelValues(d.Get("panel"))
+	keys := make(map[string]struct{}, len(panels))
+	positions := make(map[int]struct{}, len(panels))
 	for i, p := range panels {
-		pm := p.(map[string]interface{})
-		viz := pm["visualization"].([]interface{})
+		pm, ok := p.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("panel[%d]: expected object, got %T", i, p)
+		}
+		key, knownKey := dashboardPanelKey(pm)
+		if !knownKey || strings.TrimSpace(key) == "" {
+			return fmt.Errorf("panel[%d]: key must be a non-empty stable identity", i)
+		}
+		if _, exists := keys[key]; exists {
+			return fmt.Errorf("panel key %q must be unique", key)
+		}
+		keys[key] = struct{}{}
+		position, knownPosition := dashboardPanelPosition(pm)
+		if !knownPosition {
+			return fmt.Errorf("panel[%d] %q: position must be a known integer", i, key)
+		}
+		if position < 0 {
+			return fmt.Errorf("panel[%d] %q: position must be zero or greater", i, key)
+		}
+		if _, exists := positions[position]; exists {
+			return fmt.Errorf("panel position %d must be unique", position)
+		}
+		positions[position] = struct{}{}
+		viz := dashboardPanelValues(pm["visualization"])
 		if len(viz) == 0 {
 			return fmt.Errorf("panel[%d] %q: visualization is required", i, pm["name"])
 		}
-		vm := viz[0].(map[string]interface{})
-		vizType := vm["type"].(string)
-		queries := pm["query"].([]interface{})
-		layout := pm["layout"].([]interface{})
+		vm, ok := viz[0].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("panel[%d] %q: visualization must be an object (got %T: %#v; panel=%#v)", i, key, viz[0], viz[0], pm)
+		}
+		vizType, ok := vm["type"].(string)
+		if !ok || vizType == "" {
+			return fmt.Errorf("panel[%d] %q: visualization type must be known", i, key)
+		}
+		queries := dashboardPanelValues(pm["query"])
+		layout := dashboardPanelValues(pm["layout"])
+		queryNames := make(map[string]struct{}, len(queries))
+		for queryIndex, rawQuery := range queries {
+			query, ok := rawQuery.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("panel[%d] %q query[%d]: expected object", i, key, queryIndex)
+			}
+			name, ok := query["name"].(string)
+			if !ok || strings.TrimSpace(name) == "" {
+				return fmt.Errorf("panel[%d] %q query[%d]: name must be a non-empty stable identity", i, key, queryIndex)
+			}
+			if _, exists := queryNames[name]; exists {
+				return fmt.Errorf("panel[%d] %q query name %q must be unique", i, key, name)
+			}
+			queryNames[name] = struct{}{}
+		}
+		if err := validateDashboardOrderedBlocks(queries, fmt.Sprintf("panel[%d] %q query", i, key)); err != nil {
+			return err
+		}
+		if visualizations := dashboardPanelValues(pm["visualization"]); len(visualizations) == 1 {
+			if visualization, ok := visualizations[0].(map[string]interface{}); ok {
+				if statConfigs := dashboardPanelValues(visualization["stat_config"]); len(statConfigs) > 0 {
+					if stat, ok := statConfigs[0].(map[string]interface{}); ok {
+						if err := validateDashboardOrderedBlocks(dashboardPanelValues(stat["threshold"]), fmt.Sprintf("panel[%d] %q threshold", i, key)); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
 		if err := validateDashboardLogs(pm, vm); err != nil {
 			return fmt.Errorf("panel[%d] %q: %w", i, pm["name"], err)
 		}
@@ -431,7 +529,7 @@ func validateDashboardData(d dashboardGetter) error {
 				return fmt.Errorf("panel[%d] %q: section panels cannot have layout block", i, pm["name"])
 			}
 		} else if vizType == "markdown" {
-			if markdownConfig := vm["markdown_config"].([]interface{}); len(markdownConfig) == 0 {
+			if markdownConfig := dashboardPanelValues(vm["markdown_config"]); len(markdownConfig) == 0 {
 				return fmt.Errorf("panel[%d] %q: markdown panels require markdown_config", i, pm["name"])
 			}
 			if len(queries) > 0 {
@@ -465,6 +563,11 @@ func validateDashboardData(d dashboardGetter) error {
 					return fmt.Errorf("panel[%d].query[%d]: query_type %q is not valid for telemetry %q", i, qi, queryType, telemetry)
 				}
 			}
+		}
+	}
+	for position := 0; position < len(panels); position++ {
+		if _, exists := positions[position]; !exists {
+			return fmt.Errorf("panel positions must be contiguous from 0; missing position %d", position)
 		}
 	}
 
@@ -547,7 +650,7 @@ func resourceDashboardRead(ctx context.Context, d *schema.ResourceData, m interf
 		}
 	}
 
-	d.Set("panel", flattenPanels(dash.Panels))
+	d.Set("panel", flattenPanelsWithState(dash.Panels, dashboardPanelValues(d.Get("panel"))))
 	d.Set("variable", flattenVariables(dash.Variables))
 
 	if result.Metadata != nil {
@@ -593,7 +696,7 @@ func buildDashboardRequest(d *schema.ResourceData) *client.DashboardRequest {
 	dash := &client.Dashboard{
 		Links:     dashboardJSONValue(d.Get("links_json")),
 		Name:      d.Get("name").(string),
-		Panels:    expandPanels(d.Get("panel").([]interface{})),
+		Panels:    expandPanels(dashboardPanelValues(d.Get("panel"))),
 		Variables: expandVariables(d.Get("variable").([]interface{})),
 	}
 	if v, ok := d.GetOk("relative_time"); ok && v.(int) > 0 {
@@ -613,8 +716,28 @@ func buildDashboardRequest(d *schema.ResourceData) *client.DashboardRequest {
 }
 
 func expandPanels(input []interface{}) []*client.DashboardPanel {
-	panels := make([]*client.DashboardPanel, 0, len(input))
-	for _, p := range input {
+	ordered := append([]interface{}(nil), input...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		leftPanel, leftOK := ordered[i].(map[string]interface{})
+		rightPanel, rightOK := ordered[j].(map[string]interface{})
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if !leftOK {
+			return false
+		}
+		left, leftKnown := dashboardPanelPosition(leftPanel)
+		right, rightKnown := dashboardPanelPosition(rightPanel)
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if !leftKnown {
+			return false
+		}
+		return left < right
+	})
+	panels := make([]*client.DashboardPanel, 0, len(ordered))
+	for _, p := range ordered {
 		pm := p.(map[string]interface{})
 		panel := &client.DashboardPanel{
 			Collapsed:       pm["collapsed"].(bool),
@@ -630,11 +753,11 @@ func expandPanels(input []interface{}) []*client.DashboardPanel {
 			Version:         pm["version"].(int),
 		}
 
-		if vizList := pm["visualization"].([]interface{}); len(vizList) > 0 {
+		if vizList := dashboardPanelValues(pm["visualization"]); len(vizList) > 0 {
 			panel.Visualization = expandVisualization(vizList[0].(map[string]interface{}))
 		}
 
-		if layoutList := pm["layout"].([]interface{}); len(layoutList) > 0 {
+		if layoutList := dashboardPanelValues(pm["layout"]); len(layoutList) > 0 {
 			lm := layoutList[0].(map[string]interface{})
 			layout := map[string]any{
 				"x": lm["x"].(int),
@@ -655,10 +778,79 @@ func expandPanels(input []interface{}) []*client.DashboardPanel {
 			panel.Layout = layout
 		}
 
-		panel.PopulatedQueries = expandQueries(pm["query"].([]interface{}))
+		panel.PopulatedQueries = expandQueries(dashboardPanelValues(pm["query"]))
 		panels = append(panels, panel)
 	}
 	return panels
+}
+
+func dashboardPanelValues(value interface{}) []interface{} {
+	switch panels := value.(type) {
+	case *schema.Set:
+		return panels.List()
+	case []interface{}:
+		return panels
+	default:
+		return nil
+	}
+}
+
+func dashboardConstantSetHash(key string) schema.SchemaSetFunc {
+	return func(interface{}) int { return schema.HashString(key) }
+}
+
+func dashboardQueryKeyHash(value interface{}) int {
+	query, ok := value.(map[string]interface{})
+	if !ok {
+		return schema.HashString(fmt.Sprintf("invalid-query-%T", value))
+	}
+	return schema.HashString(fmt.Sprint(query["name"]))
+}
+
+func dashboardThresholdKeyHash(value interface{}) int {
+	threshold, ok := value.(map[string]interface{})
+	if !ok {
+		return schema.HashString(fmt.Sprintf("invalid-threshold-%T", value))
+	}
+	position, ok := threshold["position"].(int)
+	if !ok {
+		return schema.HashString("unknown-threshold-position")
+	}
+	return schema.HashInt(position)
+}
+
+func validateDashboardOrderedBlocks(blocks []interface{}, label string) error {
+	positions := make(map[int]struct{}, len(blocks))
+	for i, raw := range blocks {
+		block, ok := raw.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s[%d]: expected object", label, i)
+		}
+		position, ok := block["position"].(int)
+		if !ok || position < 0 {
+			return fmt.Errorf("%s[%d]: position must be a known non-negative integer", label, i)
+		}
+		if _, exists := positions[position]; exists {
+			return fmt.Errorf("%s position %d must be unique", label, position)
+		}
+		positions[position] = struct{}{}
+	}
+	for position := 0; position < len(blocks); position++ {
+		if _, exists := positions[position]; !exists {
+			return fmt.Errorf("%s positions must be contiguous from 0; missing position %d", label, position)
+		}
+	}
+	return nil
+}
+
+func dashboardPanelKey(panel map[string]interface{}) (string, bool) {
+	key, ok := panel["key"].(string)
+	return key, ok
+}
+
+func dashboardPanelPosition(panel map[string]interface{}) (int, bool) {
+	position, ok := panel["position"].(int)
+	return position, ok
 }
 
 func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisualization {
@@ -668,11 +860,11 @@ func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisuali
 		Type:          m["type"].(string),
 		FullWidth:     m["full_width"].(bool),
 	}
-	if l := m["timeseries_config"].([]interface{}); len(l) > 0 {
+	if l := dashboardPanelValues(m["timeseries_config"]); len(l) > 0 {
 		c := l[0].(map[string]interface{})
 		viz.TimeseriesConfig = &client.DashboardTimeseriesConfig{DisplayType: c["display_type"].(string)}
 	}
-	if l := m["bar_config"].([]interface{}); len(l) > 0 {
+	if l := dashboardPanelValues(m["bar_config"]); len(l) > 0 {
 		c := l[0].(map[string]interface{})
 		stacked := c["stacked"].(bool)
 		viz.BarConfig = &client.DashboardBarConfig{
@@ -680,13 +872,13 @@ func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisuali
 			Stacked:     &stacked,
 		}
 	}
-	if l := m["stat_config"].([]interface{}); len(l) > 0 {
+	if l := dashboardPanelValues(m["stat_config"]); len(l) > 0 {
 		c := l[0].(map[string]interface{})
 		viz.StatConfig = &client.DashboardStatConfig{
-			Thresholds: expandStatThresholds(c["threshold"].([]interface{})),
+			Thresholds: expandStatThresholds(dashboardPanelValues(c["threshold"])),
 		}
 	}
-	if l := m["markdown_config"].([]interface{}); len(l) > 0 {
+	if l := dashboardPanelValues(m["markdown_config"]); len(l) > 0 {
 		c := l[0].(map[string]interface{})
 		viz.MarkdownConfig = &client.DashboardMarkdownConfig{Content: c["content"].(string)}
 	}
@@ -700,6 +892,7 @@ func expandVisualization(m map[string]interface{}) *client.DashboardPanelVisuali
 }
 
 func expandStatThresholds(input []interface{}) []client.DashboardStatThreshold {
+	input = orderByDashboardPosition(input)
 	out := make([]client.DashboardStatThreshold, 0, len(input))
 	for _, t := range input {
 		tm := t.(map[string]interface{})
@@ -712,6 +905,7 @@ func expandStatThresholds(input []interface{}) []client.DashboardStatThreshold {
 }
 
 func expandQueries(input []interface{}) []*client.DashboardPanelQueryDetails {
+	input = orderByDashboardPosition(input)
 	out := make([]*client.DashboardPanelQueryDetails, 0, len(input))
 	for _, q := range input {
 		qm := q.(map[string]interface{})
@@ -742,6 +936,30 @@ func expandQueries(input []interface{}) []*client.DashboardPanelQueryDetails {
 		out = append(out, qd)
 	}
 	return out
+}
+
+func orderByDashboardPosition(input []interface{}) []interface{} {
+	ordered := append([]interface{}(nil), input...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, lok := ordered[i].(map[string]interface{})
+		right, rok := ordered[j].(map[string]interface{})
+		if lok != rok {
+			return lok
+		}
+		if !lok {
+			return false
+		}
+		lp, lok := dashboardPanelPosition(left)
+		rp, rok := dashboardPanelPosition(right)
+		if lok != rok {
+			return lok
+		}
+		if !lok {
+			return false
+		}
+		return lp < rp
+	})
+	return ordered
 }
 
 func expandVariables(input []interface{}) []*client.DashboardVariable {
@@ -805,13 +1023,39 @@ func toAnySlice(in []string) []any {
 	return out
 }
 
-func flattenPanels(panels []*client.DashboardPanel) []interface{} {
+func flattenPanelsWithState(panels []*client.DashboardPanel, current []interface{}) []interface{} {
+	keysByID := make(map[string]string, len(current))
+	keysByPosition := make(map[int]string, len(current))
+	for _, raw := range current {
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := dashboardPanelKey(panel)
+		id, _ := panel["id"].(string)
+		position, hasPosition := dashboardPanelPosition(panel)
+		if id != "" && key != "" {
+			keysByID[id] = key
+		}
+		if key != "" && hasPosition {
+			keysByPosition[position] = key
+		}
+	}
 	out := make([]interface{}, 0, len(panels))
-	for _, p := range panels {
+	for position, p := range panels {
 		if p == nil {
 			continue
 		}
+		key := keysByID[p.ID]
+		if key == "" {
+			key = keysByPosition[position]
+		}
+		if key == "" {
+			key = p.ID
+		}
 		pm := map[string]interface{}{
+			"key":                  key,
+			"position":             position,
 			"collapsed":            p.Collapsed,
 			"field_overrides_json": string(p.FieldOverrides),
 			"transformations_json": string(p.Transformations),
@@ -901,8 +1145,9 @@ func flattenVisualization(viz *client.DashboardPanelVisualization) []interface{}
 		thresholds := make([]interface{}, 0, len(viz.StatConfig.Thresholds))
 		for _, t := range viz.StatConfig.Thresholds {
 			thresholds = append(thresholds, map[string]interface{}{
-				"value": t.Value,
-				"color": t.Color,
+				"position": len(thresholds),
+				"value":    t.Value,
+				"color":    t.Color,
 			})
 		}
 		m["stat_config"] = []interface{}{map[string]interface{}{"threshold": thresholds}}
@@ -922,11 +1167,12 @@ func flattenVisualization(viz *client.DashboardPanelVisualization) []interface{}
 
 func flattenQueries(queries []*client.DashboardPanelQueryDetails) []interface{} {
 	out := make([]interface{}, 0, len(queries))
-	for _, q := range queries {
+	for i, q := range queries {
 		if q == nil {
 			continue
 		}
 		qm := map[string]interface{}{
+			"position":         i,
 			"name":             q.Name,
 			"expr":             q.Expr,
 			"type":             q.Type,
@@ -988,4 +1234,111 @@ func flattenMetadata(md *client.DashboardMetadata) []interface{} {
 			"tags":     md.Tags,
 		},
 	}
+}
+
+func dashboardPanelKeyHash(v interface{}) int {
+	panel, ok := v.(map[string]interface{})
+	if !ok {
+		return schema.HashString(fmt.Sprintf("invalid-panel-%T", v))
+	}
+	key, _ := dashboardPanelKey(panel)
+	if key == "" {
+		key, _ = panel["name"].(string)
+	}
+	return schema.HashString(key)
+}
+
+func dashboardLegacyPanelSchema(current map[string]*schema.Schema) map[string]*schema.Schema {
+	legacy := make(map[string]*schema.Schema, len(current))
+	for name, field := range current {
+		copied := *field
+		legacy[name] = &copied
+	}
+	panel := *legacy["panel"]
+	panel.Type = schema.TypeList
+	panel.Set = nil
+	panelElem := *panel.Elem.(*schema.Resource)
+	panelElem.Schema = make(map[string]*schema.Schema, len(panelElem.Schema)-2)
+	for name, field := range panel.Elem.(*schema.Resource).Schema {
+		if name == "key" || name == "position" {
+			continue
+		}
+		panelElem.Schema[name] = dashboardLegacyNestedSchema(name, field)
+	}
+	panel.Elem = &panelElem
+	legacy["panel"] = &panel
+	return legacy
+}
+
+func dashboardLegacyNestedSchema(name string, field *schema.Schema) *schema.Schema {
+	copied := *field
+	switch name {
+	case "layout", "visualization", "query", "timeseries_config", "bar_config", "stat_config", "markdown_config", "threshold":
+		copied.Type = schema.TypeList
+		copied.Set = nil
+	}
+	if resource, ok := field.Elem.(*schema.Resource); ok {
+		legacyResource := *resource
+		legacyResource.Schema = make(map[string]*schema.Schema, len(resource.Schema))
+		for childName, child := range resource.Schema {
+			if (name == "query" || name == "threshold") && childName == "position" {
+				continue
+			}
+			legacyResource.Schema[childName] = dashboardLegacyNestedSchema(childName, child)
+		}
+		copied.Elem = &legacyResource
+	}
+	return &copied
+}
+
+func upgradeDashboardPanelStateV0(_ context.Context, state map[string]interface{}, _ interface{}) (map[string]interface{}, error) {
+	panels, _ := state["panel"].([]interface{})
+	seen := make(map[string]struct{}, len(panels))
+	for position, raw := range panels {
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("cannot upgrade dashboard panel %d: expected object, got %T", position, raw)
+		}
+		key, _ := panel["id"].(string)
+		if key == "" {
+			key = fmt.Sprintf("legacy-panel-%d", position)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fmt.Errorf("cannot safely upgrade dashboard panels with duplicate API id %q", key)
+		}
+		seen[key] = struct{}{}
+		panel["key"] = key
+		panel["position"] = position
+		queries, _ := panel["query"].([]interface{})
+		for queryPosition, rawQuery := range queries {
+			query, ok := rawQuery.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("cannot upgrade dashboard panel %d query %d: expected object", position, queryPosition)
+			}
+			query["position"] = queryPosition
+		}
+		visualizations, _ := panel["visualization"].([]interface{})
+		for _, rawVisualization := range visualizations {
+			visualization, ok := rawVisualization.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("cannot upgrade dashboard panel %d visualization: expected object", position)
+			}
+			statConfigs, _ := visualization["stat_config"].([]interface{})
+			for _, rawStat := range statConfigs {
+				stat, ok := rawStat.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("cannot upgrade dashboard panel %d stat_config: expected object", position)
+				}
+				thresholds, _ := stat["threshold"].([]interface{})
+				for thresholdPosition, rawThreshold := range thresholds {
+					threshold, ok := rawThreshold.(map[string]interface{})
+					if !ok {
+						return nil, fmt.Errorf("cannot upgrade dashboard panel %d threshold %d: expected object", position, thresholdPosition)
+					}
+					threshold["position"] = thresholdPosition
+				}
+			}
+		}
+	}
+	return state, nil
 }

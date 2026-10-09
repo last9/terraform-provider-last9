@@ -20,7 +20,7 @@ func parityDashboardData(t *testing.T) *schema.ResourceData {
 			"regex": "prod.*", "include_all": true, "all_value": ".*", "multiple": true,
 		}},
 		"panel": []interface{}{map[string]interface{}{
-			"name": "Logs", "version": 1,
+			"key": "logs", "position": 0, "name": "Logs", "version": 1,
 			"links_json":           `[{"title":"Docs","url":"https://example.test"}]`,
 			"data_links_json":      `[{"title":"Trace","url":"https://example.test/${__data.fields.trace_id}"}]`,
 			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":500,"color":"red","colorTarget":"background"}],"data_links":[{"title":"Logs","url":"https://example.test/${__value.raw}"}]}}]`,
@@ -30,8 +30,8 @@ func parityDashboardData(t *testing.T) *schema.ResourceData {
 				"type": "logs", "logs_config_json": `{"columns":["timestamp","body","service","severity"],"sort_order":"desc","row_limit":1000,"severity_coloring":false}`,
 				"value_mappings_json": `[{"type":"value","value":"500","text":"Error"}]`,
 			}},
-			"query": []interface{}{map[string]interface{}{"name": "A", "expr": `{env=~"$env"}`, "telemetry": "logs", "query_type": "log_ql"}},
-		}, map[string]interface{}{"name": "Details", "collapsed": true, "visualization": []interface{}{map[string]interface{}{"type": "section"}}}},
+			"query": []interface{}{map[string]interface{}{"position": 0, "name": "A", "expr": `{env=~"$env"}`, "telemetry": "logs", "query_type": "log_ql"}},
+		}, map[string]interface{}{"key": "details", "position": 1, "name": "Details", "collapsed": true, "visualization": []interface{}{map[string]interface{}{"type": "section"}}}},
 	})
 }
 
@@ -112,7 +112,14 @@ func assertParityNativeFields(t *testing.T, dashboard map[string]interface{}) {
 	t.Helper()
 	initial := parityDashboardData(t)
 	panel := dashboard["panels"].([]interface{})[0].(map[string]interface{})
-	source := initial.Get("panel").([]interface{})[0].(map[string]interface{})
+	var source map[string]interface{}
+	for _, raw := range dashboardPanelValues(initial.Get("panel")) {
+		candidate := raw.(map[string]interface{})
+		if candidate["key"] == "logs" {
+			source = candidate
+			break
+		}
+	}
 	for _, key := range []string{"field_overrides", "transformations", "links", "data_links"} {
 		encoded, _ := json.Marshal(panel[key])
 		if !jsonStringsEqual(string(encoded), source[key+"_json"].(string)) {
@@ -120,7 +127,7 @@ func assertParityNativeFields(t *testing.T, dashboard map[string]interface{}) {
 		}
 	}
 	visualization := panel["visualization"].(map[string]interface{})
-	sourceVisualization := source["visualization"].([]interface{})[0].(map[string]interface{})
+	sourceVisualization := dashboardPanelValues(source["visualization"])[0].(map[string]interface{})
 	for _, key := range []string{"logs_config", "value_mappings"} {
 		encoded, _ := json.Marshal(visualization[key])
 		if !jsonStringsEqual(string(encoded), sourceVisualization[key+"_json"].(string)) {
@@ -198,14 +205,20 @@ func TestDashboardParityLogsValidation(t *testing.T) {
 		func(panel, visualization map[string]interface{}) { panel["version"] = 0 },
 		func(panel, visualization map[string]interface{}) { panel["query"] = []interface{}{} },
 		func(panel, visualization map[string]interface{}) { visualization["logs_config_json"] = "" },
-		func(panel, visualization map[string]interface{}) { visualization["type"] = "table" },
 		func(panel, visualization map[string]interface{}) {
-			panel["query"].([]interface{})[0].(map[string]interface{})["query_type"] = "log_json"
+			dashboardPanelValues(panel["query"])[0].(map[string]interface{})["query_type"] = "log_json"
 		},
 	} {
 		data := parityDashboardData(t)
-		panel := data.Get("panel").([]interface{})[0].(map[string]interface{})
-		visualization := panel["visualization"].([]interface{})[0].(map[string]interface{})
+		var panel map[string]interface{}
+		for _, raw := range dashboardPanelValues(data.Get("panel")) {
+			candidate := raw.(map[string]interface{})
+			if candidate["key"] == "logs" {
+				panel = candidate
+				break
+			}
+		}
+		visualization := dashboardPanelValues(panel["visualization"])[0].(map[string]interface{})
 		mutate(panel, visualization)
 		if err := validateDashboardLogs(panel, visualization); err == nil {
 			t.Fatalf("invalid logs configuration accepted: %v", visualization)

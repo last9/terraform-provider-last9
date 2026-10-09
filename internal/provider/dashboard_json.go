@@ -39,13 +39,17 @@ func dashboardJSONValue(value interface{}) json.RawMessage {
 }
 
 func validateDashboardLogs(panel, visualization map[string]interface{}) error {
-	queries := panel["query"].([]interface{})
+	queries := dashboardPanelValues(panel["query"])
 	isLogs := visualization["type"] == "logs"
 	if !isLogs && len(dashboardJSONValue(visualization["logs_config_json"])) > 0 {
 		return fmt.Errorf("logs_config_json is only valid for logs visualization")
 	}
-	for _, query := range queries {
-		if !isLogs && query.(map[string]interface{})["query_type"] == "log_raw" {
+	for _, rawQuery := range queries {
+		query, ok := rawQuery.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("query block must be a known object")
+		}
+		if !isLogs && query["query_type"] == "log_raw" {
 			return fmt.Errorf("log_raw query is only valid for logs visualization")
 		}
 	}
@@ -56,11 +60,14 @@ func validateDashboardLogs(panel, visualization map[string]interface{}) error {
 }
 
 func validateRawLogsQuery(panel, visualization map[string]interface{}) error {
-	queries := panel["query"].([]interface{})
+	queries := dashboardPanelValues(panel["query"])
 	if panel["version"].(int) < 1 || len(queries) != 1 {
 		return fmt.Errorf("logs visualization requires a V1 panel with exactly one query")
 	}
-	query := queries[0].(map[string]interface{})
+	query, ok := queries[0].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("logs visualization query must be a known object")
+	}
 	if query["telemetry"] != "logs" || (query["query_type"] != "log_ql" && query["query_type"] != "log_raw") {
 		return fmt.Errorf("logs visualization requires a logs query of type log_ql or log_raw")
 	}

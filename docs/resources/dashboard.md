@@ -28,6 +28,8 @@ resource "last9_dashboard" "memory" {
   relative_time = 60 # last 1 hour
 
   panel {
+    key = "container-memory"
+    position = 0
     name = "Container Memory Usage"
     unit = "bytes-iec"
 
@@ -43,10 +45,12 @@ resource "last9_dashboard" "memory" {
 
       stat_config {
         threshold {
+          position = 0
           value = 0
           color = "#22c55e"
         }
         threshold {
+          position = 1
           value = 1000000000 # 1 GB
           color = "#ef4444"
         }
@@ -54,6 +58,7 @@ resource "last9_dashboard" "memory" {
     }
 
     query {
+      position = 0
       name             = "A"
       expr             = "avg(container_memory_usage_bytes)"
       telemetry        = "metrics"
@@ -90,6 +95,8 @@ resource "last9_dashboard" "aws_cost" {
   }
 
   panel {
+    key = "spend-section"
+    position = 0
     name = "Spend at a Glance"
     visualization {
       type       = "section"
@@ -98,6 +105,8 @@ resource "last9_dashboard" "aws_cost" {
   }
 
   panel {
+    key = "total-spend"
+    position = 1
     name = "Total Spend"
     unit = "USD"
 
@@ -113,6 +122,7 @@ resource "last9_dashboard" "aws_cost" {
     }
 
     query {
+      position = 0
       name       = "A"
       expr       = "sum(aws_cost_unblended_USD{aws_account_id=~\"$account\"})"
       telemetry  = "metrics"
@@ -121,6 +131,8 @@ resource "last9_dashboard" "aws_cost" {
   }
 
   panel {
+    key = "cost-by-service"
+    position = 2
     name = "Cost by Service"
     unit = "USD"
 
@@ -142,6 +154,7 @@ resource "last9_dashboard" "aws_cost" {
     }
 
     query {
+      position = 0
       name             = "A"
       expr             = "sum by (aws_service) (aws_cost_unblended_USD)"
       telemetry        = "metrics"
@@ -163,6 +176,8 @@ resource "last9_dashboard" "logs" {
   relative_time = 60
 
   panel {
+    key = "service-log-volume"
+    position = 0
     name      = "Service Log Volume"
     telemetry = "logs"
 
@@ -182,6 +197,7 @@ resource "last9_dashboard" "logs" {
     }
 
     query {
+      position = 0
       name             = "A"
       expr             = "sum by (service) (count_over_time({service=~\".+\"} [1m]))"
       telemetry        = "logs"
@@ -203,6 +219,8 @@ resource "last9_dashboard" "notes" {
   relative_time = 60
 
   panel {
+    key = "dashboard-notes"
+    position = 0
     name = "Dashboard Notes"
 
     layout {
@@ -236,6 +254,8 @@ resource "last9_dashboard" "failing_spans" {
   relative_time = 60
 
   panel {
+    key = "errors-table"
+    position = 0
     name      = "Errors"
     telemetry = "traces"
 
@@ -258,6 +278,7 @@ resource "last9_dashboard" "failing_spans" {
     }
 
     query {
+      position = 0
       name       = "A"
       expr       = jsonencode([
         {
@@ -296,7 +317,7 @@ resource "last9_dashboard" "failing_spans" {
 
 - `region` (String) Region used to look up active integrations for query rendering. Not stored with the dashboard, so changing it does not recreate the resource.
 - `name` (String) Dashboard name.
-- `panel` (Block List, Min: 1) Ordered list of panels. Sections and panels interleave at the position written. See [Panel](#panel).
+- `panel` (Block Set, Min: 1) Dashboard panels identified by `key` and ordered by `position`. See [Panel](#panel).
 
 ### Optional
 
@@ -318,10 +339,12 @@ resource "last9_dashboard" "failing_spans" {
 
 The `panel` block supports:
 
+- `key` (String, Required) Stable Terraform-only identity. Keep it unchanged when renaming or reordering a panel.
+- `position` (Number, Required) Zero-based position in the dashboard's combined panel/section sequence.
 - `name` (String, Required) Panel title.
-- `visualization` (Block List, Max: 1, Required) Visualization config. See [Visualization](#visualization).
-- `layout` (Block List, Max: 1) Position and size in the grid. Required for all non-section panels.
-- `query` (Block List) Queries powering the panel. Required for non-section panels. See [Query](#query).
+- `visualization` (Block Set, Max: 1, Required) Visualization config. See [Visualization](#visualization).
+- `layout` (Block Set, Max: 1) Position and size in the grid. Required for all non-section panels.
+- `query` (Block Set) Queries powering the panel. Required for non-section panels. Each query requires a unique `name` and zero-based `position`. See [Query](#query).
 - `datasource_id` (String) Datasource UUID.
 - `telemetry` (String) Panel-level default telemetry (`metrics` | `logs` | `traces`).
 - `unit` (String) Display unit (e.g., `USD`, `bytes-iec`, `ms`).
@@ -344,10 +367,10 @@ The `visualization` block supports:
 
 - `type` (String, Required) One of `timeseries`, `stat`, `bar`, `table`, `doughnut`, `markdown`, `section`.
 - `full_width` (Boolean) Whether the panel spans full dashboard width.
-- `timeseries_config` (Block List, Max: 1) Optional config for timeseries. Has `display_type` (`line` | `area`).
-- `bar_config` (Block List, Max: 1) Optional config for bar. Has `orientation` (`vertical` | `horizontal`) and `stacked` (Boolean).
-- `stat_config` (Block List, Max: 1) Optional config for stat. Has `threshold` (Block List) entries with `value` (Float) and `color` (String).
-- `markdown_config` (Block List, Max: 1) Required for markdown panels. Has `content` (String), the Markdown body rendered in the panel.
+- `timeseries_config` (Block Set, Max: 1) Optional config for timeseries. Has `display_type` (`line` | `area`).
+- `bar_config` (Block Set, Max: 1) Optional config for bar. Has `orientation` (`vertical` | `horizontal`) and `stacked` (Boolean).
+- `stat_config` (Block Set, Max: 1) Optional config for stat. Has `threshold` (Block Set) entries with unique zero-based `position`, `value` (Float), and `color` (String).
+- `markdown_config` (Block Set, Max: 1) Required for markdown panels. Has `content` (String), the Markdown body rendered in the panel.
 - `table_config_json` (String) Raw `table_config` JSON. The backend stores this as an untyped blob (`columnConfig`, `density`, `thresholds`, `transpose`, etc.); use `jsonencode({...})` so any field set in the UI round-trips verbatim. Invalid JSON fails at plan time.
 
 Section panels (`type = "section"`) must have no `query` and no `layout` blocks.
@@ -358,6 +381,7 @@ Markdown panels (`type = "markdown"`) must have a `layout` block and no `query` 
 The `query` block supports:
 
 - `name` (String, Required) Query identifier (e.g., `A`, `B`).
+- `position` (Number, Required) Zero-based query order within this panel.
 - `expr` (String, Required) Query expression. PromQL for `query_type = "promql"`, LogQL for `log_ql`, or a serialized JSON pipeline for `log_json` / `trace_json`. The provider treats `expr` as opaque.
 - `type` (String) Query type. Defaults to `range`.
 - `unit` (String) Display unit.
@@ -395,9 +419,11 @@ The `metadata` block supports:
 - `type` (String) Defaults to `metrics`.
 - `tags` (List of String) Free-form tags for filtering dashboards.
 
-## Panel Reorder Caveat
+## Stable Panel Identity and Migration
 
-Panels are matched by index across reads. If you reorder `panel { ... }` blocks in HCL, panel UUIDs swap with their neighbors — the panel at index 0 keeps its UUID and gains panel 2's content. External references to panel UUIDs (embed URLs, drill-down links) will then point at the wrong panel. To reorder visually, change the `layout.y` coordinate instead of moving the HCL block.
+Every panel requires a stable Terraform-only `key` and a zero-based `position`. Keep `key` unchanged when renaming or moving a panel; change `position` to reorder it. Positions must be unique and contiguous from zero. The provider sorts panels by position before sending them to the API, regardless of HCL block or set order. Each query and stat threshold similarly requires a zero-based position within its panel.
+
+For existing state, add `key` and `position` to each panel before upgrading. The state upgrader assigns the existing API panel ID as the key and the old list index as position, including query/threshold order. Use these values in HCL. If a legacy panel has no API ID, it receives deterministic `legacy-panel-N`. For an imported dashboard, panel keys default to API IDs. `key` is Terraform-only and is not sent to the API.
 
 ## Import
 
