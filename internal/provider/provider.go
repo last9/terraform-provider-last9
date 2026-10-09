@@ -66,6 +66,8 @@ func New() *schema.Provider {
 			"last9_notification_channel":   resourceNotificationChannel(),
 			"last9_remapping_rule":         resourceRemappingRule(),
 			"last9_dashboard":              resourceDashboard(),
+			"last9_logs_to_metrics":        resourceLogsToMetrics(),
+			"last9_traces_to_metrics":      resourceTracesToMetrics(),
 			"last9_synthetic_check":        resourceSyntheticCheck(),
 			"last9_changeboard":            resourceChangeboard(),
 			"last9_sensitive_data_rule":    resourceSensitiveDataRule(),
