@@ -167,7 +167,7 @@ type ChangeBoardRelationshipNode struct {
 }
 
 type ChangeBoardProperties struct {
-	Granularity string `json:"granularity,omitempty"`
+	Granularity string `json:"granularity"`
 }
 
 type ChangeBoardRequest struct {
@@ -177,8 +177,8 @@ type ChangeBoardRequest struct {
 	Groups        []ChangeBoardGroup            `json:"groups"`
 	OwnerID       string                        `json:"owner_id"`
 	OwnerType     string                        `json:"owner_type"`
-	Relationships []ChangeBoardRelationshipNode `json:"relationships,omitempty"`
-	Properties    *ChangeBoardProperties        `json:"properties,omitempty"`
+	Relationships []ChangeBoardRelationshipNode `json:"relationships"`
+	Properties    *ChangeBoardProperties        `json:"properties"`
 }
 
 type ChangeBoard struct {
@@ -409,7 +409,7 @@ type PhysicalIndexProperties struct {
 	Destination     string              `json:"destination,omitempty"`
 	BucketName      *string             `json:"bucket_name,omitempty"`
 	Retain          bool                `json:"retain"`
-	RetentionPeriod *int                `json:"retention_period,omitempty"`
+	RetentionPeriod *int                `json:"retention_period"`
 }
 
 type PhysicalIndexRequest struct {

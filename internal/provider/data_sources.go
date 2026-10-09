@@ -90,12 +90,6 @@ func dataSourceEntity() *schema.Resource {
 				Computed:    true,
 				Description: "Whether UI edits are disabled",
 			},
-			"notification_channels": {
-				Type:        schema.TypeList,
-				Computed:    true,
-				Description: "Notification channel IDs or names",
-				Elem:        &schema.Schema{Type: schema.TypeString},
-			},
 		},
 	}
 }
@@ -133,7 +127,6 @@ func dataSourceEntityRead(ctx context.Context, d *schema.ResourceData, m interfa
 	d.Set("ui_readonly", entity.UIReadonly)
 	d.Set("tags", entity.Tags)
 	d.Set("labels", entity.Labels)
-	d.Set("notification_channels", entity.NotificationChannels)
 
 	return nil
 }
@@ -241,16 +234,18 @@ func dataSourceCluster() *schema.Resource {
 				Description: "Region to look up clusters in",
 			},
 			"id": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				Description: "Cluster ID. If omitted with name, returns the default cluster.",
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"name"},
+				Description:   "Cluster ID. If omitted with name, returns the default cluster.",
 			},
 			"name": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				Description: "Cluster name",
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"id"},
+				Description:   "Cluster name",
 			},
 			"default": {
 				Type:        schema.TypeBool,
@@ -302,7 +297,6 @@ func dataSourceClusterRead(ctx context.Context, d *schema.ResourceData, m interf
 	d.SetId(found.ID)
 	_ = d.Set("id", found.ID)
 	_ = d.Set("name", found.Name)
-	_ = d.Set("region", found.Region)
 	_ = d.Set("default", found.IsDefault)
 	return nil
 }
@@ -312,14 +306,16 @@ func dataSourceDatasource() *schema.Resource {
 		ReadContext: dataSourceDatasourceRead,
 		Schema: map[string]*schema.Schema{
 			"id": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"name"},
 			},
 			"name": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"id"},
 			},
 			"type": {
 				Type:     schema.TypeString,
@@ -373,11 +369,8 @@ func dataSourceDatasourceRead(ctx context.Context, d *schema.ResourceData, m int
 				break
 			}
 		}
-		if found == nil && len(list) > 0 {
-			found = &list[0]
-		}
 		if found == nil {
-			return diag.FromErr(fmt.Errorf("no datasources found"))
+			return diag.FromErr(fmt.Errorf("no default datasource found"))
 		}
 	}
 
@@ -395,16 +388,20 @@ func dataSourceUser() *schema.Resource {
 		ReadContext: dataSourceUserRead,
 		Schema: map[string]*schema.Schema{
 			"id": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				Description: "User ID",
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"email"},
+				AtLeastOneOf:  []string{"id", "email"},
+				Description:   "User ID",
 			},
 			"email": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				Description: "User email",
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ConflictsWith: []string{"id"},
+				AtLeastOneOf:  []string{"id", "email"},
+				Description:   "User email",
 			},
 			"name": {
 				Type:     schema.TypeString,

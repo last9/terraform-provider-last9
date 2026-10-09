@@ -66,8 +66,6 @@ func resourceAlertSnoozeRead(ctx context.Context, d *schema.ResourceData, m inte
 
 	_ = d.Set("entity_id", entityID)
 	_ = d.Set("alert_snoozed_until", resp.AlertSnoozedUntil)
-	// Sync until from API so a remotely cleared snooze produces a repair plan.
-	_ = d.Set("until", resp.AlertSnoozedUntil)
 	return nil
 }
 

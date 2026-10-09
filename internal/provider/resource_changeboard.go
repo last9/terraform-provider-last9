@@ -197,12 +197,8 @@ func buildChangeBoardRequest(d *schema.ResourceData) *client.ChangeBoardRequest 
 	if req.Groups == nil {
 		req.Groups = []client.ChangeBoardGroup{}
 	}
-	if rels := expandChangeBoardRelationships(d.Get("relationship").([]interface{})); len(rels) > 0 {
-		req.Relationships = rels
-	}
-	if g, ok := d.GetOk("granularity"); ok && g.(string) != "" {
-		req.Properties = &client.ChangeBoardProperties{Granularity: g.(string)}
-	}
+	req.Relationships = expandChangeBoardRelationships(d.Get("relationship").([]interface{}))
+	req.Properties = &client.ChangeBoardProperties{Granularity: d.Get("granularity").(string)}
 	return req
 }
 

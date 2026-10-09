@@ -19,6 +19,7 @@ func resourceColdStorageBucket() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
+		CustomizeDiff: validateColdStorageBucket,
 		Schema: map[string]*schema.Schema{
 			"region": {
 				Type:     schema.TypeString,
@@ -73,7 +74,36 @@ func resourceColdStorageBucket() *schema.Resource {
 	}
 }
 
+func validateColdStorageBucket(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	return validateColdStorageBucketValues(d.Get, d.NewValueKnown)
+}
+
+func validateColdStorageBucketValues(get func(string) interface{}, known func(string) bool) error {
+	switch get("auth_type").(string) {
+	case "credentials":
+		if (known("aws_access_key") && get("aws_access_key").(string) == "") ||
+			(known("aws_secret_key") && get("aws_secret_key").(string) == "") {
+			return fmt.Errorf("aws_access_key and aws_secret_key are required when auth_type is credentials")
+		}
+		if known("aws_role") && get("aws_role").(string) != "" {
+			return fmt.Errorf("aws_role cannot be set when auth_type is credentials")
+		}
+	case "role":
+		if known("aws_role") && get("aws_role").(string) == "" {
+			return fmt.Errorf("aws_role is required when auth_type is role")
+		}
+		if (known("aws_access_key") && get("aws_access_key").(string) != "") ||
+			(known("aws_secret_key") && get("aws_secret_key").(string) != "") {
+			return fmt.Errorf("aws_access_key and aws_secret_key cannot be set when auth_type is role")
+		}
+	}
+	return nil
+}
+
 func resourceColdStorageBucketCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	if err := validateColdStorageBucketValues(d.Get, func(string) bool { return true }); err != nil {
+		return diag.FromErr(err)
+	}
 	c := m.(*client.Client)
 	region := d.Get("region").(string)
 
@@ -130,6 +160,9 @@ func resourceColdStorageBucketRead(ctx context.Context, d *schema.ResourceData, 
 }
 
 func resourceColdStorageBucketUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	if err := validateColdStorageBucketValues(d.Get, func(string) bool { return true }); err != nil {
+		return diag.FromErr(err)
+	}
 	c := m.(*client.Client)
 	region, id, err := parseRegionID(d.Id())
 	if err != nil {

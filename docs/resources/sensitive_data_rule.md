@@ -23,6 +23,28 @@ resource "last9_sensitive_data_rule" "pii" {
 }
 ```
 
+## Schema
+
+### Required
+
+- `action_name` (String) Action when a match is found. Valid values: `none`, `redact`. Sent as `properties.action.name`.
+- `name` (String) Name of the rule.
+- `order` (Number) Rule evaluation order. Minimum value: 1.
+- `region` (String) Last9 region. Sent as the `region` query parameter and used in the resource ID. Changing this forces a new resource.
+- `telemetry` (String) Telemetry type. Valid values: `logs`.
+
+### Optional
+
+- `labels` (Map of String) Maps to the API `properties.labels` field.
+- `scan_credit_card` (Boolean) Scan for credit card numbers. Sent as `properties.scan_rules.credit_card_number`. Default: `false`.
+- `scan_email` (Boolean) Scan for email addresses. Sent as `properties.scan_rules.email`. Default: `false`.
+- `scan_phone_number` (Boolean) Scan for phone numbers. Sent as `properties.scan_rules.phone_number`. Default: `false`.
+
+### Read-Only
+
+- `id` (String) The ID of this resource, in the format `region:id`.
+- `status` (String) Status returned by the API.
+
 ## Import
 
 ```shell

@@ -18,6 +18,18 @@ resource "last9_alert_snooze" "maintenance" {
 }
 ```
 
+## Schema
+
+### Required
+
+- `entity_id` (String) Entity (alert group) ID to snooze. Changing this forces a new resource.
+- `until` (Number) Unix timestamp until which alerts are snoozed. Set to 0 to clear. The configured value is preserved on read.
+
+### Read-Only
+
+- `id` (String) The ID of this resource. Same as `entity_id`.
+- `alert_snoozed_until` (Number) Effective snooze end timestamp returned by the API. This is separate from the configured `until` value.
+
 ## Import
 
 ```shell
