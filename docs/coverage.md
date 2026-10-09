@@ -28,7 +28,7 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Domain | Last9 API | Terraform | l9iac | Datadog analogue | Status |
 |--------|-----------|-----------|-------|------------------|--------|
 | Alert groups | `/entities` | `last9_entity` | entity | service catalog / monitor grouping | ✅ |
-| Metric alerts | `/entities/{id}/alert-rules` + KPIs | `last9_alert` | alert | `datadog_monitor` | ✅ |
+| Metric alerts (including recurring mute schedules) | `/entities/{id}/alert-rules` + KPIs | `last9_alert` | alert | `datadog_monitor` | ✅ |
 | Log alerts | `/logs_settings/scheduled_search` | `last9_scheduled_search_alert` | — | `datadog_monitor` (log) | ✅ |
 | Entity snooze | `/entities/{id}/snooze`, `/alert-rules/snooze` | `last9_alert_snooze` | — | `datadog_downtime` | ✅ |
 | Notification channels | `/notification_settings` | `last9_notification_channel` | notification_channel | integrations / monitor notify | ✅ |

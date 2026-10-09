@@ -123,6 +123,7 @@ resource "last9_alert" "service_down" {
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.
 - `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `true`.
+- `recurring_mute_schedule` (Block) Weekly mute windows for this alert. Omit the block to preserve an existing schedule. To clear a schedule, use `recurring_mute_schedule = []`; Terraform nested blocks cannot distinguish `null` from omission. See [Recurring Mute Schedule](#recurring-mute-schedule).
 - `notification_channels` (List of String, **Deprecated**) No longer does anything — kept only for backward compatibility with existing configurations. It makes no API calls: setting it does not attach a channel, and its value is never read back from the API. The Last9 API binds channels to an `(entity, severity)` pair with no per-alert-rule ownership, and two Terraform resources managing the same entity/severity cannot coexist safely (one's drift detection can't distinguish a channel the other legitimately attached from an unmanaged one). Manage notification channels on `last9_entity.notification_channels` instead.
 - `properties` (Block) Additional alert properties. See [Properties](#properties).
 
@@ -141,6 +142,29 @@ The `properties` block supports:
 
 - `runbook_url` (String) Link to runbook for responders.
 - `annotations` (Map of String) Custom key-value annotations. Supports dynamic template variables.
+
+### Recurring Mute Schedule
+
+The `recurring_mute_schedule` block supports one timezone and up to 20 weekly windows:
+
+```terraform
+recurring_mute_schedule {
+  enabled  = true
+  timezone = "UTC"
+
+  windows {
+    weekdays   = ["mon", "wed"]
+    start_time = "09:00"
+    end_time   = "17:00"
+  }
+}
+```
+
+- `enabled` (Boolean) Enable or disable the schedule.
+- `timezone` (String) Non-empty IANA timezone.
+- `windows` (Block List) One to 20 weekly windows.
+- `weekdays` (List of String) One or more of `sun`, `mon`, `tue`, `wed`, `thu`, `fri`, `sat`.
+- `start_time`, `end_time` (String) 24-hour `HH:MM` times. Windows may span midnight.
 
 ### Dynamic Annotations
 
