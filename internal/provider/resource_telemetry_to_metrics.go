@@ -277,6 +277,16 @@ func buildTelemetryToMetricsRule(cfg telemetryToMetricsConfig, d *schema.Resourc
 	// aggregate must output "result". When the user does not supply
 	// resultant_query, derive it from query by renaming that terminal output.
 	resultantQuery := d.Get("resultant_query").(string)
+	if rawConfig := d.GetRawConfig(); !rawConfig.IsNull() {
+		configuredResultant := rawConfig.GetAttr("resultant_query")
+		if configuredResultant.IsKnown() && !configuredResultant.IsNull() {
+			resultantQuery = configuredResultant.AsString()
+		} else if d.HasChange("query") {
+			// Optional+Computed retains the prior state value when omitted. Rebuild
+			// the executed pipeline from the new authored query in that case.
+			resultantQuery = deriveResultantQuery(query)
+		}
+	}
 	if resultantQuery == "" {
 		resultantQuery = deriveResultantQuery(query)
 	}
