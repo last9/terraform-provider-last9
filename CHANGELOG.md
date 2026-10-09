@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### Added
 
 - **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.

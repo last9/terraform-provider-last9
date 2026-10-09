@@ -893,7 +893,7 @@ type ScheduledSearchProperties struct {
 	Query             string                    `json:"query"` // JSON encoded pipeline
 	SavedSearchID     string                    `json:"saved_search_id,omitempty"`
 	PostProcessor     []PostProcessor           `json:"post_processor"`
-	ResultantQuery    string                    `json:"resultant_query,omitempty"` // Merged query pipeline executed by the scheduled-search runner
+	ResultantQuery    string                    `json:"resultant_query,omitempty"` // Full executable aggregate pipeline sent to the scheduled-search runner
 	SearchFrequency   int                       `json:"search_frequency"`
 	AlertDestinations []NotificationDestination `json:"alert_destinations"`
 	MetricName        string                    `json:"metric_name,omitempty"`

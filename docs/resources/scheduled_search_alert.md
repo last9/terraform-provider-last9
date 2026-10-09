@@ -149,11 +149,21 @@ resource "last9_scheduled_search_alert" "errors_by_service" {
 - `region` (String) Region for the alert (e.g., "ap-south-1").
 - `name` (String) Name of the scheduled search alert.
 - `query` (String) JSON-encoded LogJSON query pipeline.
-- `resultant_query` (String) JSON-encoded merged query pipeline executed by the scheduled-search runner, including filter stages from `query` and the aggregate stage from `post_processor`. The final aggregate stage must use `as = "result"` (the runner reads the `result` metric key).
+- `post_processor` (Block) Post-processor configuration. See [Post Processor](#post-processor) below.
+- `search_frequency` (Number) Search frequency in seconds (60-86400).
+- `threshold` (Block) Threshold configuration. See [Threshold](#threshold) below.
+- `alert_destinations` (List of Number) List of notification destination IDs.
+
+### Optional
+
+- `query_type` (String) Query type. Default: `logjson-aggregate`.
+- `physical_index` (String) Physical index to search. Default: `logs`.
+- `telemetry` (String) Telemetry type. Default: `logs`.
+- `resultant_query` (String, Optional+Computed) Full executable aggregate pipeline. Required for aggregate creates and when `query` or `post_processor` changes; omitted configuration preserves the imported value on unrelated edits.
 
 ### Resultant Query
 
-`resultant_query` is the pipeline the scheduled-search runner executes. Merge the filter stages from `query` with the aggregate stage from `post_processor`. The aggregate output alias must be `"result"` — `post_processor` may use a different display name, but `resultant_query` must match what the runner expects.
+Supply the full pipeline the scheduled-search runner executes, including filter and aggregate stages. The provider does not compile it from `query` and `post_processor`. It must be a non-empty JSON array of objects, and the aggregate output alias must be `"result"` (the runner reads the `result` metric key).
 
 ```terraform
 resultant_query = jsonencode([
@@ -170,16 +180,6 @@ resultant_query = jsonencode([
   }
 ])
 ```
-- `post_processor` (Block) Post-processor configuration. See [Post Processor](#post-processor) below.
-- `search_frequency` (Number) Search frequency in seconds (60-86400).
-- `threshold` (Block) Threshold configuration. See [Threshold](#threshold) below.
-- `alert_destinations` (List of Number) List of notification destination IDs.
-
-### Optional
-
-- `query_type` (String) Query type. Default: `logjson-aggregate`.
-- `physical_index` (String) Physical index to search. Default: `logs`.
-- `telemetry` (String) Telemetry type. Default: `logs`.
 
 ### Read-Only
 

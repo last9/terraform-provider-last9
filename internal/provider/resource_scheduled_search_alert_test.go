@@ -199,7 +199,11 @@ func TestFlattenPostProcessors(t *testing.T) {
 }
 
 func TestScheduledSearchAlert_ResultantQueryValidation(t *testing.T) {
-	fn := resourceScheduledSearchAlert().Schema["resultant_query"].ValidateFunc
+	schema := resourceScheduledSearchAlert().Schema["resultant_query"]
+	if !schema.Optional || !schema.Computed || schema.Required {
+		t.Fatalf("resultant_query should be Optional+Computed, got %#v", schema)
+	}
+	fn := schema.ValidateFunc
 
 	tests := []struct {
 		name    string
@@ -219,6 +223,36 @@ func TestScheduledSearchAlert_ResultantQueryValidation(t *testing.T) {
 		{
 			name:    "empty array",
 			input:   "[]",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace",
+			input:   "   ",
+			wantErr: true,
+		},
+		{
+			name:    "null",
+			input:   "null",
+			wantErr: true,
+		},
+		{
+			name:    "null stage",
+			input:   `[null]`,
+			wantErr: true,
+		},
+		{
+			name:    "scalar stage",
+			input:   `[{"type":"filter"}, 1]`,
+			wantErr: true,
+		},
+		{
+			name:    "empty object stage",
+			input:   `[{}]`,
+			wantErr: false,
+		},
+		{
+			name:    "string stage",
+			input:   `["filter"]`,
 			wantErr: true,
 		},
 		{

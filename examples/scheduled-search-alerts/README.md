@@ -55,7 +55,7 @@ post_processor {
 
 ## Resultant Query
 
-`resultant_query` is required. It is the merged pipeline the scheduled-search runner executes: filter stages from `query` plus the aggregate stage from `post_processor`. The final aggregate stage must use `as = "result"` (the runner reads the `result` metric key).
+For aggregate searches, provide `resultant_query` on create and whenever `query` or `post_processor` changes. It is the full pipeline the scheduled-search runner executes, with a non-empty array of object stages and final aggregate alias `as = "result"`. After import, the provider preserves the computed pipeline on unrelated edits.
 
 ```hcl
 resultant_query = jsonencode([

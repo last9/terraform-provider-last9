@@ -68,20 +68,12 @@ func resourceScheduledSearchAlert() *schema.Resource {
 			},
 			"resultant_query": {
 				Type:        schema.TypeString,
-				Required:    true,
-				Description: "Merged log query pipeline, including the post-processor stage, executed by the scheduled-search runner. The final aggregate stage must use as = \"result\" so the runner can read the metric value.",
+				Optional:    true,
+				Computed:    true,
+				Description: "Full executable aggregate pipeline. Required for aggregate searches; when omitted after import, the stored pipeline is preserved unless query or post_processor changes.",
 				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := strings.TrimSpace(val.(string))
-					if v == "" {
-						errs = append(errs, fmt.Errorf("%q must not be empty", key))
-						return
-					}
-					var pipeline []interface{}
-					if err := json.Unmarshal([]byte(v), &pipeline); err != nil {
-						errs = append(errs, fmt.Errorf("%q must be valid JSON array: %s", key, err))
-					}
-					if len(pipeline) == 0 {
-						errs = append(errs, fmt.Errorf("%q must contain at least one pipeline stage", key))
+					if err := validateResultantQuery(val.(string)); err != nil {
+						errs = append(errs, fmt.Errorf("%q %w", key, err))
 					}
 					return
 				},
@@ -177,7 +169,35 @@ func resourceScheduledSearchAlert() *schema.Resource {
 				},
 			},
 		},
+		CustomizeDiff: validateScheduledSearchResultantQueryDiff,
 	}
+}
+
+func validateScheduledSearchResultantQueryDiff(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	if d.Get("query_type").(string) != "logjson-aggregate" {
+		return nil
+	}
+	raw := d.GetRawConfig()
+	if raw.IsNull() {
+		return nil
+	}
+	value := raw.GetAttr("resultant_query")
+	if !value.IsKnown() {
+		return nil
+	}
+	if value.IsNull() {
+		if d.Id() == "" {
+			return fmt.Errorf("resultant_query is required for logjson-aggregate; configure the full executable pipeline")
+		}
+		if d.HasChanges("query", "post_processor", "query_type") {
+			return fmt.Errorf("resultant_query must be explicitly updated when query or post_processor changes")
+		}
+		return nil
+	}
+	if err := validateResultantQuery(value.AsString()); err != nil {
+		return fmt.Errorf("resultant_query %w", err)
+	}
+	return nil
 }
 
 func resourceScheduledSearchAlertCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
@@ -317,6 +337,9 @@ func resourceScheduledSearchAlertDelete(ctx context.Context, d *schema.ResourceD
 // Helper functions
 
 func buildScheduledSearchAlert(d *schema.ResourceData, apiClient *client.Client) (*client.ScheduledSearchAlert, error) {
+	if err := validateScheduledSearchResultantQuery(d); err != nil {
+		return nil, err
+	}
 	// Get basic fields
 	name := d.Get("name").(string)
 	queryType := d.Get("query_type").(string)
@@ -370,6 +393,60 @@ func buildScheduledSearchAlert(d *schema.ResourceData, apiClient *client.Client)
 	}
 
 	return alert, nil
+}
+
+func validateScheduledSearchResultantQuery(d *schema.ResourceData) error {
+	if d.Get("query_type").(string) != "logjson-aggregate" {
+		return nil
+	}
+
+	raw := d.GetRawConfig()
+	if !raw.IsNull() {
+		value := raw.GetAttr("resultant_query")
+		if !value.IsKnown() {
+			return fmt.Errorf("resultant_query must be known when applying a scheduled search")
+		}
+		if !value.IsNull() && strings.TrimSpace(value.AsString()) == "" {
+			return fmt.Errorf("resultant_query must not be empty for logjson-aggregate")
+		}
+		if value.IsNull() {
+			if d.Id() != "" && (d.HasChange("query") || d.HasChange("post_processor") || d.HasChange("query_type")) {
+				return fmt.Errorf("resultant_query must be explicitly updated when query or post_processor changes")
+			}
+			if d.Id() == "" || d.HasChange("query_type") {
+				return fmt.Errorf("resultant_query is required for logjson-aggregate; configure the full executable pipeline")
+			}
+			// The computed value from Read is retained for unrelated edits.
+			if strings.TrimSpace(d.Get("resultant_query").(string)) == "" {
+				return fmt.Errorf("resultant_query is missing from state; refresh or re-import before updating")
+			}
+		}
+	}
+	if err := validateResultantQuery(d.Get("resultant_query").(string)); err != nil {
+		return fmt.Errorf("resultant_query %w", err)
+	}
+	return nil
+}
+
+func validateResultantQuery(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("must not be empty")
+	}
+	var pipeline []json.RawMessage
+	if err := json.Unmarshal([]byte(value), &pipeline); err != nil {
+		return fmt.Errorf("must be valid JSON array: %w", err)
+	}
+	if len(pipeline) == 0 {
+		return fmt.Errorf("must contain at least one pipeline stage")
+	}
+	for i, stage := range pipeline {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(stage, &object); err != nil || object == nil {
+			return fmt.Errorf("stage %d must be a JSON object", i)
+		}
+	}
+	return nil
 }
 
 func expandPostProcessors(raw []interface{}) ([]client.PostProcessor, error) {
