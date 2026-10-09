@@ -61,6 +61,12 @@ func resourceNotificationChannel() *schema.Resource {
 					Type: schema.TypeString,
 				},
 			},
+			"webhook_ca_certificate": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Sensitive:   true,
+				Description: "CA certificate used to verify generic webhook TLS.",
+			},
 			"slack_app_mode": {
 				Type:        schema.TypeBool,
 				Optional:    true,
@@ -108,6 +114,9 @@ func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m 
 	if len(headers) > 0 && channelType != "generic_webhook" {
 		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
 	}
+	if _, configured := d.GetOkExists("webhook_ca_certificate"); configured && channelType != "generic_webhook" {
+		return fmt.Errorf("webhook_ca_certificate can only be specified for generic_webhook type, got type: %s", channelType)
+	}
 
 	if slackAppMode && channelType != "slack" {
 		return fmt.Errorf("slack_app_mode can only be set for slack type, got type: %s", channelType)
@@ -144,6 +153,11 @@ func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 				headers[k] = v.(string)
 			}
 			prop.WebhookHeaders = headers
+			hasValue = true
+		}
+		if _, ok := d.GetOkExists("webhook_ca_certificate"); ok {
+			certificate := d.Get("webhook_ca_certificate").(string)
+			prop.WebhookCACertificate = &certificate
 			hasValue = true
 		}
 	}
@@ -222,6 +236,9 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 					d.Set("headers", headers)
 				}
 			}
+		}
+		if certificate, ok := channel.Property["webhook_ca_certificate"].(string); ok {
+			d.Set("webhook_ca_certificate", certificate)
 		}
 	}
 

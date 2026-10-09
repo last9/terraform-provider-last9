@@ -1301,6 +1301,9 @@ type KPIUpdateRequest struct {
 type NotificationSettingProperty struct {
 	// WebhookHeaders holds custom headers to be sent with webhook requests (only for generic_webhook type)
 	WebhookHeaders map[string]string `json:"webhook_headers,omitempty"`
+	// WebhookCACertificate is the optional CA certificate used to verify generic webhook TLS.
+	// A non-nil empty value clears a previously configured certificate.
+	WebhookCACertificate *string `json:"webhook_ca_certificate,omitempty"`
 	// SlackAppMode marks a Slack channel as delivered via the Slack App (bot token + chat.postMessage)
 	// instead of incoming webhooks. When true, destination must be a Slack channel ID (e.g. C0123456789).
 	SlackAppMode bool `json:"slack_app_mode,omitempty"`
