@@ -21,6 +21,12 @@ func resourceColdStorageBucket() *schema.Resource {
 		},
 		CustomizeDiff: validateColdStorageBucket,
 		Schema: map[string]*schema.Schema{
+			"storage_provider": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				Default:      "s3",
+				ValidateFunc: validation.StringInSlice([]string{"s3", "gcs"}, false),
+			},
 			"region": {
 				Type:     schema.TypeString,
 				Required: true,
@@ -79,6 +85,9 @@ func validateColdStorageBucket(ctx context.Context, d *schema.ResourceDiff, m in
 }
 
 func validateColdStorageBucketValues(get func(string) interface{}, known func(string) bool) error {
+	if known("storage_provider") && known("auth_type") && get("storage_provider").(string) == "gcs" && get("auth_type").(string) == "role" {
+		return fmt.Errorf("auth_type role is not supported when storage_provider is gcs")
+	}
 	switch get("auth_type").(string) {
 	case "credentials":
 		if (known("aws_access_key") && get("aws_access_key").(string) == "") ||
@@ -140,6 +149,11 @@ func resourceColdStorageBucketRead(ctx context.Context, d *schema.ResourceData, 
 
 	_ = d.Set("region", region)
 	_ = d.Set("name", resp.Name)
+	provider := resp.Properties.Provider
+	if provider == "" {
+		provider = "s3"
+	}
+	_ = d.Set("storage_provider", provider)
 	_ = d.Set("aws_region", resp.Properties.AWSRegion)
 	_ = d.Set("aws_bucket", resp.Properties.AWSBucket)
 	_ = d.Set("auth_type", resp.Properties.AuthType)
@@ -153,7 +167,7 @@ func resourceColdStorageBucketRead(ctx context.Context, d *schema.ResourceData, 
 	if resp.Properties.AWSAccessKey != "" {
 		_ = d.Set("aws_access_key", resp.Properties.AWSAccessKey)
 	}
-	if resp.Properties.AWSSecretKey != "" {
+	if resp.Properties.AWSSecretKey != "" && resp.Properties.AWSSecretKey != "********" {
 		_ = d.Set("aws_secret_key", resp.Properties.AWSSecretKey)
 	}
 	return nil
@@ -194,6 +208,7 @@ func resourceColdStorageBucketDelete(ctx context.Context, d *schema.ResourceData
 
 func buildColdStorageBucketRequest(d *schema.ResourceData) *client.ColdStorageBucketRequest {
 	props := client.ColdStorageBucketProperties{
+		Provider:  d.Get("storage_provider").(string),
 		Default:   d.Get("default").(bool),
 		AWSRegion: d.Get("aws_region").(string),
 		AWSBucket: d.Get("aws_bucket").(string),

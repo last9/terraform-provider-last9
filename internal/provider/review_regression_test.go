@@ -266,6 +266,8 @@ func TestReviewColdStorageBucketValidatesAuthentication(t *testing.T) {
 		"role rejects credentials":      {map[string]interface{}{"auth_type": "role", "aws_role": "role", "aws_access_key": "key", "aws_secret_key": "secret"}, false},
 		"valid credentials":             {map[string]interface{}{"auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret"}, true},
 		"valid role":                    {map[string]interface{}{"auth_type": "role", "aws_role": "role"}, true},
+		"gcs rejects role":              {map[string]interface{}{"storage_provider": "gcs", "auth_type": "role", "aws_role": "role"}, false},
+		"gcs accepts credentials":       {map[string]interface{}{"storage_provider": "gcs", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret"}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			config := make(map[string]interface{}, len(base)+len(tc.values))
@@ -280,6 +282,57 @@ func TestReviewColdStorageBucketValidatesAuthentication(t *testing.T) {
 				t.Fatalf("validation error = %v, valid = %v", err, tc.valid)
 			}
 		})
+	}
+}
+
+func TestReviewColdStorageBucketProviderDefaultsToS3AndIsSerialized(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret",
+	})
+	if got := d.Get("storage_provider"); got != "s3" {
+		t.Fatalf("storage_provider default = %q, want s3", got)
+	}
+	if got := buildColdStorageBucketRequest(d).Properties.Provider; got != "s3" {
+		t.Fatalf("request provider = %q, want s3", got)
+	}
+}
+
+func TestReviewColdStorageBucketReadPreservesMaskedSecret(t *testing.T) {
+	for _, secret := range []string{"", "********"} {
+		t.Run(fmt.Sprintf("%q", secret), func(t *testing.T) {
+			d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+				"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "configured-secret",
+			})
+			d.SetId("us-east-1:bucket-1")
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"id":"bucket-1","name":"bucket","properties":{"provider":"gcs","aws_region":"us-east-1","aws_bucket":"bucket","auth_type":"credentials","aws_access_key":"key","aws_secret_key":%q},"status":"active"}`, secret)
+			})
+			if ds := resourceColdStorageBucketRead(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			if got := d.Get("aws_secret_key"); got != "configured-secret" {
+				t.Fatalf("aws_secret_key = %q, want configured value", got)
+			}
+			if got := d.Get("storage_provider"); got != "gcs" {
+				t.Fatalf("storage_provider = %q, want gcs", got)
+			}
+		})
+	}
+}
+
+func TestReviewColdStorageBucketReadDefaultsMissingProviderToS3(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "role", "aws_role": "role",
+	})
+	d.SetId("us-east-1:bucket-1")
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"bucket-1","name":"bucket","properties":{"aws_region":"us-east-1","aws_bucket":"bucket","auth_type":"role","aws_role":"role"},"status":"active"}`)
+	})
+	if ds := resourceColdStorageBucketRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if got := d.Get("storage_provider"); got != "s3" {
+		t.Fatalf("storage_provider = %q, want s3", got)
 	}
 }
 

@@ -42,7 +42,7 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Sensitive data | `/otel_settings/sensitive_data` | `last9_sensitive_data_rule` | — | logs scrubbing | ✅ |
 | Rehydration | `/otel_settings/rehydration` | `last9_rehydration` | — | logs archive rehydrate | ✅ |
 | Physical index | `/otel_settings/physical_index` | `last9_physical_index` | — | `datadog_logs_index` | ✅ |
-| Cold storage bucket | `/otel_settings/cold_storage/bucket` | `last9_cold_storage_bucket` | — | logs archives | ✅ |
+| Cold storage bucket | `/otel_settings/cold_storage/bucket` | `last9_cold_storage_bucket` | — | logs archives | ✅ S3/GCS |
 | Cold storage backup | `/otel_settings/cold_storage/backup` | `last9_cold_storage_backup` | — | logs archives | ✅ |
 | S3 ingest | `/otel_settings/s3_ingest` | `last9_s3_ingest` | — | logs archives ingest | ✅ |
 | Streaming aggregations | `/clusters/{id}/streaming_aggregations` | `last9_streaming_aggregation` | — | metrics pipelines | ✅ |
