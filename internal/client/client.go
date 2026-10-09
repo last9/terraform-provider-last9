@@ -924,7 +924,7 @@ type ScheduledSearchProperties struct {
 	Query             string                    `json:"query"` // JSON encoded pipeline
 	SavedSearchID     string                    `json:"saved_search_id,omitempty"`
 	PostProcessor     []PostProcessor           `json:"post_processor"`
-	ResultantQuery    string                    `json:"resultant_query,omitempty"` // Computed by server
+	ResultantQuery    string                    `json:"resultant_query,omitempty"` // Full executable aggregate pipeline sent to the scheduled-search runner
 	SearchFrequency   int                       `json:"search_frequency"`
 	AlertDestinations []NotificationDestination `json:"alert_destinations"`
 	MetricName        string                    `json:"metric_name,omitempty"`
@@ -1330,6 +1330,9 @@ type KPIUpdateRequest struct {
 
 // NotificationSettingProperty contains optional properties for notification channels
 type NotificationSettingProperty struct {
+	// ServiceOwnerHandle contains comma-separated Slack handles or email addresses.
+	// A non-nil empty value clears a previously configured handle list.
+	ServiceOwnerHandle *string `json:"service_owner_handle,omitempty"`
 	// WebhookHeaders holds custom headers to be sent with webhook requests (only for generic_webhook type)
 	WebhookHeaders map[string]string `json:"webhook_headers,omitempty"`
 	// SlackAppMode marks a Slack channel as delivered via the Slack App (bot token + chat.postMessage)

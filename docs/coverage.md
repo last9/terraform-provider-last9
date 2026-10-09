@@ -31,7 +31,7 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Metric alerts (including recurring mute schedules) | `/entities/{id}/alert-rules` + KPIs | `last9_alert` | alert | `datadog_monitor` | ✅ |
 | Log alerts | `/logs_settings/scheduled_search` | `last9_scheduled_search_alert` | — | `datadog_monitor` (log) | ✅ |
 | Entity snooze | `/entities/{id}/snooze`, `/alert-rules/snooze` | `last9_alert_snooze` | — | `datadog_downtime` | ✅ |
-| Notification channels | `/notification_settings` | `last9_notification_channel` | notification_channel | integrations / monitor notify | ✅ |
+| Notification channels, including Slack/email service owner mentions | `/notification_settings` | `last9_notification_channel` | notification_channel | integrations / monitor notify | ✅ |
 | Dashboards | `/dashboards` | `last9_dashboard` | — | `datadog_dashboard` | ✅ |
 | Synthetics | `/synthetic/checks` | `last9_synthetic_check` | — | `datadog_synthetics_test` | ✅ |
 | Changeboards | `/changeboards` | `last9_changeboard` | — | (no direct) | ✅ |
@@ -51,6 +51,8 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | Users | `/users`, `/users/invite`, `/users/{id}/roles` | `last9_user` / `data.last9_user` | — | `datadog_user` | ✅ |
 | SLOs | `/entities/{id}/slo` | — | slo | `datadog_service_level_objective` | ❌ skipped |
 | Macros | `/clusters/{id}/macros` | — | — | — | ❌ skipped |
+
+Aggregate scheduled searches require the full executable `resultant_query` pipeline on create and when the source query or post-processor changes. Imported pipelines are preserved on unrelated edits.
 
 ## Datadog parity (observability core)
 
