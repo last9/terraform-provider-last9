@@ -7,13 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
 ### Added
 
 - **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.
 
 ### Changed
 
-- **last9_scheduled_search_alert** - `resultant_query` is now required. Existing configurations must supply the merged query pipeline (filter stages plus post-processor aggregate stage) that the scheduled-search runner executes. The final aggregate stage must use `as = "result"`.
+- **last9_scheduled_search_alert** - Preserve imported aggregate pipelines and validate explicit pipeline updates.
+
+## [0.6.0] - 2026-10-06
+
+### Added
+
+- **Coverage sweep** — control-plane IaC parity matrix in `docs/coverage.md` (Last9 API × TF × Datadog × l9iac)
+- **last9_synthetic_check** — manage synthetic checks (`/synthetic/checks`)
+- **last9_changeboard** — manage changeboards (`/changeboards`)
+- **last9_alert_snooze** — entity-level alert snooze / mute until timestamp
+- **last9_sensitive_data_rule** — OTel sensitive data scanning rules
+- **last9_physical_index** — OTel physical index configuration
+- **last9_rehydration** — OTel log rehydration jobs
+- **last9_streaming_aggregation** — Levitate streaming aggregation rules (`/clusters/{id}/streaming_aggregations`)
+- **last9_cold_storage_bucket** — OTel cold storage S3 bucket config
+- **last9_cold_storage_backup** — OTel cold storage backup rules
+- **last9_s3_ingest** — OTel S3 ingest bucket config
+- **last9_user** / **data.last9_user** — invite/manage org users and roles (Datadog `datadog_user` parity)
+- **data.last9_cluster** / **data.last9_datasource** — lookup helpers for region/cluster and datasources
+
+### Changed
+
+- **last9_drop_rule** / **last9_forward_rule** — migrated from legacy list-merge `logs_settings` APIs to individual REST on `/otel_settings/drop` and `/otel_settings/forward`. Import ID remains `region:cluster_id:<id>` where `<id>` is now the otel setting UUID (not the rule name). Existing state from the list-merge era must be re-imported.
+
+### Fixed
+
+- **last9_entity** / **last9_alert** — notification channels are now actually bound to alerts (ENG-1907). Previously `notification_channels` was sent in the alert-rules request body, which the API silently ignores: `terraform apply` succeeded and `plan` showed no drift, but nothing was attached, so alerts fired without paging anyone. The provider now:
+  - attaches channels through the notification binding API (`POST /notification_settings/{id}/attach`)
+  - detaches channels removed from config, including going to `channels = []`
+  - reads live bindings back on refresh, so a missing or out-of-band binding shows up as drift
+  - only reconciles the severities you declare, keeps `notification_channels` block order stable on refresh, and surfaces channel-lookup errors instead of hiding them
+- **last9_synthetic_check** — `paused` is honored on create.
+- **Provider** — secrets are redacted from `TF_LOG` request/response body dumps.
+- **Data sources** — ambiguous selectors are rejected; datasource lookup no longer returns an arbitrary datasource when no default exists; cluster lookup retains the configured region.
+- **last9_user** — an ID or email selector is required.
+- **last9_cold_storage_bucket** / **last9_cold_storage_backup** — invalid authentication and target combinations are rejected, while values that are unknown during planning are deferred until apply.
+- **last9_alert_snooze** — refresh preserves the configured `until` value.
+- **last9_changeboard** — omitting `granularity` retains the API default instead of planning a perpetual update.
+- **last9_physical_index** — updates preserve the API-provided destination; removing `retention_period` sends `null` to the API.
+
+### Deprecated
+
+- **last9_alert** — `notification_channels` is deprecated and is now a no-op. The Last9 API binds channels per `(entity, severity)`, not per alert rule. Manage channels on the alert group with `last9_entity.notification_channels` instead.
+
+### Upgrade notes
+
+- If you set `notification_channels` on `last9_alert`, move the channels to a block on the parent `last9_entity`, then run `terraform plan`:
+
+  ```terraform
+  notification_channels {
+    severity = "breach"
+    channels = ["channel-name"]
+  }
+  ```
+
+  Replace `breach` and `channel-name` with your severity and channel. Channels that were never really attached before will now show as changes — that is the fix taking effect.
+- A declared `notification_channels` block on `last9_entity` is fully authoritative for that severity: channels bound at that severity via the UI or any other way are detached on the next apply. Omit the block for severities you manage elsewhere.
+
+### Explicitly out of scope
+
+- SLOs / slo_detectors
+- PromQL macros
+- Entity relationships (`last9_relationship`)
+- Levitate tokens/access policies
 
 ## [0.5.0] - 2026-06-17
 

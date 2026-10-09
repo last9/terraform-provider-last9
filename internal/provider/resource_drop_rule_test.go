@@ -358,33 +358,23 @@ func testAccCheckDropRuleExists(resourceName string) resource.TestCheckFunc {
 }
 
 func testAccCheckDropRuleDestroy(s *terraform.State) error {
-	provider := testAccProvider()
-	providerConfig := provider.Meta()
-	if providerConfig == nil {
-		// Provider not configured, skip check
+	apiClient, err := testAccClientFromEnv()
+	if err != nil {
+		// Credentials unavailable — framework already exercised destroy
 		return nil
 	}
-
-	apiClient := providerConfig.(*client.Client)
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "last9_drop_rule" {
 			continue
 		}
 
-		region := rs.Primary.Attributes["region"]
-		name := rs.Primary.Attributes["name"]
-
-		result, err := apiClient.GetDropRules(region)
-		if err != nil {
-			// API error, assume deleted
+		region, _, otelID, parseErr := parseOTelResourceID(rs.Primary.ID)
+		if parseErr != nil {
 			continue
 		}
-
-		for _, rule := range result.Properties {
-			if rule.Name == name {
-				return fmt.Errorf("drop rule %s still exists in region %s", name, region)
-			}
+		if _, getErr := apiClient.GetOTelDrop(otelID, region); getErr == nil {
+			return fmt.Errorf("drop rule %s still exists", rs.Primary.ID)
 		}
 	}
 

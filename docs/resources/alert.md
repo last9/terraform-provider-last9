@@ -40,8 +40,6 @@ resource "last9_alert" "high_error_rate" {
 
   severity = "breach"
 
-  notification_channels = [last9_notification_channel.slack.id]
-
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-error-rate"
     annotations = {
@@ -51,6 +49,8 @@ resource "last9_alert" "high_error_rate" {
   }
 }
 ```
+
+~> **Note** Manage notification channels on the alert group (`last9_entity.notification_channels`), not here. Every alert in a group at a given severity shares the exact same channel bindings — the Last9 API has no per-alert-rule notification setting. This resource's `notification_channels` field is **deprecated and a no-op**: setting it neither attaches nor detaches anything, and it's kept only so existing configurations don't break; see the field description below.
 
 ### Threshold Alert (Less Than)
 
@@ -125,7 +125,7 @@ resource "last9_alert" "service_down" {
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.
 - `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `true`.
-- `notification_channels` (List of String) Notification channel IDs to notify when alert fires.
+- `notification_channels` (List of String, **Deprecated**) No longer does anything — kept only for backward compatibility with existing configurations. It makes no API calls: setting it does not attach a channel, and its value is never read back from the API. The Last9 API binds channels to an `(entity, severity)` pair with no per-alert-rule ownership, and two Terraform resources managing the same entity/severity cannot coexist safely (one's drift detection can't distinguish a channel the other legitimately attached from an unmanaged one). Manage notification channels on `last9_entity.notification_channels` instead.
 - `properties` (Block) Additional alert properties. See [Properties](#properties).
 
 ### Read-Only
@@ -135,6 +135,7 @@ resource "last9_alert" "service_down" {
 - `expression` (String) Alert expression (computed from KPI).
 - `kpi_id` (String) ID of the automatically created KPI.
 - `kpi_name` (String) Name of the automatically created KPI.
+- `owned_kpi_id` (String) KPI created by this resource and eligible for cleanup. Imported or recovered references do not establish ownership.
 
 ### Properties
 
@@ -175,3 +176,5 @@ Import using format `entity_id:alert_id`:
 ```shell
 terraform import last9_alert.example <entity_id>:<alert_id>
 ```
+
+Import recovers the KPI reference for alert updates, but replacing or destroying the imported alert leaves that KPI intact. State created by older provider versions has no ownership marker, so its KPI is also retained; ownership cannot be inferred safely from an ID or name. KPIs created by this version are tracked and cleaned up on replacement or destroy while the alert still references that KPI.

@@ -7,7 +7,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
-	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
 // Acceptance tests
@@ -123,33 +122,22 @@ func testAccCheckForwardRuleExists(resourceName string) resource.TestCheckFunc {
 }
 
 func testAccCheckForwardRuleDestroy(s *terraform.State) error {
-	provider := testAccProvider()
-	providerConfig := provider.Meta()
-	if providerConfig == nil {
-		// Provider not configured, skip check
+	apiClient, err := testAccClientFromEnv()
+	if err != nil {
 		return nil
 	}
-
-	apiClient := providerConfig.(*client.Client)
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "last9_forward_rule" {
 			continue
 		}
 
-		region := rs.Primary.Attributes["region"]
-		name := rs.Primary.Attributes["name"]
-
-		result, err := apiClient.GetForwardRules(region)
-		if err != nil {
-			// API error, assume deleted
+		region, _, otelID, parseErr := parseOTelResourceID(rs.Primary.ID)
+		if parseErr != nil {
 			continue
 		}
-
-		for _, rule := range result.Properties {
-			if rule.Name == name {
-				return fmt.Errorf("forward rule %s still exists in region %s", name, region)
-			}
+		if _, getErr := apiClient.GetOTelForward(otelID, region); getErr == nil {
+			return fmt.Errorf("forward rule %s still exists", rs.Primary.ID)
 		}
 	}
 
