@@ -53,6 +53,33 @@ post_processor {
 }
 ```
 
+## Resultant Query
+
+For aggregate searches, provide `resultant_query` on create and whenever `query` or `post_processor` changes. It is the full pipeline the scheduled-search runner executes, with a non-empty array of object stages and final aggregate alias `as = "result"`. After import, the provider preserves the computed pipeline on unrelated edits.
+
+```hcl
+resultant_query = jsonencode([
+  {
+    type  = "filter"
+    query = {
+      "$and" = [
+        { "$eq" = ["SeverityText", "ERROR"] }
+      ]
+    }
+  },
+  {
+    type = "aggregate"
+    aggregates = [
+      {
+        function = { "$count" = [] }
+        as       = "result"
+      }
+    ]
+    groupby = {}
+  }
+])
+```
+
 ## Threshold Configuration
 
 Define when to trigger an alert:

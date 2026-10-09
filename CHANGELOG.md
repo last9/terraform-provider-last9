@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.
+
+### Changed
+
+- **last9_scheduled_search_alert** - Preserve imported aggregate pipelines and validate explicit pipeline updates.
+
 ## [0.6.0] - 2026-10-06
 
 ### Added

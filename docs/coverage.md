@@ -52,6 +52,8 @@ Ground truth for API routes: `last9-api/api/routes_v4.go` (OpenAPI is incomplete
 | SLOs | `/entities/{id}/slo` | — | slo | `datadog_service_level_objective` | ❌ skipped |
 | Macros | `/clusters/{id}/macros` | — | — | — | ❌ skipped |
 
+Aggregate scheduled searches require the full executable `resultant_query` pipeline on create and when the source query or post-processor changes. Imported pipelines are preserved on unrelated edits.
+
 ## Datadog parity (observability core)
 
 | Datadog | Last9 TF | Gap |
