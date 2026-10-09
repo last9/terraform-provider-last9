@@ -1299,6 +1299,9 @@ type KPIUpdateRequest struct {
 
 // NotificationSettingProperty contains optional properties for notification channels
 type NotificationSettingProperty struct {
+	// ServiceOwnerHandle contains comma-separated Slack handles or email addresses.
+	// A non-nil empty value clears a previously configured handle list.
+	ServiceOwnerHandle *string `json:"service_owner_handle,omitempty"`
 	// WebhookHeaders holds custom headers to be sent with webhook requests (only for generic_webhook type)
 	WebhookHeaders map[string]string `json:"webhook_headers,omitempty"`
 	// SlackAppMode marks a Slack channel as delivered via the Slack App (bot token + chat.postMessage)
