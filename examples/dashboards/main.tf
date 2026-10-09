@@ -98,7 +98,9 @@ resource "last9_dashboard" "aws_cost_explorer" {
 
   # Section divider
   panel {
-    name = "Spend at a Glance"
+    key      = "spend-section"
+    position = 0
+    name     = "Spend at a Glance"
     visualization {
       type       = "section"
       full_width = true
@@ -107,7 +109,9 @@ resource "last9_dashboard" "aws_cost_explorer" {
 
   # Markdown panel for dashboard notes
   panel {
-    name = "Cost Dashboard Notes"
+    key      = "cost-notes"
+    position = 1
+    name     = "Cost Dashboard Notes"
 
     layout {
       x = 3
@@ -131,8 +135,10 @@ resource "last9_dashboard" "aws_cost_explorer" {
 
   # Stat with thresholds
   panel {
-    name = "Total Spend"
-    unit = "USD"
+    key      = "total-spend"
+    position = 2
+    name     = "Total Spend"
+    unit     = "USD"
 
     layout {
       x = 0
@@ -146,21 +152,25 @@ resource "last9_dashboard" "aws_cost_explorer" {
 
       stat_config {
         threshold {
-          value = 0
-          color = "#22c55e"
+          position = 0
+          value    = 0
+          color    = "#22c55e"
         }
         threshold {
-          value = 1000
-          color = "#eab308"
+          position = 1
+          value    = 1000
+          color    = "#eab308"
         }
         threshold {
-          value = 5000
-          color = "#ef4444"
+          position = 2
+          value    = 5000
+          color    = "#ef4444"
         }
       }
     }
 
     query {
+      position         = 0
       name             = "A"
       expr             = "sum(sum by (cost_date) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\"}[7d]))) or vector(0)"
       unit             = "USD"
@@ -174,7 +184,9 @@ resource "last9_dashboard" "aws_cost_explorer" {
 
   # Section + bar with stacked vertical bars
   panel {
-    name = "Trends"
+    key      = "trends-section"
+    position = 3
+    name     = "Trends"
     visualization {
       type       = "section"
       full_width = true
@@ -182,8 +194,10 @@ resource "last9_dashboard" "aws_cost_explorer" {
   }
 
   panel {
-    name = "Cost by Date and Service"
-    unit = "USD"
+    key      = "cost-by-date-service"
+    position = 4
+    name     = "Cost by Date and Service"
+    unit     = "USD"
 
     layout {
       x = 0
@@ -203,6 +217,7 @@ resource "last9_dashboard" "aws_cost_explorer" {
     }
 
     query {
+      position         = 0
       name             = "A"
       expr             = "sum by (cost_date, aws_service) (last_over_time(aws_cost_unblended_USD{cost_date!=\"\", aws_account_id=~\"$account\", aws_region=~\"$region\"}[7d]))"
       unit             = "USD"
@@ -231,6 +246,8 @@ resource "last9_dashboard" "mixed_telemetry" {
 
   # PromQL timeseries with timeseries_config
   panel {
+    key       = "jvm-major-gc-rate"
+    position  = 0
     name      = "JVM Major GC Rate"
     telemetry = "metrics"
 
@@ -250,6 +267,7 @@ resource "last9_dashboard" "mixed_telemetry" {
     }
 
     query {
+      position         = 0
       name             = "A"
       expr             = "sum(rate(process_runtime_jvm_gc_duration_seconds_sum{action=\"end of major GC\"}[5m]))"
       telemetry        = "metrics"
@@ -261,6 +279,8 @@ resource "last9_dashboard" "mixed_telemetry" {
 
   # Multi-query timeseries (LogQL, comparing services)
   panel {
+    key       = "logs-per-service"
+    position  = 1
     name      = "Logs Per Service"
     telemetry = "logs"
 
@@ -276,6 +296,7 @@ resource "last9_dashboard" "mixed_telemetry" {
     }
 
     query {
+      position         = 0
       name             = "A"
       expr             = "sum by (service) (count_over_time({service=\"nginx\"} [1m]))"
       telemetry        = "logs"
@@ -286,6 +307,7 @@ resource "last9_dashboard" "mixed_telemetry" {
     }
 
     query {
+      position         = 1
       name             = "B"
       expr             = "sum by (service) (count_over_time({service=\"frontend-proxy\"} [1m]))"
       telemetry        = "logs"
@@ -298,6 +320,8 @@ resource "last9_dashboard" "mixed_telemetry" {
 
   # Doughnut panel for categorical PromQL results
   panel {
+    key       = "http-status-mix"
+    position  = 2
     name      = "HTTP Status Mix"
     telemetry = "metrics"
 
@@ -313,6 +337,7 @@ resource "last9_dashboard" "mixed_telemetry" {
     }
 
     query {
+      position         = 0
       name             = "A"
       expr             = "sum by (status) (http_requests_total)"
       telemetry        = "metrics"
@@ -325,6 +350,8 @@ resource "last9_dashboard" "mixed_telemetry" {
 
   # Table panel from traces (JSON pipeline as expr)
   panel {
+    key       = "failing-spans-by-service"
+    position  = 3
     name      = "Failing Spans by Service"
     telemetry = "traces"
 
@@ -350,6 +377,7 @@ resource "last9_dashboard" "mixed_telemetry" {
     }
 
     query {
+      position   = 0
       name       = "A"
       expr       = "[{\"query\":{\"$and\":[{\"$eq\":[\"SpanKind\",\"SPAN_KIND_CLIENT\"]},{\"$neq\":[\"StatusCode\",\"STATUS_CODE_OK\"]}]},\"type\":\"filter\"},{\"type\":\"aggregate\",\"aggregates\":[{\"function\":{\"$count\":[]},\"as\":\"_count\"}],\"groupby\":{\"ServiceName\":\"service\",\"StatusCode\":\"status\"}}]"
       telemetry  = "traces"

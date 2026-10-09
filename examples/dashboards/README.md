@@ -77,17 +77,18 @@ The composite import ID is `region:dashboard_id` — region is required because 
 
 ## Schema Notes
 
-- `panel` is a `TypeList` (ordered) — section dividers and panels interleave at the position you write them in.
-- Panel `id` is `Computed` — set by the API. Round-tripped by HCL position, so editing a panel's name or queries keeps its UUID. **Reordering** HCL `panel { ... }` blocks swaps UUIDs across panels — see Panel reorder caveat below.
+- `panel` is keyed by the required stable `key`; each panel also requires a zero-based `position`. Keep the key unchanged when renaming or reordering; update position to reorder. API panel IDs remain computed and are matched by key, not block order.
+- Existing state is upgraded in place: the provider seeds each panel key from its API ID and position from its old list index. Add those values to HCL before upgrading. Imported dashboards use the API panel ID as the initial key; if no ID existed in legacy state, the upgrader uses `legacy-panel-N`.
+- Each query requires a zero-based `position`; each stat threshold also requires a zero-based `position`. The provider sorts all three ordered collections before API requests.
 - `legend` is flattened: `legend_type`, `legend_value`, `legend_placement` instead of a nested block. `legend_sort_field` and `legend_sort_direction` are also flat.
 - `expr` is an opaque string. For `query_type = "promql"` it's PromQL; for `log_json`/`trace_json` it's a serialized JSON pipeline (filter → aggregate stages).
 - `region` is the query-time scope used to look up active integrations for query rendering. It's not stored with the dashboard, so changing it doesn't recreate the resource — Terraform just refreshes against the new region next plan.
 - Time range is exposed as either `relative_time` (minutes) or `absolute_from` + `absolute_to` (Unix millis). The two are mutually exclusive; absolute requires both bounds.
 - `variable.current_values` is `Optional + Computed`. Set an initial selection in HCL; subsequent UI changes won't drift back to your default.
 
-### Panel reorder caveat
+### One-time identity migration
 
-Panels are matched by index across reads. If you reorder `panel { ... }` blocks in HCL, panel UUIDs swap with their neighbors — the panel at index 0 keeps its UUID, gains panel 2's content. External references to panel UUIDs (embed URLs, drill-down links) will then point at the wrong panel. If you need to reorder panels visually, change the `layout.y` coordinate instead of moving the HCL block.
+For resources already in Terraform state, copy each panel's computed API `id` into the new `key` argument and its previous block index into `position`. Add positions to query and threshold blocks in their prior order. Existing block syntax remains supported; these attributes establish stable identity/order and are not sent as API fields.
 
 ### Opaque blob fields
 
