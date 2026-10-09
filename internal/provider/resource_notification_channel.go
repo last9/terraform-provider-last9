@@ -223,23 +223,26 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 	d.Set("created_at", channel.CreatedAt)
 	d.Set("updated_at", channel.UpdatedAt)
 
-	// Extract webhook headers from property if this is a webhook channel
-	if channel.Type == "generic_webhook" && channel.Property != nil {
-		if webhookHeaders, ok := channel.Property["webhook_headers"]; ok {
-			if headersMap, ok := webhookHeaders.(map[string]interface{}); ok {
-				headers := make(map[string]string)
-				for k, v := range headersMap {
-					if strVal, ok := v.(string); ok {
-						headers[k] = strVal
+	// Extract webhook headers and CA certificate from property if this is a webhook channel.
+	if channel.Type == "generic_webhook" {
+		d.Set("webhook_ca_certificate", "")
+		if channel.Property != nil {
+			if webhookHeaders, ok := channel.Property["webhook_headers"]; ok {
+				if headersMap, ok := webhookHeaders.(map[string]interface{}); ok {
+					headers := make(map[string]string)
+					for k, v := range headersMap {
+						if strVal, ok := v.(string); ok {
+							headers[k] = strVal
+						}
+					}
+					if len(headers) > 0 {
+						d.Set("headers", headers)
 					}
 				}
-				if len(headers) > 0 {
-					d.Set("headers", headers)
-				}
 			}
-		}
-		if certificate, ok := channel.Property["webhook_ca_certificate"].(string); ok {
-			d.Set("webhook_ca_certificate", certificate)
+			if certificate, ok := channel.Property["webhook_ca_certificate"].(string); ok {
+				d.Set("webhook_ca_certificate", certificate)
+			}
 		}
 	}
 

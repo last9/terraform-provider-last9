@@ -400,6 +400,38 @@ func TestReviewNotificationWebhookCAPreservesAndClears(t *testing.T) {
 	}
 }
 
+func TestReviewNotificationWebhookCAReadClearsAbsentRemoteValue(t *testing.T) {
+	const certificate = "-----BEGIN CERTIFICATE-----\\nsynthetic\\n-----END CERTIFICATE-----"
+	config := map[string]interface{}{
+		"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": certificate,
+	}
+	for name, property := range map[string]string{
+		"absent key":   `{}`,
+		"nil property": `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `[{"id":1,"name":"hook","type":"generic_webhook","destination":"https://example.test","send_resolved":true,"property":%s}]`, property)
+			})
+			d := schema.TestResourceDataRaw(t, resourceNotificationChannel().Schema, config)
+			d.SetId("1")
+			if ds := resourceNotificationChannelRead(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			if got := d.Get("webhook_ca_certificate"); got != "" {
+				t.Fatalf("webhook_ca_certificate after remote clear = %q, want empty", got)
+			}
+			diff, err := resourceNotificationChannel().Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(config), c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff == nil || diff.Attributes["webhook_ca_certificate"] == nil {
+				t.Fatal("configured webhook CA must be restored after remote clear")
+			}
+		})
+	}
+}
+
 func TestReviewColdStorageBackupValidatesTargets(t *testing.T) {
 	base := map[string]interface{}{"region": "us-east-1", "name": "backup", "bucket_name": "bucket"}
 	for name, tc := range map[string]map[string]interface{}{
