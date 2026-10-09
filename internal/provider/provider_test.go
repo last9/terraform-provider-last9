@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
 func TestProvider(t *testing.T) {
@@ -64,4 +66,32 @@ func testAccProviderFactories() map[string]func() (*schema.Provider, error) {
 // testAccProvider is a helper function that returns a configured provider instance
 func testAccProvider() *schema.Provider {
 	return New()
+}
+
+func testAccClientFromEnv() (*client.Client, error) {
+	refresh := os.Getenv("LAST9_WRITE_REFRESH_TOKEN")
+	if refresh == "" {
+		refresh = os.Getenv("LAST9_REFRESH_TOKEN")
+	}
+	apiToken := os.Getenv("LAST9_API_TOKEN")
+	org := os.Getenv("LAST9_ORG")
+	base := os.Getenv("LAST9_API_BASE_URL")
+	if org == "" || base == "" || (refresh == "" && apiToken == "") {
+		return nil, fmt.Errorf("missing LAST9 credentials in environment")
+	}
+	return client.NewClient(&client.Config{
+		RefreshToken:       refresh,
+		APIToken:           apiToken,
+		DeleteRefreshToken: os.Getenv("LAST9_DELETE_REFRESH_TOKEN"),
+		DeleteToken:        os.Getenv("LAST9_DELETE_TOKEN"),
+		Org:                org,
+		BaseURL:            base,
+	})
+}
+
+func testAccRegion() string {
+	if r := os.Getenv("LAST9_TEST_REGION"); r != "" {
+		return r
+	}
+	return "ap-south-1"
 }

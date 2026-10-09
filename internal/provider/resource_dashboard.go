@@ -163,8 +163,9 @@ func resourceDashboard() *schema.Resource {
 						"values": {
 							Type:        schema.TypeList,
 							Optional:    true,
+							Computed:    true,
 							Elem:        &schema.Schema{Type: schema.TypeString},
-							Description: "Static values (used when type=static)",
+							Description: "Static values (used when type=static). Computed so empty server-side lists for label variables do not create plan drift when omitted from HCL.",
 						},
 					},
 				},

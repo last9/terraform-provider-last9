@@ -17,13 +17,18 @@ The Last9 provider enables Terraform to manage [Last9](https://last9.io) resourc
 
 ## Features
 
-- **Alerts**: Configure alerting rules (metric-based with thresholds/expressions, or log-based with scheduled searches)
-- **Notification Channels**: Manage alert destinations (Slack, PagerDuty, email, webhooks)
-- **Drop Rules**: Filter and drop logs for cost optimization at Last9 Control Plane
-- **Forward Rules**: Forward logs to external destinations such as S3 bucket
-- **Remapping Rules**: Extract fields from logs and map attributes to standard fields (logs and traces)
-- **Dashboards**: Define custom dashboards with panels, queries, variables, and layout grid
-- **Macros**: PromQL query templates
+- **Alerts**: Metric-based and log-based (scheduled search) alerting rules
+- **Alert snooze**: Entity-level mute until a timestamp (`last9_alert_snooze`)
+- **Notification Channels**: Slack, PagerDuty, email, webhooks
+- **Synthetics**: HTTP/TCP/DNS/ICMP/API/script checks (`last9_synthetic_check`)
+- **Changeboards**: Entity change correlation views
+- **Drop / Forward / Remapping**: OTel control-plane pipeline rules
+- **Sensitive data / Physical index / Rehydration**: Log pipeline controls
+- **Dashboards**: Custom dashboards with panels, queries, and variables
+- **Lookups**: `last9_cluster`, `last9_datasource`, `last9_user`, entity, notification destination data sources
+- **Users**: Invite and manage org members + roles (`last9_user`)
+
+See [docs/coverage.md](coverage.md) for the full API × Terraform × Datadog matrix.
 
 ## Alerting Lifecycle
 
@@ -60,7 +65,7 @@ terraform {
   required_providers {
     last9 = {
       source  = "last9/last9"
-      version = "~> 0.2"
+      version = "~> 0.6"
     }
   }
 }
@@ -79,6 +84,13 @@ resource "last9_entity" "api_alerts" {
   external_ref = "api-service-prod"
   description  = "Alerts for Production API Service"
   ui_readonly  = true  # Prevent UI edits, manage via Terraform only
+
+  # Notification channels are bound per severity, on the alert group --
+  # every last9_alert below at "breach" severity shares this binding.
+  notification_channels {
+    severity = "breach"
+    channels = [last9_notification_channel.slack_alerts.id]
+  }
 }
 
 # Create a notification channel (Slack App)
@@ -101,8 +113,6 @@ resource "last9_alert" "high_error_rate" {
   bad_minutes   = 5
   total_minutes = 10
   severity      = "breach"
-
-  notification_channels = [last9_notification_channel.slack_alerts.id]
 
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-error-rate"
