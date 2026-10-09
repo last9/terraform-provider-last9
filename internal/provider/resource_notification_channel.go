@@ -163,8 +163,7 @@ func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 	}
 
 	if channelType == "slack" || channelType == "email" {
-		if value, ok := d.GetOkExists("service_owner_handle"); ok {
-			handle := value.(string)
+		if handle := d.Get("service_owner_handle").(string); handle != "" || d.HasChange("service_owner_handle") {
 			prop.ServiceOwnerHandle = &handle
 			hasValue = true
 		}
