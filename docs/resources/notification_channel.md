@@ -92,6 +92,17 @@ resource "last9_notification_channel" "webhook_with_auth" {
 }
 ```
 
+### Generic Webhook with a Custom CA
+
+```terraform
+resource "last9_notification_channel" "webhook_with_ca" {
+  name                   = "Private Webhook"
+  type                   = "generic_webhook"
+  destination            = "https://alerts.internal.example.com/events"
+  webhook_ca_certificate = file("${path.module}/webhook-ca.pem")
+}
+```
+
 ## Schema
 
 ### Required
@@ -104,6 +115,7 @@ resource "last9_notification_channel" "webhook_with_auth" {
 
 - `send_resolved` (Boolean) Whether to send notifications when alerts are resolved. Default: `true`.
 - `headers` (Map of String) Custom HTTP headers to send with webhook requests. Only applicable for `generic_webhook` type. Useful for authentication tokens or custom metadata.
+- `webhook_ca_certificate` (String, Sensitive) CA certificate used to verify TLS for a `generic_webhook`. Set to an empty string to clear a configured certificate.
 - `slack_app_mode` (Boolean) Only valid for `type = "slack"`. When `true`, deliver via the Last9 Slack App (`chat.postMessage` via OAuth bot token) and treat `destination` as a Slack channel ID. When `false` or unset, deliver via Slack incoming webhook and treat `destination` as a `https://hooks.slack.com/` URL. **Force-new**: mode cannot be changed after the channel is created. New Slack channels must set this to `true`; the API no longer accepts new webhook Slack channels.
 
 ### Read-Only

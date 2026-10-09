@@ -266,6 +266,8 @@ func TestReviewColdStorageBucketValidatesAuthentication(t *testing.T) {
 		"role rejects credentials":      {map[string]interface{}{"auth_type": "role", "aws_role": "role", "aws_access_key": "key", "aws_secret_key": "secret"}, false},
 		"valid credentials":             {map[string]interface{}{"auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret"}, true},
 		"valid role":                    {map[string]interface{}{"auth_type": "role", "aws_role": "role"}, true},
+		"gcs rejects role":              {map[string]interface{}{"storage_provider": "gcs", "auth_type": "role", "aws_role": "role"}, false},
+		"gcs accepts credentials":       {map[string]interface{}{"storage_provider": "gcs", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret"}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			config := make(map[string]interface{}, len(base)+len(tc.values))
@@ -278,6 +280,153 @@ func TestReviewColdStorageBucketValidatesAuthentication(t *testing.T) {
 			_, err := resourceColdStorageBucket().Diff(context.Background(), nil, terraform.NewResourceConfigRaw(config), nil)
 			if (err == nil) != tc.valid {
 				t.Fatalf("validation error = %v, valid = %v", err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestReviewColdStorageBucketProviderDefaultsToS3AndIsSerialized(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "secret",
+	})
+	if got := d.Get("storage_provider"); got != "s3" {
+		t.Fatalf("storage_provider default = %q, want s3", got)
+	}
+	if got := buildColdStorageBucketRequest(d).Properties.Provider; got != "s3" {
+		t.Fatalf("request provider = %q, want s3", got)
+	}
+}
+
+func TestReviewColdStorageBucketReadPreservesMaskedSecret(t *testing.T) {
+	for _, secret := range []string{"", "********"} {
+		t.Run(fmt.Sprintf("%q", secret), func(t *testing.T) {
+			d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+				"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "credentials", "aws_access_key": "key", "aws_secret_key": "configured-secret",
+			})
+			d.SetId("us-east-1:bucket-1")
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"id":"bucket-1","name":"bucket","properties":{"provider":"gcs","aws_region":"us-east-1","aws_bucket":"bucket","auth_type":"credentials","aws_access_key":"key","aws_secret_key":%q},"status":"active"}`, secret)
+			})
+			if ds := resourceColdStorageBucketRead(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			if got := d.Get("aws_secret_key"); got != "configured-secret" {
+				t.Fatalf("aws_secret_key = %q, want configured value", got)
+			}
+			if got := d.Get("storage_provider"); got != "gcs" {
+				t.Fatalf("storage_provider = %q, want gcs", got)
+			}
+		})
+	}
+}
+
+func TestReviewColdStorageBucketReadDefaultsMissingProviderToS3(t *testing.T) {
+	d := schema.TestResourceDataRaw(t, resourceColdStorageBucket().Schema, map[string]interface{}{
+		"region": "us-east-1", "name": "bucket", "aws_region": "us-east-1", "aws_bucket": "bucket", "auth_type": "role", "aws_role": "role",
+	})
+	d.SetId("us-east-1:bucket-1")
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"bucket-1","name":"bucket","properties":{"aws_region":"us-east-1","aws_bucket":"bucket","auth_type":"role","aws_role":"role"},"status":"active"}`)
+	})
+	if ds := resourceColdStorageBucketRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if got := d.Get("storage_provider"); got != "s3" {
+		t.Fatalf("storage_provider = %q, want s3", got)
+	}
+}
+
+func TestReviewNotificationWebhookCAIsWebhookOnly(t *testing.T) {
+	for name, config := range map[string]map[string]interface{}{
+		"webhook": {"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
+		"slack":   {"name": "slack", "type": "slack", "destination": "https://hooks.slack.com/services/test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := resourceNotificationChannel().Diff(context.Background(), nil, terraform.NewResourceConfigRaw(config), nil)
+			if (err == nil) != (name == "webhook") {
+				t.Fatalf("validation error = %v", err)
+			}
+		})
+	}
+}
+
+func TestReviewNotificationWebhookCAPreservesAndClears(t *testing.T) {
+	const certificate = "-----BEGIN CERTIFICATE-----\\nsynthetic\\n-----END CERTIFICATE-----"
+	var requests []client.NotificationChannelRequest
+	currentCertificate := certificate
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprintf(w, `[{"id":1,"name":"hook","type":"generic_webhook","destination":"https://example.test","send_resolved":true,"property":{"webhook_ca_certificate":%q}}]`, currentCertificate)
+		case http.MethodPut:
+			var request client.NotificationChannelRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			requests = append(requests, request)
+			currentCertificate = *request.Property.WebhookCACertificate
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	d := schema.TestResourceDataRaw(t, resourceNotificationChannel().Schema, map[string]interface{}{
+		"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": certificate,
+	})
+	d.SetId("1")
+	if ds := resourceNotificationChannelRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if ds := resourceNotificationChannelUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if err := d.Set("webhook_ca_certificate", ""); err != nil {
+		t.Fatal(err)
+	}
+	if ds := resourceNotificationChannelUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("PUT requests = %d, want 2", len(requests))
+	}
+	for i, want := range []string{certificate, ""} {
+		if requests[i].Property == nil || requests[i].Property.WebhookCACertificate == nil || *requests[i].Property.WebhookCACertificate != want {
+			t.Fatalf("request %d webhook_ca_certificate = %#v, want %q", i, requests[i].Property, want)
+		}
+	}
+	if got := d.Get("webhook_ca_certificate"); got != "" {
+		t.Fatalf("webhook_ca_certificate after clear = %q, want empty", got)
+	}
+}
+
+func TestReviewNotificationWebhookCAReadClearsAbsentRemoteValue(t *testing.T) {
+	const certificate = "-----BEGIN CERTIFICATE-----\\nsynthetic\\n-----END CERTIFICATE-----"
+	config := map[string]interface{}{
+		"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": certificate,
+	}
+	for name, property := range map[string]string{
+		"absent key":   `{}`,
+		"nil property": `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `[{"id":1,"name":"hook","type":"generic_webhook","destination":"https://example.test","send_resolved":true,"property":%s}]`, property)
+			})
+			d := schema.TestResourceDataRaw(t, resourceNotificationChannel().Schema, config)
+			d.SetId("1")
+			if ds := resourceNotificationChannelRead(context.Background(), d, c); ds.HasError() {
+				t.Fatal(ds)
+			}
+			if got := d.Get("webhook_ca_certificate"); got != "" {
+				t.Fatalf("webhook_ca_certificate after remote clear = %q, want empty", got)
+			}
+			diff, err := resourceNotificationChannel().Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(config), c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff == nil || diff.Attributes["webhook_ca_certificate"] == nil {
+				t.Fatal("configured webhook CA must be restored after remote clear")
 			}
 		})
 	}

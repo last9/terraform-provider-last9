@@ -61,6 +61,12 @@ func resourceNotificationChannel() *schema.Resource {
 					Type: schema.TypeString,
 				},
 			},
+			"webhook_ca_certificate": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Sensitive:   true,
+				Description: "CA certificate used to verify generic webhook TLS.",
+			},
 			"slack_app_mode": {
 				Type:        schema.TypeBool,
 				Optional:    true,
@@ -108,6 +114,10 @@ func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m 
 	if len(headers) > 0 && channelType != "generic_webhook" {
 		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
 	}
+	webhookCACertificate := d.Get("webhook_ca_certificate").(string)
+	if (webhookCACertificate != "" || d.HasChange("webhook_ca_certificate")) && channelType != "generic_webhook" {
+		return fmt.Errorf("webhook_ca_certificate can only be specified for generic_webhook type, got type: %s", channelType)
+	}
 
 	if slackAppMode && channelType != "slack" {
 		return fmt.Errorf("slack_app_mode can only be set for slack type, got type: %s", channelType)
@@ -144,6 +154,11 @@ func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 				headers[k] = v.(string)
 			}
 			prop.WebhookHeaders = headers
+			hasValue = true
+		}
+		certificate := d.Get("webhook_ca_certificate").(string)
+		if certificate != "" || d.HasChange("webhook_ca_certificate") {
+			prop.WebhookCACertificate = &certificate
 			hasValue = true
 		}
 	}
@@ -208,19 +223,25 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 	d.Set("created_at", channel.CreatedAt)
 	d.Set("updated_at", channel.UpdatedAt)
 
-	// Extract webhook headers from property if this is a webhook channel
-	if channel.Type == "generic_webhook" && channel.Property != nil {
-		if webhookHeaders, ok := channel.Property["webhook_headers"]; ok {
-			if headersMap, ok := webhookHeaders.(map[string]interface{}); ok {
-				headers := make(map[string]string)
-				for k, v := range headersMap {
-					if strVal, ok := v.(string); ok {
-						headers[k] = strVal
+	// Extract webhook headers and CA certificate from property if this is a webhook channel.
+	if channel.Type == "generic_webhook" {
+		d.Set("webhook_ca_certificate", "")
+		if channel.Property != nil {
+			if webhookHeaders, ok := channel.Property["webhook_headers"]; ok {
+				if headersMap, ok := webhookHeaders.(map[string]interface{}); ok {
+					headers := make(map[string]string)
+					for k, v := range headersMap {
+						if strVal, ok := v.(string); ok {
+							headers[k] = strVal
+						}
+					}
+					if len(headers) > 0 {
+						d.Set("headers", headers)
 					}
 				}
-				if len(headers) > 0 {
-					d.Set("headers", headers)
-				}
+			}
+			if certificate, ok := channel.Property["webhook_ca_certificate"].(string); ok {
+				d.Set("webhook_ca_certificate", certificate)
 			}
 		}
 	}

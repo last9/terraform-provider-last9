@@ -2,14 +2,15 @@
 page_title: "last9_cold_storage_bucket Resource - Last9"
 subcategory: ""
 description: |-
-  Manages an OTel cold storage S3 bucket configuration.
+  Manages an OTel cold storage bucket configuration.
 ---
 
 # last9_cold_storage_bucket (Resource)
 
-Configures an S3 bucket used for log cold storage via `/otel_settings/cold_storage/bucket`.
+Configures an S3 or GCS bucket used for log cold storage via `/otel_settings/cold_storage/bucket`.
 
 Auth is either IAM `role` (recommended) or static `credentials`.
+GCS requires `credentials`; the existing AWS-shaped credential attribute names are used for both providers.
 
 With `auth_type = "role"`, set `aws_role` and do not set `aws_access_key` or `aws_secret_key`. With `auth_type = "credentials"`, set both `aws_access_key` and `aws_secret_key` and do not set `aws_role`. Values that are unknown during planning are deferred until apply, when these requirements are enforced.
 
@@ -44,6 +45,7 @@ resource "last9_cold_storage_bucket" "archive" {
 - `aws_secret_key` (String, Sensitive) Required with `auth_type = "credentials"`; must not be set with `auth_type = "role"`. Sent as `properties.aws_secret_key`. The value in state is kept when the API does not return it.
 - `default` (Boolean) When `true`, the provider marks this bucket as the default bucket after create, or after update when the value changes. Default: `false`.
 - `retention_period` (Number) Maps to the API `properties.retention_period` field. Omitted from the request when not set.
+- `storage_provider` (String) Storage provider: `s3` (the default, including for existing configurations that omit it) or `gcs`. GCS requires `auth_type = "credentials"`.
 
 ### Read-Only
 
