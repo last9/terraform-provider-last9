@@ -23,6 +23,26 @@ resource "last9_s3_ingest" "imports" {
 }
 ```
 
+## Schema
+
+### Required
+
+- `aws_bucket` (String) Name of the S3 bucket. Sent as `properties.aws_bucket`.
+- `aws_region` (String) AWS region of the S3 bucket. Sent as `properties.aws_region`.
+- `aws_role` (String) IAM role ARN (`auth_type` is always `role`). Sent as `properties.aws_role`.
+- `name` (String) Name of the S3 ingest configuration.
+- `region` (String) Last9 region. Sent as the `region` query parameter and used in the resource ID. Changing this forces a new resource.
+
+### Optional
+
+- `auth_type` (String) Authentication type. Valid values: `role`. Default: `role`.
+- `default` (Boolean) Maps to the API `properties.default` field. Default: `false`.
+
+### Read-Only
+
+- `id` (String) The ID of this resource, in the format `region:id`.
+- `status` (String) Status returned by the API.
+
 ## Import
 
 ```shell

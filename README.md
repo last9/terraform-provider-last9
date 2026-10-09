@@ -9,7 +9,7 @@ terraform {
   required_providers {
     last9 = {
       source  = "last9/last9"
-      version = "~> 0.2"
+      version = "~> 0.6"
     }
   }
 }
