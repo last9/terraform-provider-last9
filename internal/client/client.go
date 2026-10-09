@@ -601,23 +601,52 @@ type AlertExpressionArg struct {
 }
 
 type Alert struct {
-	ID                           string          `json:"id"`
-	Name                         string          `json:"rule_name"`
-	Description                  string          `json:"description"`
-	EntityID                     string          `json:"entity_id"`
-	Indicator                    string          `json:"primary_indicator"`
-	Expression                   string          `json:"expression,omitempty"`
-	Condition                    string          `json:"condition,omitempty"`
-	EvalWindow                   int             `json:"eval_window,omitempty"`
-	AlertCondition               string          `json:"alert_condition,omitempty"`
-	Severity                     string          `json:"severity"`
-	MuteUntil                    int             `json:"mute_until"`
-	IsDisabled                   bool            `json:"is_disabled"`
-	Properties                   AlertProperties `json:"properties"`
-	GroupTimeseriesNotifications bool            `json:"group_timeseries_notifications"`
-	NotificationChannels         []string        `json:"notification_channels,omitempty"`
+	ID                           string                 `json:"id"`
+	Name                         string                 `json:"rule_name"`
+	Description                  string                 `json:"description"`
+	EntityID                     string                 `json:"entity_id"`
+	Indicator                    string                 `json:"primary_indicator"`
+	Expression                   string                 `json:"expression,omitempty"`
+	Condition                    string                 `json:"condition,omitempty"`
+	EvalWindow                   int                    `json:"eval_window,omitempty"`
+	AlertCondition               string                 `json:"alert_condition,omitempty"`
+	Severity                     string                 `json:"severity"`
+	MuteUntil                    int                    `json:"mute_until"`
+	IsDisabled                   bool                   `json:"is_disabled"`
+	Properties                   AlertProperties        `json:"properties"`
+	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
+	NotificationChannels         []string               `json:"notification_channels,omitempty"`
+	RecurringMuteSchedule        *RecurringMuteSchedule `json:"recurring_mute_schedule,omitempty"`
 
 	ExpressionArgs map[string]*AlertExpressionArg `json:"expression_args,omitempty"`
+}
+
+// RecurringMuteWindow is one weekly wall-clock interval during which an alert
+// is muted.
+type RecurringMuteWindow struct {
+	Weekdays  []string `json:"weekdays"`
+	StartTime string   `json:"start_time"`
+	EndTime   string   `json:"end_time"`
+}
+
+type RecurringMuteSchedule struct {
+	Enabled  bool                  `json:"enabled"`
+	Timezone string                `json:"timezone"`
+	Windows  []RecurringMuteWindow `json:"windows"`
+}
+
+// RecurringMuteSchedulePatch keeps the three API request states distinct:
+// nil field omits the key, a nil Schedule serializes as null, and a schedule
+// serializes as an object.
+type RecurringMuteSchedulePatch struct {
+	Schedule *RecurringMuteSchedule
+}
+
+func (p RecurringMuteSchedulePatch) MarshalJSON() ([]byte, error) {
+	if p.Schedule == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal(p.Schedule)
 }
 
 type AlertProperties struct {
@@ -627,35 +656,37 @@ type AlertProperties struct {
 }
 
 type AlertCreateRequest struct {
-	RuleName                     string                 `json:"rule_name"`
-	PrimaryIndicator             string                 `json:"primary_indicator"`
-	Expression                   string                 `json:"expression,omitempty"`
-	Condition                    string                 `json:"condition,omitempty"`
-	EvalWindow                   int                    `json:"eval_window,omitempty"`
-	AlertCondition               string                 `json:"alert_condition,omitempty"`
-	Severity                     string                 `json:"severity"`
-	IsDisabled                   bool                   `json:"is_disabled"`
-	Properties                   AlertProperties        `json:"properties"`
-	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
-	MuteUntil                    int                    `json:"mute_until"`
-	ExpressionArgs               map[string]interface{} `json:"expression_args"`
-	NotificationChannels         []string               `json:"notification_channels,omitempty"`
+	RuleName                     string                      `json:"rule_name"`
+	PrimaryIndicator             string                      `json:"primary_indicator"`
+	Expression                   string                      `json:"expression,omitempty"`
+	Condition                    string                      `json:"condition,omitempty"`
+	EvalWindow                   int                         `json:"eval_window,omitempty"`
+	AlertCondition               string                      `json:"alert_condition,omitempty"`
+	Severity                     string                      `json:"severity"`
+	IsDisabled                   bool                        `json:"is_disabled"`
+	Properties                   AlertProperties             `json:"properties"`
+	GroupTimeseriesNotifications bool                        `json:"group_timeseries_notifications"`
+	MuteUntil                    int                         `json:"mute_until"`
+	ExpressionArgs               map[string]interface{}      `json:"expression_args"`
+	NotificationChannels         []string                    `json:"notification_channels,omitempty"`
+	RecurringMuteSchedule        *RecurringMuteSchedulePatch `json:"recurring_mute_schedule,omitempty"`
 }
 
 type AlertUpdateRequest struct {
-	RuleName                     *string                `json:"rule_name,omitempty"`
-	PrimaryIndicator             *string                `json:"primary_indicator,omitempty"`
-	Expression                   *string                `json:"expression,omitempty"`
-	Condition                    *string                `json:"condition,omitempty"`
-	EvalWindow                   *int                   `json:"eval_window,omitempty"`
-	AlertCondition               *string                `json:"alert_condition,omitempty"`
-	Severity                     *string                `json:"severity,omitempty"`
-	IsDisabled                   *bool                  `json:"is_disabled,omitempty"`
-	Properties                   *AlertProperties       `json:"properties,omitempty"`
-	GroupTimeseriesNotifications *bool                  `json:"group_timeseries_notifications,omitempty"`
-	MuteUntil                    *int                   `json:"mute_until,omitempty"`
-	ExpressionArgs               map[string]interface{} `json:"expression_args,omitempty"`
-	NotificationChannels         []string               `json:"notification_channels,omitempty"`
+	RuleName                     *string                     `json:"rule_name,omitempty"`
+	PrimaryIndicator             *string                     `json:"primary_indicator,omitempty"`
+	Expression                   *string                     `json:"expression,omitempty"`
+	Condition                    *string                     `json:"condition,omitempty"`
+	EvalWindow                   *int                        `json:"eval_window,omitempty"`
+	AlertCondition               *string                     `json:"alert_condition,omitempty"`
+	Severity                     *string                     `json:"severity,omitempty"`
+	IsDisabled                   *bool                       `json:"is_disabled,omitempty"`
+	Properties                   *AlertProperties            `json:"properties,omitempty"`
+	GroupTimeseriesNotifications *bool                       `json:"group_timeseries_notifications,omitempty"`
+	MuteUntil                    *int                        `json:"mute_until,omitempty"`
+	ExpressionArgs               map[string]interface{}      `json:"expression_args,omitempty"`
+	NotificationChannels         []string                    `json:"notification_channels,omitempty"`
+	RecurringMuteSchedule        *RecurringMuteSchedulePatch `json:"recurring_mute_schedule,omitempty"`
 }
 
 type Macro struct {

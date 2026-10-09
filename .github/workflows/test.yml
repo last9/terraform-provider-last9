@@ -62,6 +62,12 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
       - name: Run Unit Tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
@@ -87,6 +93,12 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
           cache: true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
 
       - name: Run Integration Tests
         run: |
