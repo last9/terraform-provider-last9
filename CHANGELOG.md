@@ -55,12 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```terraform
   notification_channels {
-    severity = "..."
-    channels = [...]
+    severity = "breach"
+    channels = ["channel-name"]
   }
   ```
 
-  Channels that were never really attached before will now show as changes — that is the fix taking effect.
+  Replace `breach` and `channel-name` with your severity and channel. Channels that were never really attached before will now show as changes — that is the fix taking effect.
 - A declared `notification_channels` block on `last9_entity` is fully authoritative for that severity: channels bound at that severity via the UI or any other way are detached on the next apply. Omit the block for severities you manage elsewhere.
 
 ### Explicitly out of scope
