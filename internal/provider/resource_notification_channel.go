@@ -114,7 +114,8 @@ func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m 
 	if len(headers) > 0 && channelType != "generic_webhook" {
 		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
 	}
-	if _, configured := d.GetOkExists("webhook_ca_certificate"); configured && channelType != "generic_webhook" {
+	webhookCACertificate := d.Get("webhook_ca_certificate").(string)
+	if (webhookCACertificate != "" || d.HasChange("webhook_ca_certificate")) && channelType != "generic_webhook" {
 		return fmt.Errorf("webhook_ca_certificate can only be specified for generic_webhook type, got type: %s", channelType)
 	}
 
@@ -155,8 +156,8 @@ func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 			prop.WebhookHeaders = headers
 			hasValue = true
 		}
-		if _, ok := d.GetOkExists("webhook_ca_certificate"); ok {
-			certificate := d.Get("webhook_ca_certificate").(string)
+		certificate := d.Get("webhook_ca_certificate").(string)
+		if certificate != "" || d.HasChange("webhook_ca_certificate") {
 			prop.WebhookCACertificate = &certificate
 			hasValue = true
 		}

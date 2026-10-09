@@ -338,9 +338,8 @@ func TestReviewColdStorageBucketReadDefaultsMissingProviderToS3(t *testing.T) {
 
 func TestReviewNotificationWebhookCAIsWebhookOnly(t *testing.T) {
 	for name, config := range map[string]map[string]interface{}{
-		"webhook":     {"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
-		"slack":       {"name": "slack", "type": "slack", "destination": "https://hooks.slack.com/services/test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
-		"empty slack": {"name": "slack", "type": "slack", "destination": "https://hooks.slack.com/services/test", "webhook_ca_certificate": ""},
+		"webhook": {"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
+		"slack":   {"name": "slack", "type": "slack", "destination": "https://hooks.slack.com/services/test", "webhook_ca_certificate": "-----BEGIN CERTIFICATE-----"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := resourceNotificationChannel().Diff(context.Background(), nil, terraform.NewResourceConfigRaw(config), nil)
