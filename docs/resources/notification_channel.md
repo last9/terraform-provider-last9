@@ -38,6 +38,7 @@ resource "last9_notification_channel" "slack_alerts" {
   slack_app_mode = true
   destination    = "C0123456789" # Slack channel ID
   send_resolved  = true
+  service_owner_handle = "oncall,platform-team"
 }
 ```
 
@@ -105,6 +106,7 @@ resource "last9_notification_channel" "webhook_with_auth" {
 - `send_resolved` (Boolean) Whether to send notifications when alerts are resolved. Default: `true`.
 - `headers` (Map of String) Custom HTTP headers to send with webhook requests. Only applicable for `generic_webhook` type. Useful for authentication tokens or custom metadata.
 - `slack_app_mode` (Boolean) Only valid for `type = "slack"`. When `true`, deliver via the Last9 Slack App (`chat.postMessage` via OAuth bot token) and treat `destination` as a Slack channel ID. When `false` or unset, deliver via Slack incoming webhook and treat `destination` as a `https://hooks.slack.com/` URL. **Force-new**: mode cannot be changed after the channel is created. New Slack channels must set this to `true`; the API no longer accepts new webhook Slack channels.
+- `service_owner_handle` (String) Comma-separated Slack handles or email addresses to mention. Only applicable for `slack` and `email` types.
 
 ### Read-Only
 

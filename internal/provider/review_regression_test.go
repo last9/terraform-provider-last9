@@ -567,6 +567,59 @@ func TestReviewSyntheticCreateHonorsPaused(t *testing.T) {
 	}
 }
 
+func TestReviewNotificationServiceOwnerHandlePreservesAndClears(t *testing.T) {
+	var requests []client.NotificationChannelRequest
+	currentHandle := "oncall,platform-team"
+	c := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprintf(w, `[{"id":1,"name":"team-alerts","type":"slack","destination":"C0123456789","send_resolved":true,"property":{"slack_app_mode":true,"service_owner_handle":%q}}]`, currentHandle)
+		case http.MethodPut:
+			var request client.NotificationChannelRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			requests = append(requests, request)
+			if request.Property == nil || request.Property.ServiceOwnerHandle == nil {
+				http.Error(w, `{"error":"missing service_owner_handle"}`, http.StatusBadRequest)
+				return
+			}
+			currentHandle = *request.Property.ServiceOwnerHandle
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	d := schema.TestResourceDataRaw(t, resourceNotificationChannel().Schema, map[string]interface{}{
+		"name": "team-alerts", "type": "slack", "destination": "C0123456789", "slack_app_mode": true, "service_owner_handle": currentHandle,
+	})
+	d.SetId("1")
+	if ds := resourceNotificationChannelRead(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if err := d.Set("name", "team-alerts-updated"); err != nil {
+		t.Fatal(err)
+	}
+	if ds := resourceNotificationChannelUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if err := d.Set("service_owner_handle", ""); err != nil {
+		t.Fatal(err)
+	}
+	if ds := resourceNotificationChannelUpdate(context.Background(), d, c); ds.HasError() {
+		t.Fatal(ds)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("PUT requests = %d, want 2", len(requests))
+	}
+	for i, want := range []string{"oncall,platform-team", ""} {
+		if requests[i].Property == nil || requests[i].Property.ServiceOwnerHandle == nil || *requests[i].Property.ServiceOwnerHandle != want {
+			t.Fatalf("PUT request %d service_owner_handle = %#v, want %q", i, requests[i].Property, want)
+		}
+	}
+}
+
 func TestReviewNewExamplesParseAsTerraform(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {

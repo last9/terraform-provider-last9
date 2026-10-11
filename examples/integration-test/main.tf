@@ -32,10 +32,10 @@ provider "last9" {
 # ====================================================================
 locals {
   # Generate unique destinations using environment name (contains timestamp)
-  webhook_url           = var.webhook_url != "" ? var.webhook_url : "https://webhook.site/${var.environment}"
-  slack_channel_id      = var.slack_channel_id != "" ? var.slack_channel_id : "C0000000000"
-  pagerduty_key         = var.pagerduty_integration_key != "" ? var.pagerduty_integration_key : "pd-key-${var.environment}"
-  alert_email           = var.alert_email != "" ? var.alert_email : "${var.environment}@last9.io"
+  webhook_url      = var.webhook_url != "" ? var.webhook_url : "https://webhook.site/${var.environment}"
+  slack_channel_id = var.slack_channel_id != "" ? var.slack_channel_id : "C0000000000"
+  pagerduty_key    = var.pagerduty_integration_key != "" ? var.pagerduty_integration_key : "pd-key-${var.environment}"
+  alert_email      = var.alert_email != "" ? var.alert_email : "${var.environment}@last9.io"
 }
 
 # ====================================================================
@@ -188,9 +188,9 @@ resource "last9_notification_channel" "webhook_with_headers" {
   send_resolved = true
 
   headers = {
-    "Authorization"      = "Bearer ${var.webhook_auth_token}"
-    "X-Custom-Header"    = "integration-test"
-    "X-Environment"      = var.environment
+    "Authorization"   = "Bearer ${var.webhook_auth_token}"
+    "X-Custom-Header" = "integration-test"
+    "X-Environment"   = var.environment
   }
 }
 
@@ -263,6 +263,27 @@ resource "last9_scheduled_search_alert" "high_error_count" {
           { "$eq" = ["SeverityText", "ERROR"] }
         ]
       }
+    }
+  ])
+
+  resultant_query = jsonencode([
+    {
+      type = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
     }
   ])
 

@@ -67,6 +67,11 @@ func resourceNotificationChannel() *schema.Resource {
 				ForceNew:    true,
 				Description: "When true, deliver via the Last9 Slack App (bot token + chat.postMessage) and treat destination as a Slack channel ID (e.g. C0123456789). When false or unset, destination must be a https://hooks.slack.com/ webhook URL. Mode cannot be changed after the channel is created. Only applicable for slack type. New Slack webhook channels are no longer accepted by the API; new Slack channels must set slack_app_mode = true.",
 			},
+			"service_owner_handle": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "Comma-separated Slack handles or email addresses to mention. Only applicable for slack and email types.",
+			},
 			// Computed fields
 			"global": {
 				Type:        schema.TypeBool,
@@ -113,6 +118,10 @@ func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m 
 		return fmt.Errorf("slack_app_mode can only be set for slack type, got type: %s", channelType)
 	}
 
+	if _, ok := d.GetOk("service_owner_handle"); ok && channelType != "slack" && channelType != "email" {
+		return fmt.Errorf("service_owner_handle can only be set for slack or email type, got type: %s", channelType)
+	}
+
 	if channelType == "slack" && destination != "" {
 		if slackAppMode {
 			if strings.HasPrefix(destination, "http") {
@@ -151,6 +160,13 @@ func buildProperty(d *schema.ResourceData) *client.NotificationSettingProperty {
 	if channelType == "slack" && d.Get("slack_app_mode").(bool) {
 		prop.SlackAppMode = true
 		hasValue = true
+	}
+
+	if channelType == "slack" || channelType == "email" {
+		if handle := d.Get("service_owner_handle").(string); handle != "" || d.HasChange("service_owner_handle") {
+			prop.ServiceOwnerHandle = &handle
+			hasValue = true
+		}
 	}
 
 	if !hasValue {
@@ -207,6 +223,11 @@ func resourceNotificationChannelRead(ctx context.Context, d *schema.ResourceData
 	d.Set("organization_id", channel.OrganizationID)
 	d.Set("created_at", channel.CreatedAt)
 	d.Set("updated_at", channel.UpdatedAt)
+	if (channel.Type == "slack" || channel.Type == "email") && channel.Property != nil {
+		if handle, ok := channel.Property["service_owner_handle"].(string); ok {
+			d.Set("service_owner_handle", handle)
+		}
+	}
 
 	// Extract webhook headers from property if this is a webhook channel
 	if channel.Type == "generic_webhook" && channel.Property != nil {
