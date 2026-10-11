@@ -37,6 +37,28 @@ resource "last9_scheduled_search_alert" "error_count" {
     }
   ])
 
+  # Merged pipeline executed by the scheduled-search runner (query + post-processor)
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = {}
+    }
+  ])
+
   post_processor {
     type = "aggregate"
 
@@ -79,6 +101,27 @@ resource "last9_scheduled_search_alert" "errors_by_service" {
     }
   ])
 
+  resultant_query = jsonencode([
+    {
+      type  = "filter"
+      query = {
+        "$and" = [
+          { "$eq" = ["SeverityText", "ERROR"] }
+        ]
+      }
+    },
+    {
+      type = "aggregate"
+      aggregates = [
+        {
+          function = { "$count" = [] }
+          as       = "result"
+        }
+      ]
+      groupby = { "service" = "$attributes.service" }
+    }
+  ])
+
   post_processor {
     type = "aggregate"
 
@@ -116,6 +159,27 @@ resource "last9_scheduled_search_alert" "errors_by_service" {
 - `query_type` (String) Query type. Default: `logjson-aggregate`.
 - `physical_index` (String) Physical index to search. Default: `logs`.
 - `telemetry` (String) Telemetry type. Default: `logs`.
+- `resultant_query` (String, Optional+Computed) Full executable aggregate pipeline. Required for aggregate creates and when `query` or `post_processor` changes; omitted configuration preserves the imported value on unrelated edits.
+
+### Resultant Query
+
+Supply the full pipeline the scheduled-search runner executes, including filter and aggregate stages. The provider does not compile it from `query` and `post_processor`. It must be a non-empty JSON array of objects, and the aggregate output alias must be `"result"` (the runner reads the `result` metric key).
+
+```terraform
+resultant_query = jsonencode([
+  # ... filter stages from query ...
+  {
+    type = "aggregate"
+    aggregates = [
+      {
+        function = { "$count" = [] }
+        as       = "result"
+      }
+    ]
+    groupby = {}
+  }
+])
+```
 
 ### Read-Only
 
