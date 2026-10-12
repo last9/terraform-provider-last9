@@ -238,7 +238,9 @@ func telemetryToMetricsDelete(ctx context.Context, d *schema.ResourceData, m int
 // in that case.
 func deriveResultantQuery(query string) string {
 	var stages []map[string]interface{}
-	if err := json.Unmarshal([]byte(query), &stages); err != nil {
+	dec := json.NewDecoder(strings.NewReader(query))
+	dec.UseNumber()
+	if err := dec.Decode(&stages); err != nil {
 		return query
 	}
 
