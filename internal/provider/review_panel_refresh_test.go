@@ -42,7 +42,9 @@ func TestReviewPanelRefreshPreservesEveryServerPanel(t *testing.T) {
 				if r.Method != http.MethodGet {
 					t.Fatalf("unexpected method %s", r.Method)
 				}
-				json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: &client.Dashboard{ID: d.Id(), Name: "Synthetic", Panels: panels}})
+				if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: &client.Dashboard{ID: d.Id(), Name: "Synthetic", Panels: panels}}); err != nil {
+					t.Fatal(err)
+				}
 			})
 			if diags := resourceDashboardRead(context.Background(), d, api); diags.HasError() {
 				t.Fatal(diags)
