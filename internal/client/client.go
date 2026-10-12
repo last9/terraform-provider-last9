@@ -1598,7 +1598,7 @@ type DashboardTime struct {
 }
 
 type DashboardPanel struct {
-	Collapsed        bool                          `json:"collapsed,omitempty"`
+	Collapsed        bool                          `json:"collapsed"`
 	FieldOverrides   json.RawMessage               `json:"field_overrides,omitempty"`
 	Transformations  json.RawMessage               `json:"transformations,omitempty"`
 	Links            json.RawMessage               `json:"links,omitempty"`
@@ -1675,7 +1675,7 @@ type DashboardPanelLegendSort struct {
 
 type DashboardVariable struct {
 	Regex         string        `json:"regex,omitempty"`
-	IncludeAll    bool          `json:"include_all,omitempty"`
+	IncludeAll    bool          `json:"include_all"`
 	AllValue      string        `json:"all_value,omitempty"`
 	Values        []interface{} `json:"values"`
 	Matches       []string      `json:"matches,omitempty"`
