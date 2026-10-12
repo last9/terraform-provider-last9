@@ -49,7 +49,9 @@ func TestReviewRenamePreservesOmittedPanelJSON(t *testing.T) {
 				if sent == nil {
 					t.Fatal("read before update")
 				}
-				json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: sent})
+				if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: sent}); err != nil {
+					t.Fatal(err)
+				}
 			})
 			_, diags := r.Apply(context.Background(), d.State(), diff, api)
 			if diags.HasError() {
