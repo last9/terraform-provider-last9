@@ -119,6 +119,43 @@ func TestTelemetryToMetricsQueryUpdateRecomputesResultantQuery(t *testing.T) {
 	}
 }
 
+func TestReviewNumericPredicateChangeMustPlan(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		resource  *schema.Resource
+		queryType string
+	}{
+		{"logs", resourceLogsToMetrics(), "logjson-aggregate"},
+		{"traces", resourceTracesToMetrics(), "tracejson-aggregate"},
+	} {
+		for _, pair := range [][2]string{
+			{"42", "43"},
+			{"9007199254740992", "9007199254740993"},
+		} {
+			for _, field := range []string{"query", "resultant_query"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", tc.name, field, pair[1]), func(t *testing.T) {
+					oldQuery := telemetryToMetricsNumericPredicateQuery(pair[0])
+					oldConfig := telemetryToMetricsLifecycleConfig(tc.queryType, oldQuery)
+					oldConfig["resultant_query"] = oldQuery
+					prior := schema.TestResourceDataRaw(t, tc.resource.Schema, oldConfig)
+					prior.SetId("ap-south-1:rule-1:numeric")
+
+					newConfig := telemetryToMetricsLifecycleConfig(tc.queryType, oldQuery)
+					newConfig["resultant_query"] = oldQuery
+					newConfig[field] = telemetryToMetricsNumericPredicateQuery(pair[1])
+					diff, err := tc.resource.Diff(context.Background(), prior.State(), terraform.NewResourceConfigRaw(newConfig), nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if diff == nil || diff.Attributes[field] == nil || diff.Attributes[field].Old == diff.Attributes[field].New {
+						t.Fatalf("%s edit %s -> %s was suppressed; diff=%#v", field, pair[0], pair[1], diff)
+					}
+				})
+			}
+		}
+	}
+}
+
 func telemetryToMetricsLifecycleConfig(queryType, query string) map[string]interface{} {
 	physicalIndex := "logs"
 	if queryType == "tracejson-aggregate" {
@@ -137,6 +174,10 @@ func telemetryToMetricsLifecycleConfig(queryType, query string) map[string]inter
 
 func telemetryToMetricsTestQuery(service string) string {
 	return fmt.Sprintf(`[{"type":"filter","query":{"$and":[{"$eq":["ServiceName",%q]}]}},{"type":"aggregate","aggregates":[{"function":{"$count":[]},"as":"requests"}],"groupby":{"ServiceName":"service_name"},"window":["1","minutes"]}]`, service)
+}
+
+func telemetryToMetricsNumericPredicateQuery(value string) string {
+	return fmt.Sprintf(`[{"type":"filter","query":{"$eq":["attributes['order_id']",%s]}},{"type":"aggregate","aggregates":[{"function":{"$count":[]},"as":"result"}],"window":["1","minutes"]}]`, value)
 }
 
 func writeTelemetryToMetricsResponse(t *testing.T, w http.ResponseWriter, rule client.ScheduledSearchAlert) {

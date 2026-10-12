@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 
@@ -31,6 +32,32 @@ func TestReviewResultantQueryPreservesIntegerFilter(t *testing.T) {
 					t.Fatalf("executed order_id=%s; authored order_id=%s", got, value)
 				}
 			})
+		}
+	}
+}
+
+func TestReviewLosslessDerivationSeeded(t *testing.T) {
+	rng := rand.New(rand.NewSource(221012))
+	values := []string{"-0", "0.123456789012345678901", "1e300", "-9007199254740993", "18446744073709551615"}
+	for i := 0; i < 100; i++ {
+		values = append(values, fmt.Sprint(rng.Uint64()))
+	}
+
+	for _, value := range values {
+		query := telemetryToMetricsNumericPredicateQuery(value)
+		derived := deriveResultantQuery(query)
+		dec := json.NewDecoder(strings.NewReader(derived))
+		dec.UseNumber()
+		var stages []map[string]interface{}
+		if err := dec.Decode(&stages); err != nil {
+			t.Fatal(err)
+		}
+		got := stages[0]["query"].(map[string]interface{})["$eq"].([]interface{})[1].(json.Number).String()
+		if got != value {
+			t.Fatalf("literal %s changed to %s", value, got)
+		}
+		if deriveResultantQuery(derived) != derived {
+			t.Fatal("derivation is not idempotent")
 		}
 	}
 }

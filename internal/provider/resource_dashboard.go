@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"math/big"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -51,7 +51,58 @@ func jsonStringsEqual(a, b string) bool {
 	if err := bdec.Decode(&bv); err != nil {
 		return false
 	}
-	return reflect.DeepEqual(av, bv)
+	return jsonValuesEqual(av, bv)
+}
+
+func jsonValuesEqual(a, b interface{}) bool {
+	switch av := a.(type) {
+	case map[string]interface{}:
+		bv, ok := b.(map[string]interface{})
+		if !ok || len(av) != len(bv) {
+			return false
+		}
+		for key, value := range av {
+			other, ok := bv[key]
+			if !ok || !jsonValuesEqual(value, other) {
+				return false
+			}
+		}
+		return true
+	case []interface{}:
+		bv, ok := b.([]interface{})
+		if !ok || len(av) != len(bv) {
+			return false
+		}
+		for i, value := range av {
+			if !jsonValuesEqual(value, bv[i]) {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		bv, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		return jsonNumbersEqual(av, bv)
+	default:
+		return a == b
+	}
+}
+
+func jsonNumbersEqual(a, b json.Number) bool {
+	if a == b {
+		return true
+	}
+	ar, ok := new(big.Rat).SetString(a.String())
+	if !ok {
+		return false
+	}
+	br, ok := new(big.Rat).SetString(b.String())
+	if !ok {
+		return false
+	}
+	return ar.Cmp(br) == 0
 }
 
 var (
