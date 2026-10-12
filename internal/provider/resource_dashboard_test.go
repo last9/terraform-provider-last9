@@ -64,6 +64,130 @@ func TestDashboardPanelStateUpgradeV0PreservesStableIdentityAndOrder(t *testing.
 	}
 }
 
+func TestDashboardPanelContentEditsProduceDiff(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]interface{})
+	}{
+		{
+			name: "panel rename",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["name"] = "After"
+			},
+		},
+		{
+			name: "collapsed",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["collapsed"] = false
+			},
+		},
+		{
+			name: "field overrides",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":false,"thresholds":[{"value":"500","color":"red"}]}}]`
+			},
+		},
+		{
+			name: "logs config",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffVisualization(config)["logs_config_json"] = `{"columns":["timestamp"],"sort_order":"asc","row_limit":200}`
+			},
+		},
+		{
+			name: "value mappings",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffVisualization(config)["value_mappings_json"] = `[{"type":"value","value":"DOWN","text":"Down"}]`
+			},
+		},
+		{
+			name: "query expr",
+			mutate: func(config map[string]interface{}) {
+				query := firstDashboardDiffPanel(config)["query"].([]interface{})[0].(map[string]interface{})
+				query["expr"] = `{service="web"}`
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := resourceDashboard()
+			before := dashboardDiffConfig()
+			after := dashboardDiffConfig()
+			tc.mutate(after)
+
+			d := schema.TestResourceDataRaw(t, r.Schema, before)
+			d.SetId("synthetic")
+			diff, err := r.Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(after), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !diffHasPanelChange(diff) {
+				t.Fatalf("panel edit produced no panel diff: %#v", diff)
+			}
+
+			applied := dashboardDiffConfig()
+			tc.mutate(applied)
+			firstDashboardDiffPanel(applied)["id"] = "id-alpha"
+			appliedState := schema.TestResourceDataRaw(t, r.Schema, applied)
+			appliedState.SetId("synthetic")
+			clean, err := r.Diff(context.Background(), appliedState.State(), terraform.NewResourceConfigRaw(after), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diffHasPanelChange(clean) {
+				t.Fatalf("clean re-plan produced panel diff: %#v", clean)
+			}
+		})
+	}
+}
+
+func dashboardDiffConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"region": "us-east-1",
+		"name":   "Synthetic",
+		"panel": []interface{}{map[string]interface{}{
+			"key":                  "alpha",
+			"position":             0,
+			"name":                 "Before",
+			"collapsed":            true,
+			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":"500","color":"red"}]}}]`,
+			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
+			"visualization": []interface{}{map[string]interface{}{
+				"type":                "logs",
+				"logs_config_json":    `{"columns":["timestamp"],"sort_order":"desc","row_limit":1000}`,
+				"value_mappings_json": `[{"type":"value","value":"UP","text":"Up"}]`,
+			}},
+			"query": []interface{}{map[string]interface{}{
+				"position":   0,
+				"name":       "A",
+				"expr":       `{service="api"}`,
+				"telemetry":  "logs",
+				"query_type": "log_ql",
+			}},
+		}},
+	}
+}
+
+func firstDashboardDiffPanel(config map[string]interface{}) map[string]interface{} {
+	return config["panel"].([]interface{})[0].(map[string]interface{})
+}
+
+func firstDashboardDiffVisualization(config map[string]interface{}) map[string]interface{} {
+	return firstDashboardDiffPanel(config)["visualization"].([]interface{})[0].(map[string]interface{})
+}
+
+func diffHasPanelChange(diff *terraform.InstanceDiff) bool {
+	if diff == nil {
+		return false
+	}
+	for key := range diff.Attributes {
+		if strings.HasPrefix(key, "panel.") {
+			return true
+		}
+	}
+	return false
+}
+
 // Acceptance tests
 
 func TestAccDashboard_basic(t *testing.T) {

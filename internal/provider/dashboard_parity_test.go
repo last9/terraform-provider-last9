@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -242,6 +243,43 @@ func TestDashboardParityAPIRequiresStringFieldOverrideThresholdValue(t *testing.
 	}
 }
 
+func TestDashboardParityJSONRejectsNumericNativeValues(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(map[string]interface{}, map[string]interface{})
+		wantErr string
+	}{
+		{
+			name: "numeric value mapping value",
+			mutate: func(panel, visualization map[string]interface{}) {
+				visualization["value_mappings_json"] = `[{"type":"value","value":500,"text":"Error"}]`
+			},
+			wantErr: "value_mappings_json[0].value must be a JSON string",
+		},
+		{
+			name: "numeric field override threshold value",
+			mutate: func(panel, visualization map[string]interface{}) {
+				panel["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"thresholds":[{"value":500,"color":"red"}]}}]`
+			},
+			wantErr: "field_overrides_json[0].properties.thresholds[0].value must be a JSON string",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := parityDashboardData(t)
+			panel := parityLogsPanel(t, data)
+			visualization := dashboardPanelValues(panel["visualization"])[0].(map[string]interface{})
+			tc.mutate(panel, visualization)
+			err := validateDashboardData(data)
+			if err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validation error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestDashboardParityLogsValidation(t *testing.T) {
 	for _, mutate := range []func(map[string]interface{}, map[string]interface{}){
 		func(panel, visualization map[string]interface{}) { panel["version"] = 0 },
@@ -252,18 +290,23 @@ func TestDashboardParityLogsValidation(t *testing.T) {
 		},
 	} {
 		data := parityDashboardData(t)
-		var panel map[string]interface{}
-		for _, raw := range dashboardPanelValues(data.Get("panel")) {
-			candidate := raw.(map[string]interface{})
-			if candidate["key"] == "logs" {
-				panel = candidate
-				break
-			}
-		}
+		panel := parityLogsPanel(t, data)
 		visualization := dashboardPanelValues(panel["visualization"])[0].(map[string]interface{})
 		mutate(panel, visualization)
 		if err := validateDashboardLogs(panel, visualization); err == nil {
 			t.Fatalf("invalid logs configuration accepted: %v", visualization)
 		}
 	}
+}
+
+func parityLogsPanel(t *testing.T, data *schema.ResourceData) map[string]interface{} {
+	t.Helper()
+	for _, raw := range dashboardPanelValues(data.Get("panel")) {
+		candidate := raw.(map[string]interface{})
+		if candidate["key"] == "logs" {
+			return candidate
+		}
+	}
+	t.Fatal("logs panel not found")
+	return nil
 }

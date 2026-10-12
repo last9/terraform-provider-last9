@@ -181,7 +181,6 @@ func resourceDashboard() *schema.Resource {
 				ConfigMode: schema.SchemaConfigModeBlock,
 				Required:   true,
 				MinItems:   1,
-				Set:        dashboardPanelKeyHash,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"key": {
@@ -229,7 +228,6 @@ func resourceDashboard() *schema.Resource {
 							Type:     schema.TypeSet,
 							Optional: true,
 							MaxItems: 1,
-							Set:      dashboardConstantSetHash("layout"),
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"x": {Type: schema.TypeInt, Required: true},
@@ -254,13 +252,6 @@ func resourceDashboard() *schema.Resource {
 							ConfigMode: schema.SchemaConfigModeBlock,
 							Required:   true,
 							MaxItems:   1,
-							Set: func(v interface{}) int {
-								visualization, ok := v.(map[string]interface{})
-								if !ok {
-									return schema.HashString(fmt.Sprintf("invalid-visualization-%T", v))
-								}
-								return schema.HashString(fmt.Sprint(visualization["type"]))
-							},
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"type": {
@@ -275,7 +266,6 @@ func resourceDashboard() *schema.Resource {
 										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
-										Set:      dashboardConstantSetHash("timeseries"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"display_type": {
@@ -290,7 +280,6 @@ func resourceDashboard() *schema.Resource {
 										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
-										Set:      dashboardConstantSetHash("bar"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"orientation": {
@@ -306,13 +295,11 @@ func resourceDashboard() *schema.Resource {
 										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
-										Set:      dashboardConstantSetHash("stat"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"threshold": {
 													Type:     schema.TypeSet,
 													Optional: true,
-													Set:      dashboardThresholdKeyHash,
 													Elem: &schema.Resource{
 														Schema: map[string]*schema.Schema{
 															"position": {Type: schema.TypeInt, Required: true, ValidateFunc: validation.IntAtLeast(0)},
@@ -328,7 +315,6 @@ func resourceDashboard() *schema.Resource {
 										Type:     schema.TypeSet,
 										Optional: true,
 										MaxItems: 1,
-										Set:      dashboardConstantSetHash("markdown"),
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
 												"content": {
@@ -355,7 +341,6 @@ func resourceDashboard() *schema.Resource {
 						"query": {
 							Type:     schema.TypeSet,
 							Optional: true,
-							Set:      dashboardQueryKeyHash,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"position": {Type: schema.TypeInt, Required: true, ValidateFunc: validation.IntAtLeast(0)},
@@ -520,6 +505,9 @@ func validateDashboardData(d dashboardGetter) error {
 		if err := validateDashboardLogs(pm, vm); err != nil {
 			return fmt.Errorf("panel[%d] %q: %w", i, pm["name"], err)
 		}
+		if err := validateDashboardNativeJSONStrings(pm, vm); err != nil {
+			return fmt.Errorf("panel[%d] %q: %w", i, pm["name"], err)
+		}
 
 		if vizType == "section" {
 			if len(queries) > 0 {
@@ -665,6 +653,8 @@ func resourceDashboardUpdate(ctx context.Context, d *schema.ResourceData, m inte
 	req := buildDashboardRequest(d)
 	if req.Dashboard != nil {
 		req.Dashboard.ID = d.Id()
+		oldPanels, _ := d.GetChange("panel")
+		preservePanelIDsByKey(req.Dashboard.Panels, dashboardPanelValues(d.Get("panel")), dashboardPanelValues(oldPanels))
 	}
 
 	if _, err := apiClient.UpdateDashboard(d.Id(), req); err != nil {
@@ -795,30 +785,6 @@ func dashboardPanelValues(value interface{}) []interface{} {
 	}
 }
 
-func dashboardConstantSetHash(key string) schema.SchemaSetFunc {
-	return func(interface{}) int { return schema.HashString(key) }
-}
-
-func dashboardQueryKeyHash(value interface{}) int {
-	query, ok := value.(map[string]interface{})
-	if !ok {
-		return schema.HashString(fmt.Sprintf("invalid-query-%T", value))
-	}
-	return schema.HashString(fmt.Sprint(query["name"]))
-}
-
-func dashboardThresholdKeyHash(value interface{}) int {
-	threshold, ok := value.(map[string]interface{})
-	if !ok {
-		return schema.HashString(fmt.Sprintf("invalid-threshold-%T", value))
-	}
-	position, ok := threshold["position"].(int)
-	if !ok {
-		return schema.HashString("unknown-threshold-position")
-	}
-	return schema.HashInt(position)
-}
-
 func validateDashboardOrderedBlocks(blocks []interface{}, label string) error {
 	positions := make(map[int]struct{}, len(blocks))
 	for i, raw := range blocks {
@@ -841,6 +807,39 @@ func validateDashboardOrderedBlocks(blocks []interface{}, label string) error {
 		}
 	}
 	return nil
+}
+
+func preservePanelIDsByKey(panels []*client.DashboardPanel, newValues, oldValues []interface{}) {
+	idsByKey := make(map[string]string, len(oldValues))
+	for _, raw := range oldValues {
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := dashboardPanelKey(panel)
+		id, _ := panel["id"].(string)
+		if key != "" && id != "" {
+			idsByKey[key] = id
+		}
+	}
+	if len(idsByKey) == 0 {
+		return
+	}
+
+	ordered := orderByDashboardPosition(newValues)
+	for i, raw := range ordered {
+		if i >= len(panels) || panels[i] == nil || panels[i].ID != "" {
+			continue
+		}
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := dashboardPanelKey(panel)
+		if id := idsByKey[key]; id != "" {
+			panels[i].ID = id
+		}
+	}
 }
 
 func dashboardPanelKey(panel map[string]interface{}) (string, bool) {
@@ -1249,18 +1248,6 @@ func flattenMetadata(md *client.DashboardMetadata) []interface{} {
 			"tags":     md.Tags,
 		},
 	}
-}
-
-func dashboardPanelKeyHash(v interface{}) int {
-	panel, ok := v.(map[string]interface{})
-	if !ok {
-		return schema.HashString(fmt.Sprintf("invalid-panel-%T", v))
-	}
-	key, _ := dashboardPanelKey(panel)
-	if key == "" {
-		key, _ = panel["name"].(string)
-	}
-	return schema.HashString(key)
 }
 
 func dashboardLegacyPanelSchema(current map[string]*schema.Schema) map[string]*schema.Schema {

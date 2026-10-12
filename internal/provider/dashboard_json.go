@@ -59,6 +59,78 @@ func validateDashboardLogs(panel, visualization map[string]interface{}) error {
 	return validateRawLogsQuery(panel, visualization)
 }
 
+func validateDashboardNativeJSONStrings(panel, visualization map[string]interface{}) error {
+	if err := validateDashboardValueMappingsJSON(visualization["value_mappings_json"]); err != nil {
+		return err
+	}
+	return validateDashboardFieldOverridesJSON(panel["field_overrides_json"])
+}
+
+func validateDashboardValueMappingsJSON(value interface{}) error {
+	text, _ := value.(string)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	var mappings []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &mappings); err != nil {
+		return fmt.Errorf("value_mappings_json must be a JSON array of objects: %w", err)
+	}
+	for i, mapping := range mappings {
+		if raw, ok := mapping["value"]; ok {
+			if err := validateJSONStringToken(raw, fmt.Sprintf("value_mappings_json[%d].value", i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateDashboardFieldOverridesJSON(value interface{}) error {
+	text, _ := value.(string)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	var overrides []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &overrides); err != nil {
+		return fmt.Errorf("field_overrides_json must be a JSON array of objects: %w", err)
+	}
+	for overrideIndex, override := range overrides {
+		propertiesRaw, ok := override["properties"]
+		if !ok {
+			continue
+		}
+		var properties map[string]json.RawMessage
+		if err := json.Unmarshal(propertiesRaw, &properties); err != nil {
+			continue
+		}
+		thresholdsRaw, ok := properties["thresholds"]
+		if !ok {
+			continue
+		}
+		var thresholds []map[string]json.RawMessage
+		if err := json.Unmarshal(thresholdsRaw, &thresholds); err != nil {
+			continue
+		}
+		for thresholdIndex, threshold := range thresholds {
+			if raw, ok := threshold["value"]; ok {
+				label := fmt.Sprintf("field_overrides_json[%d].properties.thresholds[%d].value", overrideIndex, thresholdIndex)
+				if err := validateJSONStringToken(raw, label); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateJSONStringToken(raw json.RawMessage, label string) error {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("%s must be a JSON string", label)
+	}
+	return nil
+}
+
 func validateRawLogsQuery(panel, visualization map[string]interface{}) error {
 	queries := dashboardPanelValues(panel["query"])
 	if panel["version"].(int) < 1 || len(queries) != 1 {
