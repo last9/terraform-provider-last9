@@ -425,6 +425,7 @@ func resourceDashboard() *schema.Resource {
 
 type dashboardGetter interface {
 	Get(key string) interface{}
+	GetChange(key string) (interface{}, interface{})
 }
 
 func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
@@ -433,6 +434,8 @@ func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{
 
 func validateDashboardData(d dashboardGetter) error {
 	panels := dashboardPanelValues(d.Get("panel"))
+	oldPanelsRaw, _ := d.GetChange("panel")
+	oldPanelsByKey := indexDashboardPanelsByKey(dashboardPanelValues(oldPanelsRaw))
 	keys := make(map[string]struct{}, len(panels))
 	positions := make(map[int]struct{}, len(panels))
 	for i, p := range panels {
@@ -498,6 +501,16 @@ func validateDashboardData(d dashboardGetter) error {
 						if err := validateDashboardOrderedBlocks(dashboardPanelValues(stat["threshold"]), fmt.Sprintf("panel[%d] %q threshold", i, key)); err != nil {
 							return err
 						}
+					}
+				}
+			}
+		}
+		logsConfig, _ := vm["logs_config_json"].(string)
+		if vizType == "logs" && strings.TrimSpace(logsConfig) == "" {
+			if oldPanel, ok := oldPanelsByKey[key]; ok {
+				if oldViz := firstDashboardMap(oldPanel["visualization"]); oldViz != nil {
+					if old, _ := oldViz["logs_config_json"].(string); strings.TrimSpace(old) != "" {
+						vm["logs_config_json"] = old
 					}
 				}
 			}
@@ -888,6 +901,7 @@ func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues,
 		preserveOmittedJSONField(&panels[i].DataLinks, oldPanel["data_links_json"])
 		preserveOmittedStringField(&panels[i].DatasourceID, newPanel["datasource_id"], oldPanel["datasource_id"])
 		preserveOmittedStringField(&panels[i].Telemetry, newPanel["telemetry"], oldPanel["telemetry"])
+		preserveOmittedLayoutExtras(panels[i], firstDashboardMap(newPanel["layout"]), firstDashboardMap(oldPanel["layout"]))
 
 		if panels[i].Visualization == nil {
 			continue
@@ -931,6 +945,35 @@ func preserveOmittedStringField(field *string, newRaw, oldRaw interface{}) {
 	}
 }
 
+// preserveOmittedLayoutExtras restores imported layout extras (e.g. minH,
+// static) that the API returned but the new config's layout block omitted,
+// without touching the configured x/y/w/h geometry or an explicit extra_json
+// edit/clear.
+func preserveOmittedLayoutExtras(panel *client.DashboardPanel, newLayout, oldLayout map[string]interface{}) {
+	if panel == nil || newLayout == nil || oldLayout == nil {
+		return
+	}
+	if extra, _ := newLayout["extra_json"].(string); strings.TrimSpace(extra) != "" {
+		return
+	}
+	oldExtra, _ := oldLayout["extra_json"].(string)
+	if strings.TrimSpace(oldExtra) == "" {
+		return
+	}
+	var blob map[string]interface{}
+	if err := json.Unmarshal([]byte(oldExtra), &blob); err != nil {
+		return
+	}
+	if panel.Layout == nil {
+		panel.Layout = map[string]any{}
+	}
+	for k, v := range blob {
+		if _, reserved := panel.Layout[k]; !reserved {
+			panel.Layout[k] = v
+		}
+	}
+}
+
 func firstDashboardMap(value interface{}) map[string]interface{} {
 	list := dashboardPanelValues(value)
 	if len(list) == 0 {
@@ -938,6 +981,20 @@ func firstDashboardMap(value interface{}) map[string]interface{} {
 	}
 	m, _ := list[0].(map[string]interface{})
 	return m
+}
+
+func indexDashboardPanelsByKey(values []interface{}) map[string]map[string]interface{} {
+	byKey := make(map[string]map[string]interface{}, len(values))
+	for _, raw := range values {
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if key, ok := dashboardPanelKey(panel); ok && key != "" {
+			byKey[key] = panel
+		}
+	}
+	return byKey
 }
 
 func dashboardPanelKey(panel map[string]interface{}) (string, bool) {
