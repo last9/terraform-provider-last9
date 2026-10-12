@@ -22,7 +22,7 @@ func validateOptionalJSONString(v interface{}, p cty.Path) diag.Diagnostics {
 	}
 	var blob interface{}
 	if err := json.Unmarshal([]byte(s), &blob); err != nil {
-		return diag.Diagnostics{{
+		return diag.Diagnostics{diag.Diagnostic{
 			Severity:      diag.Error,
 			Summary:       "invalid JSON",
 			Detail:        fmt.Sprintf("expected valid JSON, got error: %v", err),
