@@ -350,6 +350,21 @@ func TestReviewNotificationWebhookCAIsWebhookOnly(t *testing.T) {
 	}
 }
 
+func TestReviewNotificationChannelCanReplaceWebhookWhileClearingCA(t *testing.T) {
+	resource := resourceNotificationChannel()
+	previous := schema.TestResourceDataRaw(t, resource.Schema, map[string]interface{}{
+		"name": "hook", "type": "generic_webhook", "destination": "https://example.test", "webhook_ca_certificate": "synthetic-ca",
+	})
+	previous.SetId("1")
+
+	_, err := resource.Diff(context.Background(), previous.State(), terraform.NewResourceConfigRaw(map[string]interface{}{
+		"name": "hook", "type": "slack", "destination": "C0123456789", "slack_app_mode": true,
+	}), nil)
+	if err != nil {
+		t.Fatalf("replacing a webhook while removing its CA: %v", err)
+	}
+}
+
 func TestReviewNotificationWebhookCAPreservesAndClears(t *testing.T) {
 	const certificate = "-----BEGIN CERTIFICATE-----\\nsynthetic\\n-----END CERTIFICATE-----"
 	var requests []client.NotificationChannelRequest

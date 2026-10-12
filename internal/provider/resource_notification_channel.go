@@ -120,7 +120,7 @@ func validateNotificationChannel(ctx context.Context, d *schema.ResourceDiff, m 
 		return fmt.Errorf("headers can only be specified for generic_webhook type, got type: %s", channelType)
 	}
 	webhookCACertificate := d.Get("webhook_ca_certificate").(string)
-	if (webhookCACertificate != "" || d.HasChange("webhook_ca_certificate")) && channelType != "generic_webhook" {
+	if webhookCACertificate != "" && channelType != "generic_webhook" {
 		return fmt.Errorf("webhook_ca_certificate can only be specified for generic_webhook type, got type: %s", channelType)
 	}
 
