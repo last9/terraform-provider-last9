@@ -654,7 +654,10 @@ func resourceDashboardUpdate(ctx context.Context, d *schema.ResourceData, m inte
 	if req.Dashboard != nil {
 		req.Dashboard.ID = d.Id()
 		oldPanels, _ := d.GetChange("panel")
-		preservePanelIDsByKey(req.Dashboard.Panels, dashboardPanelValues(d.Get("panel")), dashboardPanelValues(oldPanels))
+		newValues := dashboardPanelValues(d.Get("panel"))
+		oldValues := dashboardPanelValues(oldPanels)
+		preservePanelIDsByKey(req.Dashboard.Panels, newValues, oldValues)
+		preserveOmittedPanelFieldsByKey(req.Dashboard.Panels, newValues, oldValues)
 	}
 
 	if _, err := apiClient.UpdateDashboard(d.Id(), req); err != nil {
@@ -840,6 +843,101 @@ func preservePanelIDsByKey(panels []*client.DashboardPanel, newValues, oldValues
 			panels[i].ID = id
 		}
 	}
+}
+
+// preserveOmittedPanelFieldsByKey restores optional/computed native panel and
+// visualization fields (e.g. imported field_overrides_json) that the SDK
+// drops when a panel's Set identity changes between plan and apply, matching
+// panels by their stable "key" rather than by array position. A field is
+// only restored when the new config omitted it entirely (produced an empty
+// value); explicit clears ("[]"/"{}") and explicit content edits already
+// produce a non-empty value and are left untouched.
+func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues, oldValues []interface{}) {
+	oldByKey := make(map[string]map[string]interface{}, len(oldValues))
+	for _, raw := range oldValues {
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if key, ok := dashboardPanelKey(panel); ok && key != "" {
+			oldByKey[key] = panel
+		}
+	}
+	if len(oldByKey) == 0 {
+		return
+	}
+
+	ordered := orderByDashboardPosition(newValues)
+	for i, raw := range ordered {
+		if i >= len(panels) || panels[i] == nil {
+			continue
+		}
+		newPanel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := dashboardPanelKey(newPanel)
+		oldPanel, ok := oldByKey[key]
+		if !ok {
+			continue
+		}
+
+		preserveOmittedJSONField(&panels[i].FieldOverrides, oldPanel["field_overrides_json"])
+		preserveOmittedJSONField(&panels[i].Transformations, oldPanel["transformations_json"])
+		preserveOmittedJSONField(&panels[i].Links, oldPanel["links_json"])
+		preserveOmittedJSONField(&panels[i].DataLinks, oldPanel["data_links_json"])
+		preserveOmittedStringField(&panels[i].DatasourceID, newPanel["datasource_id"], oldPanel["datasource_id"])
+		preserveOmittedStringField(&panels[i].Telemetry, newPanel["telemetry"], oldPanel["telemetry"])
+
+		if panels[i].Visualization == nil {
+			continue
+		}
+		newViz := firstDashboardMap(newPanel["visualization"])
+		oldViz := firstDashboardMap(oldPanel["visualization"])
+		if newViz == nil || oldViz == nil {
+			continue
+		}
+		preserveOmittedJSONField(&panels[i].Visualization.ValueMappings, oldViz["value_mappings_json"])
+		preserveOmittedJSONField(&panels[i].Visualization.LogsConfig, oldViz["logs_config_json"])
+		if newTable, _ := newViz["table_config_json"].(string); strings.TrimSpace(newTable) == "" {
+			if old, _ := oldViz["table_config_json"].(string); strings.TrimSpace(old) != "" {
+				var blob interface{}
+				if err := json.Unmarshal([]byte(old), &blob); err == nil {
+					panels[i].Visualization.TableConfig = blob
+				}
+			}
+		}
+	}
+}
+
+// preserveOmittedJSONField restores oldRaw into *field when the new config
+// produced no value (empty field means the new config omitted this
+// optional/computed JSON attribute entirely).
+func preserveOmittedJSONField(field *json.RawMessage, oldRaw interface{}) {
+	if len(*field) > 0 {
+		return
+	}
+	if value := dashboardJSONValue(oldRaw); len(value) > 0 {
+		*field = value
+	}
+}
+
+func preserveOmittedStringField(field *string, newRaw, oldRaw interface{}) {
+	if s, _ := newRaw.(string); s != "" {
+		return
+	}
+	if old, _ := oldRaw.(string); old != "" {
+		*field = old
+	}
+}
+
+func firstDashboardMap(value interface{}) map[string]interface{} {
+	list := dashboardPanelValues(value)
+	if len(list) == 0 {
+		return nil
+	}
+	m, _ := list[0].(map[string]interface{})
+	return m
 }
 
 func dashboardPanelKey(panel map[string]interface{}) (string, bool) {
