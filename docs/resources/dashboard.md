@@ -11,7 +11,7 @@ Manages a Last9 custom dashboard. Dashboards organize panels (timeseries, stat, 
 
 ### Native dashboard presentation and raw logs
 
-`links_json` preserves dashboard navigation links. Panels accept `field_overrides_json`, `transformations_json`, `links_json`, and `data_links_json` as ordered JSON arrays. Use `jsonencode(...)`; malformed JSON and incorrect object/array shapes fail at plan time. The API validates the native field and transformation contracts. Reading or importing a dashboard preserves these fields, including field-level links, regex/type matchers, hidden fields, and thresholds.
+`links_json` preserves dashboard navigation links. Panels accept `field_overrides_json`, `transformations_json`, `links_json`, and `data_links_json` as ordered JSON arrays. Use `jsonencode(...)`; malformed JSON and incorrect object/array shapes fail at plan time. The API validates the native field and transformation contracts. Reading or importing a dashboard preserves these fields, including field-level links, regex/type matchers, hidden fields, and thresholds. The API requires `value` in `field_overrides_json` thresholds (and in `value_mappings_json`) to be a JSON string (e.g. `"500"`), not a number — a numeric `value` is rejected at apply time with a 422.
 
 Section panels accept `collapsed = true`. Variables accept `regex`, `include_all`, and `all_value` alongside `internal` (hides the variable control). Omit `all_value` to use the API's default All behavior.
 

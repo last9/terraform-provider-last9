@@ -23,7 +23,7 @@ func parityDashboardData(t *testing.T) *schema.ResourceData {
 			"key": "logs", "position": 0, "name": "Logs", "version": 1,
 			"links_json":           `[{"title":"Docs","url":"https://example.test"}]`,
 			"data_links_json":      `[{"title":"Trace","url":"https://example.test/${__data.fields.trace_id}"}]`,
-			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":500,"color":"red","colorTarget":"background"}],"data_links":[{"title":"Logs","url":"https://example.test/${__value.raw}"}]}}]`,
+			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":"500","color":"red","colorTarget":"background"}],"data_links":[{"title":"Logs","url":"https://example.test/${__value.raw}"}]}}]`,
 			"transformations_json": `[{"id":"organize","options":{"excludeByName":{"Time":true}}}]`,
 			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
 			"visualization": []interface{}{map[string]interface{}{
@@ -54,6 +54,11 @@ func parityAPI(t *testing.T, stored *map[string]interface{}) http.HandlerFunc {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+			if err := validateParityAPIFieldOverrides(body); err != nil {
+				t.Errorf("API rejected invalid field_overrides shape: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			if err := json.NewDecoder(bytes.NewReader(body)).Decode(stored); err != nil {
 				t.Error(err)
 			}
@@ -78,6 +83,24 @@ func validateParityAPIValueMappings(body []byte) error {
 						Text  string `json:"text"`
 					} `json:"value_mappings"`
 				} `json:"visualization"`
+			} `json:"panels"`
+		} `json:"dashboard"`
+	}
+	return json.Unmarshal(body, &payload)
+}
+
+func validateParityAPIFieldOverrides(body []byte) error {
+	var payload struct {
+		Dashboard struct {
+			Panels []struct {
+				FieldOverrides []struct {
+					Properties struct {
+						Thresholds []struct {
+							Value string `json:"value"`
+							Color string `json:"color"`
+						} `json:"thresholds"`
+					} `json:"properties"`
+				} `json:"field_overrides"`
 			} `json:"panels"`
 		} `json:"dashboard"`
 	}
@@ -195,6 +218,25 @@ func TestDashboardParityAPIRequiresStringValueMappingValue(t *testing.T) {
 			err := validateParityAPIValueMappings(body)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("validateParityAPIValueMappings error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDashboardParityAPIRequiresStringFieldOverrideThresholdValue(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "string value", value: `"500"`},
+		{name: "numeric value", value: `500`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"dashboard":{"panels":[{"field_overrides":[{"properties":{"thresholds":[{"value":` + tc.value + `,"color":"red"}]}}]}]}}`)
+			err := validateParityAPIFieldOverrides(body)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateParityAPIFieldOverrides error = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
 	}
