@@ -41,10 +41,14 @@ func jsonStringsEqual(a, b string) bool {
 		return a == b
 	}
 	var av, bv interface{}
-	if err := json.Unmarshal([]byte(a), &av); err != nil {
+	adec := json.NewDecoder(strings.NewReader(a))
+	adec.UseNumber()
+	if err := adec.Decode(&av); err != nil {
 		return false
 	}
-	if err := json.Unmarshal([]byte(b), &bv); err != nil {
+	bdec := json.NewDecoder(strings.NewReader(b))
+	bdec.UseNumber()
+	if err := bdec.Decode(&bv); err != nil {
 		return false
 	}
 	return reflect.DeepEqual(av, bv)

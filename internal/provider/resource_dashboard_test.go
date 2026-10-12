@@ -735,6 +735,7 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 	}{
 		{`{"a":1,"b":2}`, `{"b":2,"a":1}`, true},
 		{`{"a":1}`, `{"a":2}`, false},
+		{`{"order_id":9007199254740992}`, `{"order_id":9007199254740993}`, false},
 		{`{}`, `{}`, true},
 		{"", "", true},
 		{`{"a":1}`, `not json`, false},
