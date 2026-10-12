@@ -1041,6 +1041,19 @@ func flattenPanelsWithState(panels []*client.DashboardPanel, current []interface
 			keysByPosition[position] = key
 		}
 	}
+	// Keys already resolved by server ID are reserved: a positional fallback
+	// must never hand that same key to a different panel, or the two panels
+	// collapse onto one key once written back into the Set.
+	claimedByID := make(map[string]bool, len(keysByID))
+	for _, p := range panels {
+		if p == nil {
+			continue
+		}
+		if key := keysByID[p.ID]; key != "" {
+			claimedByID[key] = true
+		}
+	}
+
 	out := make([]interface{}, 0, len(panels))
 	for position, p := range panels {
 		if p == nil {
@@ -1048,7 +1061,9 @@ func flattenPanelsWithState(panels []*client.DashboardPanel, current []interface
 		}
 		key := keysByID[p.ID]
 		if key == "" {
-			key = keysByPosition[position]
+			if candidate := keysByPosition[position]; candidate != "" && !claimedByID[candidate] {
+				key = candidate
+			}
 		}
 		if key == "" {
 			key = p.ID
