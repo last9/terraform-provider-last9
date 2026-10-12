@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -214,6 +215,56 @@ func resourceAlert() *schema.Resource {
 				Default:     true,
 				Description: "Group timeseries notifications",
 			},
+			"recurring_mute_schedule": {
+				Type:        schema.TypeList,
+				Optional:    true,
+				Computed:    true,
+				ConfigMode:  schema.SchemaConfigModeAttr,
+				MaxItems:    1,
+				Description: "Weekly alert mute schedule. Omit to preserve an existing schedule; set to [] to clear it.",
+				Elem: &schema.Resource{Schema: map[string]*schema.Schema{
+					"enabled": {
+						Type:        schema.TypeBool,
+						Required:    true,
+						Description: "Whether the schedule mutes the alert.",
+					},
+					"timezone": {
+						Type:         schema.TypeString,
+						Required:     true,
+						ValidateFunc: validation.StringIsNotEmpty,
+						Description:  "IANA timezone for the schedule.",
+					},
+					"windows": {
+						Type:        schema.TypeList,
+						Required:    true,
+						ConfigMode:  schema.SchemaConfigModeAttr,
+						MinItems:    1,
+						MaxItems:    20,
+						Description: "Weekly mute windows.",
+						Elem: &schema.Resource{Schema: map[string]*schema.Schema{
+							"weekdays": {
+								Type:        schema.TypeList,
+								Required:    true,
+								ConfigMode:  schema.SchemaConfigModeAttr,
+								MinItems:    1,
+								MaxItems:    7,
+								Description: "Weekdays: sun, mon, tue, wed, thu, fri, sat.",
+								Elem:        &schema.Schema{Type: schema.TypeString, ValidateFunc: validation.StringInSlice([]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}, false)},
+							},
+							"start_time": {
+								Type:         schema.TypeString,
+								Required:     true,
+								ValidateFunc: validation.StringMatch(regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`), "must use 24-hour HH:MM format"),
+							},
+							"end_time": {
+								Type:         schema.TypeString,
+								Required:     true,
+								ValidateFunc: validation.StringMatch(regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`), "must use 24-hour HH:MM format"),
+							},
+						}},
+					},
+				}},
+			},
 			"notification_channels": {
 				Type:     schema.TypeList,
 				Optional: true,
@@ -272,6 +323,9 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 				"id": kpi.ID,
 			},
 		},
+	}
+	if schedule := expandRecurringMuteSchedule(d.Get("recurring_mute_schedule")); schedule != nil {
+		req.RecurringMuteSchedule = &client.RecurringMuteSchedulePatch{Schedule: schedule}
 	}
 
 	// notification_channels is deprecated and a no-op (see schema
@@ -385,6 +439,11 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	// Note: mute and is_disabled fields are intentionally not read from API
 	// The API may return different values than what was sent, causing drift
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
+	if alert.RecurringMuteSchedule == nil {
+		d.Set("recurring_mute_schedule", nil)
+	} else {
+		d.Set("recurring_mute_schedule", flattenRecurringMuteSchedule(alert.RecurringMuteSchedule))
+	}
 
 	// notification_channels is deprecated and a no-op (see schema
 	// description) -- left exactly as configured, never read from or
@@ -534,6 +593,12 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 		}
 	}
 	req.Properties = &props
+	if schedule := expandRecurringMuteSchedule(d.Get("recurring_mute_schedule")); schedule != nil {
+		req.RecurringMuteSchedule = &client.RecurringMuteSchedulePatch{Schedule: schedule}
+	} else if d.HasChange("recurring_mute_schedule") {
+		// Terraform represents an explicit nested-block clear as an empty list.
+		req.RecurringMuteSchedule = &client.RecurringMuteSchedulePatch{}
+	}
 
 	updatedAlert, err := apiClient.UpdateAlert(entityID, d.Id(), req)
 	if err != nil {
@@ -667,6 +732,9 @@ func parseAndSetCondition(d *schema.ResourceData, condition string, evalWindow i
 
 func buildStaticThresholdCondition(d *schema.ResourceData) string {
 	rawCfg := d.GetRawConfig()
+	if rawCfg.IsNull() || !rawCfg.IsKnown() {
+		return ""
+	}
 	thresholdFields := []struct {
 		field    string
 		operator string
@@ -685,4 +753,43 @@ func buildStaticThresholdCondition(d *schema.ResourceData) string {
 		}
 	}
 	return ""
+}
+
+func expandRecurringMuteSchedule(raw interface{}) *client.RecurringMuteSchedule {
+	schedules, ok := raw.([]interface{})
+	if !ok || len(schedules) == 0 || schedules[0] == nil {
+		return nil
+	}
+	schedule := schedules[0].(map[string]interface{})
+	windowsRaw := schedule["windows"].([]interface{})
+	windows := make([]client.RecurringMuteWindow, len(windowsRaw))
+	for i, rawWindow := range windowsRaw {
+		window := rawWindow.(map[string]interface{})
+		windows[i] = client.RecurringMuteWindow{
+			Weekdays:  toStringSlice(window["weekdays"].([]interface{})),
+			StartTime: window["start_time"].(string),
+			EndTime:   window["end_time"].(string),
+		}
+	}
+	return &client.RecurringMuteSchedule{
+		Enabled:  schedule["enabled"].(bool),
+		Timezone: schedule["timezone"].(string),
+		Windows:  windows,
+	}
+}
+
+func flattenRecurringMuteSchedule(schedule *client.RecurringMuteSchedule) []interface{} {
+	windows := make([]interface{}, len(schedule.Windows))
+	for i, window := range schedule.Windows {
+		windows[i] = map[string]interface{}{
+			"weekdays":   window.Weekdays,
+			"start_time": window.StartTime,
+			"end_time":   window.EndTime,
+		}
+	}
+	return []interface{}{map[string]interface{}{
+		"enabled":  schedule.Enabled,
+		"timezone": schedule.Timezone,
+		"windows":  windows,
+	}}
 }
