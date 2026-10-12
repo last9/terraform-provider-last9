@@ -678,6 +678,7 @@ func (c *Client) DeleteStreamingAggregation(clusterID, region, id string) error 
 // --- Cold storage bucket ---
 
 type ColdStorageBucketProperties struct {
+	Provider        string `json:"provider,omitempty"`
 	Default         bool   `json:"default"`
 	AWSRegion       string `json:"aws_region"`
 	AWSBucket       string `json:"aws_bucket"`

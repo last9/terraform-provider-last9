@@ -17,13 +17,14 @@ provider "last9" {
 }
 
 resource "last9_cold_storage_bucket" "archive" {
-  region     = var.region
-  name       = "last9-log-archive"
-  aws_region = "ap-south-1"
-  aws_bucket = var.aws_bucket
-  auth_type  = "role"
-  aws_role   = var.aws_role
-  default    = true
+  storage_provider = "s3"
+  region           = var.region
+  name             = "last9-log-archive"
+  aws_region       = "ap-south-1"
+  aws_bucket       = var.aws_bucket
+  auth_type        = "role"
+  aws_role         = var.aws_role
+  default          = true
 }
 
 resource "last9_cold_storage_backup" "all_logs" {
