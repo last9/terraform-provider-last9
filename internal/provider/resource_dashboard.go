@@ -93,6 +93,9 @@ func jsonValuesEqual(a, b interface{}) bool {
 
 func dashboardSetHash(value interface{}) int {
 	canonical := canonicalDashboardValue(value)
+	if panel, ok := canonical.(map[string]interface{}); ok {
+		delete(panel, "id")
+	}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return schema.HashString(fmt.Sprint(value))
@@ -102,10 +105,16 @@ func dashboardSetHash(value interface{}) int {
 
 func canonicalDashboardValue(value interface{}) interface{} {
 	switch v := value.(type) {
+	case *schema.Set:
+		return canonicalDashboardSet(v.List())
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(v))
 		for k, item := range v {
-			out[k] = canonicalDashboardValue(item)
+			canonical := canonicalDashboardValue(item)
+			if canonicalDashboardEmpty(canonical) {
+				continue
+			}
+			out[k] = canonical
 		}
 		return out
 	case []interface{}:
@@ -115,6 +124,9 @@ func canonicalDashboardValue(value interface{}) interface{} {
 		}
 		return out
 	case string:
+		if v == terraformUnknownValue {
+			return ""
+		}
 		var parsed interface{}
 		dec := json.NewDecoder(strings.NewReader(v))
 		dec.UseNumber()
@@ -122,8 +134,61 @@ func canonicalDashboardValue(value interface{}) interface{} {
 			return canonicalDashboardValue(parsed)
 		}
 		return v
+	case json.Number:
+		if r, ok := new(big.Rat).SetString(v.String()); ok {
+			return map[string]string{"__dashboard_number": r.RatString()}
+		}
+		return v.String()
 	default:
 		return v
+	}
+}
+
+func canonicalDashboardSet(values []interface{}) []interface{} {
+	out := make([]interface{}, len(values))
+	for i, item := range values {
+		out[i] = canonicalDashboardValue(item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left, leftOK := canonicalDashboardPosition(out[i])
+		right, rightOK := canonicalDashboardPosition(out[j])
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if !leftOK {
+			return false
+		}
+		return left < right
+	})
+	return out
+}
+
+func canonicalDashboardEmpty(value interface{}) bool {
+	switch v := value.(type) {
+	case string:
+		return v == ""
+	case []interface{}:
+		return len(v) == 0
+	default:
+		return false
+	}
+}
+
+func canonicalDashboardPosition(value interface{}) (int, bool) {
+	m, ok := value.(map[string]interface{})
+	if !ok {
+		return 0, false
+	}
+	switch position := m["position"].(type) {
+	case int:
+		return position, true
+	case float64:
+		return int(position), true
+	case json.Number:
+		i, err := position.Int64()
+		return int(i), err == nil
+	default:
+		return 0, false
 	}
 }
 
@@ -158,6 +223,9 @@ var (
 		"traces":  {"trace_ql": true, "trace_json": true},
 	}
 )
+
+// Terraform Plugin SDK uses this sentinel for values that are unknown during diff.
+const terraformUnknownValue = "74D93920-ED26-11E3-AC10-0800200C9A66"
 
 func resourceDashboard() *schema.Resource {
 	r := &schema.Resource{
@@ -521,7 +589,21 @@ type dashboardGetter interface {
 }
 
 func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
+	if err := clearEmptyDashboardMetadataDiff(d); err != nil {
+		return err
+	}
 	return validateDashboardData(d)
+}
+
+func clearEmptyDashboardMetadataDiff(d *schema.ResourceDiff) error {
+	if len(d.GetChangedKeysPrefix("metadata")) == 0 {
+		return nil
+	}
+	oldMetadata, newMetadata := d.GetChange("metadata")
+	if len(dashboardPanelValues(oldMetadata)) != 0 || len(dashboardPanelValues(newMetadata)) != 0 {
+		return nil
+	}
+	return d.Clear("metadata")
 }
 
 func validateDashboardData(d dashboardGetter) error {
@@ -530,11 +612,16 @@ func validateDashboardData(d dashboardGetter) error {
 	oldPanelsByKey := indexDashboardPanelsByKey(dashboardPanelValues(oldPanelsRaw))
 	keys := make(map[string]struct{}, len(panels))
 	positions := make(map[int]struct{}, len(panels))
+	panelCount := 0
 	for i, p := range panels {
 		pm, ok := p.(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("panel[%d]: expected object, got %T", i, p)
 		}
+		if isEmptyDashboardPanelSetElement(pm) {
+			continue
+		}
+		panelCount++
 		key, knownKey := dashboardPanelKey(pm)
 		if !knownKey || strings.TrimSpace(key) == "" {
 			return fmt.Errorf("panel[%d]: key must be a non-empty stable identity", i)
@@ -658,7 +745,7 @@ func validateDashboardData(d dashboardGetter) error {
 			}
 		}
 	}
-	for position := 0; position < len(panels); position++ {
+	for position := 0; position < panelCount; position++ {
 		if _, exists := positions[position]; !exists {
 			return fmt.Errorf("panel positions must be contiguous from 0; missing position %d", position)
 		}
@@ -689,6 +776,29 @@ func validateDashboardData(d dashboardGetter) error {
 	}
 
 	return nil
+}
+
+func isEmptyDashboardPanelSetElement(panel map[string]interface{}) bool {
+	for _, field := range []string{
+		"key", "id", "name", "field_overrides_json", "transformations_json",
+		"links_json", "data_links_json", "datasource_id", "telemetry", "unit",
+	} {
+		if value, _ := panel[field].(string); strings.TrimSpace(value) != "" {
+			return false
+		}
+	}
+	if collapsed, _ := panel["collapsed"].(bool); collapsed {
+		return false
+	}
+	if position, _ := panel["position"].(int); position != 0 {
+		return false
+	}
+	if version, _ := panel["version"].(int); version != 0 {
+		return false
+	}
+	return len(dashboardPanelValues(panel["layout"])) == 0 &&
+		len(dashboardPanelValues(panel["visualization"])) == 0 &&
+		len(dashboardPanelValues(panel["query"])) == 0
 }
 
 func resourceDashboardCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {

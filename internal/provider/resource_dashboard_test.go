@@ -924,6 +924,36 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 	}
 }
 
+func TestDashboardPanelSetHashIgnoresRefreshOnlyValues(t *testing.T) {
+	beforeRefresh := map[string]interface{}{
+		"key":                  "alpha",
+		"position":             0,
+		"name":                 "Panel",
+		"id":                   "",
+		"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true}}]`,
+	}
+	afterRefresh := map[string]interface{}{
+		"key":                  "alpha",
+		"position":             0,
+		"name":                 "Panel",
+		"datasource_id":        terraformUnknownValue,
+		"id":                   "server-panel-alpha",
+		"field_overrides_json": `[{"properties":{"hidden":true},"matcher":{"value":"status.*","type":"regex"}}]`,
+	}
+	renamedPanel := map[string]interface{}{"key": "alpha", "position": 0, "name": "Renamed"}
+	differentPanel := map[string]interface{}{"key": "beta"}
+
+	if dashboardSetHash(beforeRefresh) != dashboardSetHash(afterRefresh) {
+		t.Fatal("panel hash changed when only computed id and JSON spelling changed")
+	}
+	if dashboardSetHash(beforeRefresh) == dashboardSetHash(renamedPanel) {
+		t.Fatal("panel content edits must still change the set hash")
+	}
+	if dashboardSetHash(beforeRefresh) == dashboardSetHash(differentPanel) {
+		t.Fatal("different panel keys must have different identity hashes")
+	}
+}
+
 func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 	for _, width := range []string{"100", "100.0", "1e2"} {
 		t.Run(width, func(t *testing.T) {
