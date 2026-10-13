@@ -909,6 +909,10 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 	}{
 		{`{"a":1,"b":2}`, `{"b":2,"a":1}`, true},
 		{`{"a":1}`, `{"a":2}`, false},
+		{`{"width":100}`, `{"width":100.0}`, true},
+		{`{"width":100}`, `{"width":1e2}`, true},
+		{`{"ratio":0.123456789012345678901}`, `{"ratio":0.123456789012345678902}`, false},
+		{`{"order_id":9007199254740992}`, `{"order_id":9007199254740993}`, false},
 		{`{}`, `{}`, true},
 		{"", "", true},
 		{`{"a":1}`, `not json`, false},
@@ -917,6 +921,50 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 		if got := jsonStringsEqual(c.a, c.b); got != c.want {
 			t.Errorf("jsonStringsEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestReviewDashboardNumericRoundTrip(t *testing.T) {
+	for _, width := range []string{"100", "100.0", "1e2"} {
+		t.Run(width, func(t *testing.T) {
+			r := resourceDashboard()
+			raw := map[string]interface{}{
+				"region": "ap-south-1",
+				"name":   "synthetic numeric roundtrip",
+				"panel": []interface{}{map[string]interface{}{
+					"key": "table", "position": 0,
+					"name":      "table",
+					"version":   1,
+					"telemetry": "metrics",
+					"query": []interface{}{map[string]interface{}{
+						"name":       "A",
+						"expr":       "1",
+						"telemetry":  "metrics",
+						"query_type": "promql",
+					}},
+					"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
+					"visualization": []interface{}{map[string]interface{}{
+						"type":              "table",
+						"table_config_json": fmt.Sprintf(`{"density":"compact","columnConfig":[{"key":"svc","width":%s}]}`, width),
+					}},
+				}},
+			}
+
+			state := schema.TestResourceDataRaw(t, r.Schema, raw)
+			current := dashboardPanelValues(state.Get("panel"))
+			if err := state.Set("panel", flattenPanelsWithState(expandPanels(current), current)); err != nil {
+				t.Fatal(err)
+			}
+			state.SetId("synthetic-dashboard")
+
+			diff, err := r.Diff(context.Background(), state.State(), terraform.NewResourceConfigRaw(raw), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff != nil && !diff.Empty() {
+				t.Fatalf("unchanged authored dashboard planned an update: %#v", diff)
+			}
+		})
 	}
 }
 
