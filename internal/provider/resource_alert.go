@@ -528,20 +528,20 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 	req.Severity = &severity
 
 	// Determine KPI name and ID to use
-	kpiName := d.Get("kpi_name").(string)
-	kpiID := d.Get("kpi_id").(string)
+	kpiName := oldKPIName
+	indicatorRef := map[string]interface{}{
+		"id": oldKPIID,
+	}
 
 	// If we created a new KPI, use its details
 	if newKPI != nil {
 		kpiName = newKPI.Name
-		kpiID = newKPI.ID
+		indicatorRef["id"] = newKPI.ID
 	}
 
 	req.PrimaryIndicator = &kpiName
 	req.ExpressionArgs = map[string]interface{}{
-		kpiName: map[string]interface{}{
-			"id": kpiID,
-		},
+		kpiName: indicatorRef,
 	}
 
 	// Note: mute field is not sent to API - it's ignored by Terraform

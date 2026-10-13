@@ -932,7 +932,8 @@ func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 				"region": "ap-south-1",
 				"name":   "synthetic numeric roundtrip",
 				"panel": []interface{}{map[string]interface{}{
-					"key": "table", "position": 0,
+					"key":       "table-panel",
+					"position":  0,
 					"name":      "table",
 					"version":   1,
 					"telemetry": "metrics",
@@ -951,8 +952,8 @@ func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 			}
 
 			state := schema.TestResourceDataRaw(t, r.Schema, raw)
-			current := dashboardPanelValues(state.Get("panel"))
-			if err := state.Set("panel", flattenPanelsWithState(expandPanels(current), current)); err != nil {
+			currentPanels := dashboardPanelValues(state.Get("panel"))
+			if err := state.Set("panel", flattenPanelsWithState(expandPanels(currentPanels), currentPanels)); err != nil {
 				t.Fatal(err)
 			}
 			state.SetId("synthetic-dashboard")

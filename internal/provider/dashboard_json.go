@@ -25,7 +25,7 @@ func dashboardJSONSchema(kind, description string) *schema.Schema {
 			if text == "" || (kind == "array" && text[0] == '[') || (kind == "object" && text[0] == '{') {
 				return nil
 			}
-			return diag.Diagnostics{{Severity: diag.Error, Summary: fmt.Sprintf("expected JSON %s", kind), AttributePath: path}}
+			return diag.Diagnostics{diag.Diagnostic{Severity: diag.Error, Summary: fmt.Sprintf("expected JSON %s", kind), AttributePath: path}}
 		},
 	}
 }
