@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
-	"sort"
 	"math/big"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
