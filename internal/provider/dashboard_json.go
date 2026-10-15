@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -114,7 +115,7 @@ func validateDashboardFieldOverridesJSON(value interface{}) error {
 		for thresholdIndex, threshold := range thresholds {
 			if raw, ok := threshold["value"]; ok {
 				label := fmt.Sprintf("field_overrides_json[%d].properties.thresholds[%d].value", overrideIndex, thresholdIndex)
-				if err := validateJSONStringToken(raw, label); err != nil {
+				if err := validateJSONNumberToken(raw, label); err != nil {
 					return err
 				}
 			}
@@ -127,6 +128,17 @@ func validateJSONStringToken(raw json.RawMessage, label string) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return fmt.Errorf("%s must be a JSON string", label)
+	}
+	return nil
+}
+
+func validateJSONNumberToken(raw json.RawMessage, label string) error {
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("%s must be a finite number", label)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("%s must be a finite number", label)
 	}
 	return nil
 }

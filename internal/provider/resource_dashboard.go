@@ -38,6 +38,9 @@ func jsonStringsEqual(a, b string) bool {
 	}
 	a = strings.TrimSpace(a)
 	b = strings.TrimSpace(b)
+	if dashboardJSONStringIsEmpty(a) && dashboardJSONStringIsEmpty(b) {
+		return true
+	}
 	if a == "" || b == "" {
 		return a == b
 	}
@@ -53,6 +56,19 @@ func jsonStringsEqual(a, b string) bool {
 		return false
 	}
 	return jsonValuesEqual(av, bv)
+}
+
+// dashboardJSONStringIsEmpty reports whether a trimmed JSON string represents
+// an absent value. The API returns nothing for an empty array/object, so
+// state stores "" where config may hold "[]"/"{}"/"null"; without this they
+// never compare equal and every plan re-proposes the explicit clear.
+func dashboardJSONStringIsEmpty(s string) bool {
+	switch s {
+	case "", "[]", "{}", "null":
+		return true
+	default:
+		return false
+	}
 }
 
 func jsonValuesEqual(a, b interface{}) bool {
@@ -165,9 +181,13 @@ func canonicalDashboardSet(values []interface{}) []interface{} {
 
 func canonicalDashboardEmpty(value interface{}) bool {
 	switch v := value.(type) {
+	case nil:
+		return true
 	case string:
 		return v == ""
 	case []interface{}:
+		return len(v) == 0
+	case map[string]interface{}:
 		return len(v) == 0
 	default:
 		return false

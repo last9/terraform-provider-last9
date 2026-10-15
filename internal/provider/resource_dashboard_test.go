@@ -84,7 +84,7 @@ func TestDashboardPanelContentEditsProduceDiff(t *testing.T) {
 		{
 			name: "field overrides",
 			mutate: func(config map[string]interface{}) {
-				firstDashboardDiffPanel(config)["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":false,"thresholds":[{"value":"500","color":"red"}]}}]`
+				firstDashboardDiffPanel(config)["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":false,"thresholds":[{"value":500,"color":"red"}]}}]`
 			},
 		},
 		{
@@ -150,7 +150,7 @@ func dashboardDiffConfig() map[string]interface{} {
 			"position":             0,
 			"name":                 "Before",
 			"collapsed":            true,
-			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":"500","color":"red"}]}}]`,
+			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":500,"color":"red"}]}}]`,
 			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
 			"visualization": []interface{}{map[string]interface{}{
 				"type":                "logs",
@@ -915,6 +915,10 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 		{`{"order_id":9007199254740992}`, `{"order_id":9007199254740993}`, false},
 		{`{}`, `{}`, true},
 		{"", "", true},
+		{"", "[]", true},
+		{"", "{}", true},
+		{"", "null", true},
+		{"[]", "{}", true},
 		{`{"a":1}`, `not json`, false},
 	}
 	for _, c := range cases {

@@ -24,7 +24,7 @@ func parityDashboardData(t *testing.T) *schema.ResourceData {
 			"key": "logs", "position": 0, "name": "Logs", "version": 1,
 			"links_json":           `[{"title":"Docs","url":"https://example.test"}]`,
 			"data_links_json":      `[{"title":"Trace","url":"https://example.test/${__data.fields.trace_id}"}]`,
-			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":"500","color":"red","colorTarget":"background"}],"data_links":[{"title":"Logs","url":"https://example.test/${__value.raw}"}]}}]`,
+			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":500,"color":"red","colorTarget":"background"}],"data_links":[{"title":"Logs","url":"https://example.test/${__value.raw}"}]}}]`,
 			"transformations_json": `[{"id":"organize","options":{"excludeByName":{"Time":true}}}]`,
 			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
 			"visualization": []interface{}{map[string]interface{}{
@@ -97,8 +97,8 @@ func validateParityAPIFieldOverrides(body []byte) error {
 				FieldOverrides []struct {
 					Properties struct {
 						Thresholds []struct {
-							Value string `json:"value"`
-							Color string `json:"color"`
+							Value float64 `json:"value"`
+							Color string  `json:"color"`
 						} `json:"thresholds"`
 					} `json:"properties"`
 				} `json:"field_overrides"`
@@ -224,14 +224,14 @@ func TestDashboardParityAPIRequiresStringValueMappingValue(t *testing.T) {
 	}
 }
 
-func TestDashboardParityAPIRequiresStringFieldOverrideThresholdValue(t *testing.T) {
+func TestDashboardParityAPIRequiresNumericFieldOverrideThresholdValue(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		value   string
 		wantErr bool
 	}{
-		{name: "string value", value: `"500"`},
-		{name: "numeric value", value: `500`, wantErr: true},
+		{name: "numeric value", value: `500`},
+		{name: "string value", value: `"500"`, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(`{"dashboard":{"panels":[{"field_overrides":[{"properties":{"thresholds":[{"value":` + tc.value + `,"color":"red"}]}}]}]}}`)
@@ -257,11 +257,11 @@ func TestDashboardParityJSONRejectsNumericNativeValues(t *testing.T) {
 			wantErr: "value_mappings_json[0].value must be a JSON string",
 		},
 		{
-			name: "numeric field override threshold value",
+			name: "string field override threshold value",
 			mutate: func(panel, visualization map[string]interface{}) {
-				panel["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"thresholds":[{"value":500,"color":"red"}]}}]`
+				panel["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"thresholds":[{"value":"500","color":"red"}]}}]`
 			},
-			wantErr: "field_overrides_json[0].properties.thresholds[0].value must be a JSON string",
+			wantErr: "field_overrides_json[0].properties.thresholds[0].value must be a finite number",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
