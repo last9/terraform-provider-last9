@@ -29,6 +29,16 @@ func dashboardJSONSchema(kind, description string) *schema.Schema {
 	}
 }
 
+// knownDashboardJSONText returns the trimmed JSON text of a planned value, or
+// "" while it is unknown so content checks wait until apply, when it is known.
+func knownDashboardJSONText(value interface{}) string {
+	text, _ := value.(string)
+	if text == terraformUnknownValue {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
 func dashboardJSONValue(value interface{}) json.RawMessage {
 	text, _ := value.(string)
 	if strings.TrimSpace(text) == "" {
@@ -40,7 +50,7 @@ func dashboardJSONValue(value interface{}) json.RawMessage {
 func validateDashboardLogs(panel, visualization map[string]interface{}) error {
 	queries := dashboardPanelValues(panel["query"])
 	isLogs := visualization["type"] == "logs"
-	if !isLogs && len(dashboardJSONValue(visualization["logs_config_json"])) > 0 {
+	if !isLogs && knownDashboardJSONText(visualization["logs_config_json"]) != "" {
 		return fmt.Errorf("logs_config_json is only valid for logs visualization")
 	}
 	for _, rawQuery := range queries {
@@ -66,8 +76,8 @@ func validateDashboardNativeJSONStrings(panel, visualization map[string]interfac
 }
 
 func validateDashboardValueMappingsJSON(value interface{}) error {
-	text, _ := value.(string)
-	if strings.TrimSpace(text) == "" {
+	text := knownDashboardJSONText(value)
+	if text == "" {
 		return nil
 	}
 	var mappings []map[string]json.RawMessage
@@ -85,8 +95,8 @@ func validateDashboardValueMappingsJSON(value interface{}) error {
 }
 
 func validateDashboardFieldOverridesJSON(value interface{}) error {
-	text, _ := value.(string)
-	if strings.TrimSpace(text) == "" {
+	text := knownDashboardJSONText(value)
+	if text == "" {
 		return nil
 	}
 	var overrides []map[string]json.RawMessage

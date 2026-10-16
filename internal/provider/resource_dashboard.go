@@ -746,7 +746,7 @@ func restoreOmittedComputedFields(resource *schema.Resource, planned, prior map[
 		if !field.Computed {
 			continue
 		}
-		if _, configured := dashboardRawValue(raw, name); configured {
+		if dashboardRawConfigured(raw, name) {
 			continue
 		}
 		if old, ok := prior[name]; ok && !reflect.DeepEqual(old, planned[name]) {
@@ -873,6 +873,19 @@ func dashboardRawString(raw cty.Value, field string) (string, bool) {
 		return "", false
 	}
 	return value.AsString(), true
+}
+
+// dashboardRawConfigured reports whether config sets field, including to a
+// value only known after apply. Unlike dashboardRawValue it must not treat
+// unknown as omitted: planning the prior value would drop the pending edit.
+func dashboardRawConfigured(raw cty.Value, field string) bool {
+	if raw == cty.NilVal || raw.IsNull() {
+		return false
+	}
+	if !raw.IsKnown() {
+		return true
+	}
+	return raw.Type().IsObjectType() && raw.Type().HasAttribute(field) && !raw.GetAttr(field).IsNull()
 }
 
 func dashboardRawValue(raw cty.Value, field string) (cty.Value, bool) {
