@@ -27,8 +27,9 @@ const (
 // TestDashboardNativeJSONImportLifecycle replays the live QA sequence through
 // Terraform core: import a dashboard carrying native JSON fields, rename it
 // with those fields omitted from HCL (they must be preserved and the plan must
-// settle), then clear them explicitly (the clear must reach the API and the
-// plan must settle even though the API returns nothing for empty values).
+// settle), edit a numeric-looking string mapping, then clear them explicitly.
+// Each edit must reach the API and leave an empty plan, even though the API
+// returns nothing for empty values.
 func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 	stored := nativeLifecycleSeed()
 	var puts []*client.Dashboard
@@ -67,6 +68,7 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 		"mappings":  `value_mappings_json = "[]"`,
 		"dashboard": `links_json = "[]"`,
 	}
+	editedMappings := `[{"type":"value","value":"0.0","text":"DOWN"}]`
 	resource.UnitTest(t, resource.TestCase{
 		ProviderFactories: map[string]func() (*schema.Provider, error){"last9": factory},
 		Steps: []resource.TestStep{
@@ -80,15 +82,20 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 			// Unrelated rename with every native field omitted from HCL. The
 			// harness fails the step if the post-apply plan is not empty.
 			{Config: nativeLifecycleHCL("Renamed", nil)},
+			// Only the mapping string changes: "0" and "0.0" are distinct
+			// values, so the panel hash must allow Terraform to apply the edit.
+			{Config: nativeLifecycleHCL("Renamed", map[string]string{
+				"mappings": fmt.Sprintf("value_mappings_json = %q", editedMappings),
+			})},
 			// Explicit clears of every clearable native field.
 			{Config: nativeLifecycleHCL("Renamed", clears)},
 		},
 	})
 
-	if len(puts) != 2 {
-		t.Fatalf("expected one rename update and one clear update, got %d", len(puts))
+	if len(puts) != 3 {
+		t.Fatalf("expected rename, mapping edit, and clear updates, got %d", len(puts))
 	}
-	renamed, cleared := puts[0], puts[1]
+	renamed, edited, cleared := puts[0], puts[1], puts[2]
 	if renamed.Name != "Renamed" {
 		t.Errorf("rename update sent name %q", renamed.Name)
 	}
@@ -102,6 +109,9 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 		"ts.layout.minH":      "4",
 		"logs.logs_config":    nativeLifecycleLogsConfig,
 		"logs.field_override": "",
+	})
+	assertNativeLifecycleFields(t, "mapping edit", edited, map[string]string{
+		"ts.value_mappings": editedMappings,
 	})
 	assertNativeLifecycleFields(t, "clear", cleared, map[string]string{
 		"dashboard.links":     "[]",
