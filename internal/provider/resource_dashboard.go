@@ -134,7 +134,12 @@ func canonicalDashboardValue(value interface{}) interface{} {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(v))
 		for k, item := range v {
-			canonical := canonicalDashboardValue(item)
+			var canonical interface{}
+			if s, ok := item.(string); ok && strings.HasSuffix(k, "_json") {
+				canonical = canonicalDashboardJSONString(s)
+			} else {
+				canonical = canonicalDashboardValue(item)
+			}
 			if canonicalDashboardEmpty(canonical) {
 				continue
 			}
@@ -151,13 +156,48 @@ func canonicalDashboardValue(value interface{}) interface{} {
 		if v == terraformUnknownValue {
 			return ""
 		}
-		var parsed interface{}
-		dec := json.NewDecoder(strings.NewReader(v))
-		dec.UseNumber()
-		if dec.Decode(&parsed) == nil {
-			return canonicalDashboardValue(parsed)
-		}
 		return v
+	default:
+		return v
+	}
+}
+
+// canonicalDashboardJSONString canonicalizes a serialized `*_json` attribute
+// with exactly the equivalence of jsonStringsEqual: the hash must not merge
+// values the diff tells apart, or diffSet drops the edit.
+func canonicalDashboardJSONString(s string) interface{} {
+	if s == terraformUnknownValue {
+		return ""
+	}
+	trimmed := strings.TrimSpace(s)
+	if dashboardJSONStringIsEmpty(trimmed) {
+		return ""
+	}
+	var parsed interface{}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	if dec.Decode(&parsed) != nil {
+		return s
+	}
+	return canonicalParsedJSON(parsed)
+}
+
+// canonicalParsedJSON normalizes numeric spelling only; strings (including
+// numeric-looking or JSON-looking ones) and empty values stay as they are.
+func canonicalParsedJSON(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for k, item := range v {
+			out[k] = canonicalParsedJSON(item)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i, item := range v {
+			out[i] = canonicalParsedJSON(item)
+		}
+		return out
 	case json.Number:
 		if r, ok := new(big.Rat).SetString(v.String()); ok {
 			return map[string]string{"__dashboard_number": r.RatString()}
