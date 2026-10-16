@@ -15,6 +15,179 @@ import (
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
 
+func TestDashboardPanelStateUpgradeV0PreservesStableIdentityAndOrder(t *testing.T) {
+	state := map[string]interface{}{"panel": []interface{}{
+		map[string]interface{}{
+			"id": "panel-1", "name": "Duplicate", "query": []interface{}{map[string]interface{}{"name": "A"}, map[string]interface{}{"name": "B"}},
+			"visualization": []interface{}{map[string]interface{}{"type": "stat", "stat_config": []interface{}{map[string]interface{}{"threshold": []interface{}{map[string]interface{}{"value": 10.0, "color": "red"}, map[string]interface{}{"value": 20.0, "color": "green"}}}}}},
+		},
+		map[string]interface{}{"id": "panel-2", "name": "Duplicate", "query": []interface{}{}, "visualization": []interface{}{map[string]interface{}{"type": "section"}}},
+		map[string]interface{}{"name": "No API ID", "query": []interface{}{}, "visualization": []interface{}{map[string]interface{}{"type": "section"}}},
+	}}
+	upgraded, err := upgradeDashboardPanelStateV0(context.Background(), state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	panels := upgraded["panel"].([]interface{})
+	for i, wantKey := range []string{"panel-1", "panel-2", "legacy-panel-2"} {
+		panel := panels[i].(map[string]interface{})
+		if panel["key"] != wantKey || panel["position"] != i {
+			t.Errorf("panel %d identity/order = (%v,%v), want (%s,%d)", i, panel["key"], panel["position"], wantKey, i)
+		}
+	}
+	first := panels[0].(map[string]interface{})
+	queries := first["query"].([]interface{})
+	for i, q := range queries {
+		if q.(map[string]interface{})["position"] != i {
+			t.Errorf("query %d position was not migrated", i)
+		}
+	}
+	stat := first["visualization"].([]interface{})[0].(map[string]interface{})["stat_config"].([]interface{})[0].(map[string]interface{})
+	thresholds := stat["threshold"].([]interface{})
+	for i, threshold := range thresholds {
+		if threshold.(map[string]interface{})["position"] != i {
+			t.Errorf("threshold %d position was not migrated", i)
+		}
+	}
+	legacy := dashboardLegacyPanelSchema(resourceDashboard().Schema)
+	panelSchema := legacy["panel"]
+	if panelSchema.Type != schema.TypeList {
+		t.Fatal("legacy panel schema must remain TypeList")
+	}
+	panelFields := panelSchema.Elem.(*schema.Resource).Schema
+	if panelFields["query"].Type != schema.TypeList || panelFields["visualization"].Type != schema.TypeList || panelFields["layout"].Type != schema.TypeList {
+		t.Fatal("legacy panel nested fields do not match the old TypeList state shape")
+	}
+	legacyVisualization := panelFields["visualization"].Elem.(*schema.Resource).Schema
+	if legacyVisualization["stat_config"].Type != schema.TypeList || legacyVisualization["stat_config"].Elem.(*schema.Resource).Schema["threshold"].Type != schema.TypeList {
+		t.Fatal("legacy visualization nested fields do not match the old TypeList state shape")
+	}
+}
+
+func TestDashboardPanelContentEditsProduceDiff(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]interface{})
+	}{
+		{
+			name: "panel rename",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["name"] = "After"
+			},
+		},
+		{
+			name: "collapsed",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["collapsed"] = false
+			},
+		},
+		{
+			name: "field overrides",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffPanel(config)["field_overrides_json"] = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":false,"thresholds":[{"value":500,"color":"red"}]}}]`
+			},
+		},
+		{
+			name: "logs config",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffVisualization(config)["logs_config_json"] = `{"columns":["timestamp"],"sort_order":"asc","row_limit":200}`
+			},
+		},
+		{
+			name: "value mappings",
+			mutate: func(config map[string]interface{}) {
+				firstDashboardDiffVisualization(config)["value_mappings_json"] = `[{"type":"value","value":"DOWN","text":"Down"}]`
+			},
+		},
+		{
+			name: "query expr",
+			mutate: func(config map[string]interface{}) {
+				query := firstDashboardDiffPanel(config)["query"].([]interface{})[0].(map[string]interface{})
+				query["expr"] = `{service="web"}`
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := resourceDashboard()
+			before := dashboardDiffConfig()
+			after := dashboardDiffConfig()
+			tc.mutate(after)
+
+			d := schema.TestResourceDataRaw(t, r.Schema, before)
+			d.SetId("synthetic")
+			diff, err := r.Diff(context.Background(), d.State(), terraform.NewResourceConfigRaw(after), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !diffHasPanelChange(diff) {
+				t.Fatalf("panel edit produced no panel diff: %#v", diff)
+			}
+
+			applied := dashboardDiffConfig()
+			tc.mutate(applied)
+			firstDashboardDiffPanel(applied)["id"] = "id-alpha"
+			appliedState := schema.TestResourceDataRaw(t, r.Schema, applied)
+			appliedState.SetId("synthetic")
+			clean, err := r.Diff(context.Background(), appliedState.State(), terraform.NewResourceConfigRaw(after), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diffHasPanelChange(clean) {
+				t.Fatalf("clean re-plan produced panel diff: %#v", clean)
+			}
+		})
+	}
+}
+
+func dashboardDiffConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"region": "us-east-1",
+		"name":   "Synthetic",
+		"panel": []interface{}{map[string]interface{}{
+			"key":                  "alpha",
+			"position":             0,
+			"name":                 "Before",
+			"collapsed":            true,
+			"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true,"thresholds":[{"value":500,"color":"red"}]}}]`,
+			"layout":               []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 24, "h": 8}},
+			"visualization": []interface{}{map[string]interface{}{
+				"type":                "logs",
+				"logs_config_json":    `{"columns":["timestamp"],"sort_order":"desc","row_limit":1000}`,
+				"value_mappings_json": `[{"type":"value","value":"UP","text":"Up"}]`,
+			}},
+			"query": []interface{}{map[string]interface{}{
+				"position":   0,
+				"name":       "A",
+				"expr":       `{service="api"}`,
+				"telemetry":  "logs",
+				"query_type": "log_ql",
+			}},
+		}},
+	}
+}
+
+func firstDashboardDiffPanel(config map[string]interface{}) map[string]interface{} {
+	return config["panel"].([]interface{})[0].(map[string]interface{})
+}
+
+func firstDashboardDiffVisualization(config map[string]interface{}) map[string]interface{} {
+	return firstDashboardDiffPanel(config)["visualization"].([]interface{})[0].(map[string]interface{})
+}
+
+func diffHasPanelChange(diff *terraform.InstanceDiff) bool {
+	if diff == nil {
+		return false
+	}
+	for key := range diff.Attributes {
+		if strings.HasPrefix(key, "panel.") {
+			return true
+		}
+	}
+	return false
+}
+
 // Acceptance tests
 
 func TestAccDashboard_basic(t *testing.T) {
@@ -190,7 +363,7 @@ func TestDashboard_ExpandPanels_BasicStat(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "stat panel",
+				"key": "stat-panel", "position": 0, "name": "stat panel",
 				"unit":   "bytes-iec",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
@@ -213,7 +386,7 @@ func TestDashboard_ExpandPanels_BasicStat(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	if len(panels) != 1 {
 		t.Fatalf("expected 1 panel, got %d", len(panels))
 	}
@@ -238,7 +411,7 @@ func TestDashboard_ExpandPanels_SectionNoLayoutNoQueries(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name": "Section A",
+				"key": "section-a", "position": 0, "name": "Section A",
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "section", "full_width": true},
 				},
@@ -246,7 +419,7 @@ func TestDashboard_ExpandPanels_SectionNoLayoutNoQueries(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	if panels[0].Layout != nil {
 		t.Errorf("section panel should have nil layout, got %v", panels[0].Layout)
 	}
@@ -261,7 +434,7 @@ func TestDashboard_ExpandPanels_BarWithConfig(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "bar panel",
+				"key": "bar-panel", "position": 0, "name": "bar panel",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{
@@ -286,7 +459,7 @@ func TestDashboard_ExpandPanels_BarWithConfig(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	bc := panels[0].Visualization.BarConfig
 	if bc == nil {
 		t.Fatal("bar_config not expanded")
@@ -302,7 +475,7 @@ func TestDashboard_ExpandPanels_MarkdownWithConfigNoQuery(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "markdown panel",
+				"key": "markdown-panel", "position": 0, "name": "markdown panel",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
 				"visualization": []interface{}{
 					map[string]interface{}{
@@ -322,7 +495,7 @@ func TestDashboard_ExpandPanels_MarkdownWithConfigNoQuery(t *testing.T) {
 		t.Fatalf("markdown panels should not require query blocks: %v", err)
 	}
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	mc := panels[0].Visualization.MarkdownConfig
 	if mc == nil {
 		t.Fatal("markdown_config not expanded")
@@ -338,7 +511,7 @@ func TestDashboard_ValidateMarkdownRequiresConfig(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "markdown panel",
+				"key": "markdown-panel", "position": 0, "name": "markdown panel",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "markdown"},
@@ -362,7 +535,7 @@ func TestDashboard_ValidateMarkdownRejectsQuery(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "markdown panel",
+				"key": "markdown-panel", "position": 0, "name": "markdown panel",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 12, "h": 4}},
 				"visualization": []interface{}{
 					map[string]interface{}{
@@ -394,7 +567,7 @@ func TestDashboard_ValidateMarkdownRequiresLayout(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name": "markdown panel",
+				"key": "markdown-panel", "position": 0, "name": "markdown panel",
 				"visualization": []interface{}{
 					map[string]interface{}{
 						"type": "markdown",
@@ -422,7 +595,7 @@ func TestDashboard_ExpandPanels_DoughnutType(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "doughnut panel",
+				"key": "doughnut-panel", "position": 0, "name": "doughnut panel",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "doughnut"},
@@ -443,7 +616,7 @@ func TestDashboard_ExpandPanels_DoughnutType(t *testing.T) {
 		t.Fatalf("doughnut panels should validate with query and layout: %v", err)
 	}
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	if panels[0].Visualization.Type != "doughnut" {
 		t.Errorf("visualization type mismatch: %q", panels[0].Visualization.Type)
 	}
@@ -524,7 +697,7 @@ func TestDashboard_TableConfigJSON_OpaqueRoundTrip(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	if panels[0].Visualization.TableConfig == nil {
 		t.Fatal("table_config not parsed")
 	}
@@ -582,7 +755,7 @@ func TestDashboard_LegendSortAndMatrix_RoundTrip(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "p",
+				"key": "panel", "position": 0, "name": "p",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "stat"},
@@ -602,7 +775,7 @@ func TestDashboard_LegendSortAndMatrix_RoundTrip(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	q := panels[0].PopulatedQueries[0]
 	if q.LegendSort == nil || q.LegendSort.Field != "value" || q.LegendSort.Direction != "desc" {
 		t.Errorf("legend_sort wrong: %+v", q.LegendSort)
@@ -638,7 +811,7 @@ func TestDashboard_ExpandPanels_EmptyUnitSerializedToJSON(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	b, err := json.Marshal(panels[0])
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -657,7 +830,7 @@ func TestDashboard_ExpandQueries_EmptyUnitSerializedToJSON(t *testing.T) {
 		"name":   "test",
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "p",
+				"key": "panel", "position": 0, "name": "p",
 				"unit":   "bytes-iec",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
@@ -676,7 +849,7 @@ func TestDashboard_ExpandQueries_EmptyUnitSerializedToJSON(t *testing.T) {
 		},
 	})
 
-	panels := expandPanels(d.Get("panel").([]interface{}))
+	panels := expandPanels(dashboardPanelValues(d.Get("panel")))
 	b, err := json.Marshal(panels[0].PopulatedQueries[0])
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -742,12 +915,51 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 		{`{"order_id":9007199254740992}`, `{"order_id":9007199254740993}`, false},
 		{`{}`, `{}`, true},
 		{"", "", true},
+		{"", "[]", true},
+		{"", "{}", true},
+		{"", "null", true},
+		{"[]", "{}", true},
+		{"", "[ ]", true},
+		{"", "[\n  ]", true},
+		{"", "{ }", true},
+		{"", "\tnull\n", true},
+		{"", `[ "" ]`, false},
 		{`{"a":1}`, `not json`, false},
 	}
 	for _, c := range cases {
 		if got := jsonStringsEqual(c.a, c.b); got != c.want {
 			t.Errorf("jsonStringsEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestDashboardPanelSetHashIgnoresRefreshOnlyValues(t *testing.T) {
+	beforeRefresh := map[string]interface{}{
+		"key":                  "alpha",
+		"position":             0,
+		"name":                 "Panel",
+		"id":                   "",
+		"field_overrides_json": `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true}}]`,
+	}
+	afterRefresh := map[string]interface{}{
+		"key":                  "alpha",
+		"position":             0,
+		"name":                 "Panel",
+		"datasource_id":        terraformUnknownValue,
+		"id":                   "server-panel-alpha",
+		"field_overrides_json": `[{"properties":{"hidden":true},"matcher":{"value":"status.*","type":"regex"}}]`,
+	}
+	renamedPanel := map[string]interface{}{"key": "alpha", "position": 0, "name": "Renamed"}
+	differentPanel := map[string]interface{}{"key": "beta"}
+
+	if dashboardSetHash(beforeRefresh) != dashboardSetHash(afterRefresh) {
+		t.Fatal("panel hash changed when only computed id and JSON spelling changed")
+	}
+	if dashboardSetHash(beforeRefresh) == dashboardSetHash(renamedPanel) {
+		t.Fatal("panel content edits must still change the set hash")
+	}
+	if dashboardSetHash(beforeRefresh) == dashboardSetHash(differentPanel) {
+		t.Fatal("different panel keys must have different identity hashes")
 	}
 }
 
@@ -759,6 +971,8 @@ func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 				"region": "ap-south-1",
 				"name":   "synthetic numeric roundtrip",
 				"panel": []interface{}{map[string]interface{}{
+					"key":       "table-panel",
+					"position":  0,
 					"name":      "table",
 					"version":   1,
 					"telemetry": "metrics",
@@ -777,7 +991,8 @@ func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 			}
 
 			state := schema.TestResourceDataRaw(t, r.Schema, raw)
-			if err := state.Set("panel", flattenPanels(expandPanels(state.Get("panel").([]interface{})))); err != nil {
+			currentPanels := dashboardPanelValues(state.Get("panel"))
+			if err := state.Set("panel", flattenPanelsWithState(expandPanels(currentPanels), currentPanels)); err != nil {
 				t.Fatal(err)
 			}
 			state.SetId("synthetic-dashboard")
@@ -786,9 +1001,8 @@ func TestReviewDashboardNumericRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			field := "panel.0.visualization.0.table_config_json"
-			if diff != nil && diff.Attributes[field] != nil {
-				t.Fatalf("unchanged authored dashboard planned an update: old=%s new=%s", diff.Attributes[field].Old, diff.Attributes[field].New)
+			if diff != nil && !diff.Empty() {
+				t.Fatalf("unchanged authored dashboard planned an update: %#v", diff)
 			}
 		})
 	}
@@ -819,7 +1033,7 @@ func TestDashboard_Validate_TimeXOR(t *testing.T) {
 				"absolute_to":   tc.to,
 				"panel": []interface{}{
 					map[string]interface{}{
-						"name":   "p",
+						"key": "panel", "position": 0, "name": "p",
 						"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 						"visualization": []interface{}{
 							map[string]interface{}{"type": "stat"},
@@ -867,7 +1081,7 @@ func TestDashboard_Validate_VersionRequiresTelemetry(t *testing.T) {
 				"name":   "x",
 				"panel": []interface{}{
 					map[string]interface{}{
-						"name":    "p",
+						"key": "panel", "position": 0, "name": "p",
 						"version": tc.version,
 						"layout":  []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 						"visualization": []interface{}{
@@ -966,7 +1180,7 @@ func TestDashboard_BuildRequest_SetsAbsoluteTime(t *testing.T) {
 		"absolute_to":   1700003600000,
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "p",
+				"key": "panel", "position": 0, "name": "p",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "stat"},
@@ -998,7 +1212,7 @@ func TestDashboard_BuildRequest_SetsRelativeTime(t *testing.T) {
 		"relative_time": 10080,
 		"panel": []interface{}{
 			map[string]interface{}{
-				"name":   "p",
+				"key": "panel", "position": 0, "name": "p",
 				"layout": []interface{}{map[string]interface{}{"x": 0, "y": 0, "w": 6, "h": 6}},
 				"visualization": []interface{}{
 					map[string]interface{}{"type": "stat"},
@@ -1088,6 +1302,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "container-memory"
+    position = 0
     name = "Container Memory"
     unit = "bytes-iec"
 
@@ -1104,6 +1320,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name             = "A"
       expr             = "avg(container_memory_usage_bytes)"
       telemetry        = "metrics"
@@ -1129,6 +1346,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "container-memory"
+    position = 0
     name = "Container Memory Updated"
     unit = "bytes-iec"
 
@@ -1144,6 +1363,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name       = "A"
       expr       = "avg(container_memory_usage_bytes)"
       telemetry  = "metrics"
@@ -1167,6 +1387,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "spend-section"
+    position = 0
     name = "Spend at a Glance"
     visualization {
       type       = "section"
@@ -1175,6 +1397,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "total-spend"
+    position = 1
     name = "Total Spend"
     unit = ""
 
@@ -1190,6 +1414,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name       = "A"
       expr       = "sum(aws_cost_unblended_USD)"
       telemetry  = "metrics"
@@ -1198,6 +1423,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "cost-by-service"
+    position = 2
     name = "Cost by Service"
     unit = ""
 
@@ -1219,6 +1446,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name             = "A"
       expr             = "sum by (aws_service) (aws_cost_unblended_USD)"
       telemetry        = "metrics"
@@ -1266,6 +1494,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "total-spend"
+    position = 0
     name = "Total Spend"
     unit = ""
 
@@ -1281,6 +1511,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name       = "A"
       expr       = "sum(aws_cost_unblended_USD{aws_account_id=~\"$account\", aws_region=~\"$region\"})"
       telemetry  = "metrics"
@@ -1298,6 +1529,8 @@ resource "last9_dashboard" "test" {
   name   = "TF Test Bad Section"
 
   panel {
+    key = "bad-section"
+    position = 0
     name = "Bad Section"
 
     visualization {
@@ -1305,6 +1538,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name = "A"
       expr = "1"
     }
@@ -1320,6 +1554,8 @@ resource "last9_dashboard" "test" {
   name   = "TF Test Missing Layout"
 
   panel {
+    key = "stat-no-layout"
+    position = 0
     name = "stat no layout"
 
     visualization {
@@ -1327,6 +1563,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name = "A"
       expr = "1"
     }
@@ -1348,6 +1585,8 @@ resource "last9_dashboard" "test" {
   }
 
   panel {
+    key = "panel"
+    position = 0
     name = "p"
 
     layout {
@@ -1362,6 +1601,7 @@ resource "last9_dashboard" "test" {
     }
 
     query {
+      position = 0
       name = "A"
       expr = "1"
     }

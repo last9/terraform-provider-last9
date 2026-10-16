@@ -14,6 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **last9_scheduled_search_alert** - Preserve imported aggregate pipelines and validate explicit pipeline updates.
+- **last9_dashboard** - `panel` and `query` blocks are now sets and require a stable `key` (panel only) and a zero-based `position`, instead of relying on HCL list order.
+
+### Upgrade notes / BREAKING
+
+- **last9_dashboard** - Every existing `last9_dashboard` config must add `key`/`position` to each panel and `position` to each query before it will `validate`. The `SchemaVersion = 1` state upgrader migrates existing state automatically (using the prior API panel ID as `key` and prior list index as `position`), but the HCL itself must be updated to match or `terraform plan` will fail validation.
+
+  Before:
+
+  ```terraform
+  panel {
+    name = "Container Memory Usage"
+    # ...
+    query {
+      name = "A"
+      expr = "avg(container_memory_usage_bytes)"
+    }
+  }
+  ```
+
+  After:
+
+  ```terraform
+  panel {
+    key      = "container-memory" # stable identity; keep unchanged when editing/moving the panel
+    position = 0                  # zero-based order among panels; must be unique and contiguous from 0
+    name     = "Container Memory Usage"
+    # ...
+    query {
+      position = 0 # zero-based order among this panel's queries
+      name     = "A"
+      expr     = "avg(container_memory_usage_bytes)"
+    }
+  }
+  ```
 
 ## [0.6.0] - 2026-10-06
 

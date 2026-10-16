@@ -43,7 +43,11 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
+          verify: false
+
+      - name: Verify golangci-lint config
+        run: golangci-lint config verify --schema .github/golangci.v1.64.jsonschema.json
 
   unit-tests:
     name: Unit Tests (Go ${{ matrix.go-version }})
