@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -52,11 +51,6 @@ func TestReviewDashboardNativeJSONOmissionAndClear(t *testing.T) {
 			rawConfig, err := schema.JSONMapToStateValue(after, r.CoreConfigSchema())
 			if err != nil {
 				t.Fatal(err)
-			}
-			panel := dashboardPanelValues(d.Get("panel"))[0].(map[string]interface{})
-			omitted := dashboardJSONFieldOmitted(rawConfig, fmt.Sprintf("panel.%d.links_json", dashboardSetHash(panel)), d)
-			if omitted != (tc.name == "omitted") {
-				t.Fatalf("links omission detection = %t, want %t", omitted, tc.name == "omitted")
 			}
 			resourceConfig.CtyValue = rawConfig
 			diff, err := r.Diff(context.Background(), d.State(), resourceConfig, nil)

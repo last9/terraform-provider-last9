@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -60,43 +59,11 @@ func jsonStringsEqual(a, b string) bool {
 	return jsonValuesEqual(av, bv)
 }
 
-func suppressDashboardJSONDiff(key, old, next string, d *schema.ResourceData) bool {
-	if jsonStringsEqual(old, next) {
-		return true
-	}
-	if old == "" || next != "" {
-		return false
-	}
-	return dashboardJSONFieldOmitted(d.GetRawConfig(), key, d)
-}
-
-func dashboardJSONFieldOmitted(raw cty.Value, path string, d *schema.ResourceData) bool {
-	parts := strings.Split(path, ".")
-	if len(parts) == 1 {
-		return !dashboardRawStringConfigured(raw, parts[0])
-	}
-	if len(parts) < 3 || parts[0] != "panel" {
-		return false
-	}
-	hash, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return false
-	}
-	for _, value := range dashboardPanelValues(d.Get("panel")) {
-		panel, ok := value.(map[string]interface{})
-		if !ok || dashboardSetHash(panel) != hash {
-			continue
-		}
-		key, _ := dashboardPanelKey(panel)
-		rawPanel := dashboardRawPanels(raw)[key]
-		if len(parts) == 3 {
-			return !dashboardRawStringConfigured(rawPanel, parts[2])
-		}
-		if len(parts) == 5 && (parts[2] == "visualization" || parts[2] == "layout") {
-			return !dashboardRawStringConfigured(dashboardRawBlock(rawPanel, parts[2]), parts[4])
-		}
-	}
-	return false
+// suppressDashboardJSONDiff compares native JSON semantically. Omitted fields
+// need no handling here: the SDK emits no diff for an absent Optional+Computed
+// attribute, and restoreOmittedDashboardPanelFields plans them inside panels.
+func suppressDashboardJSONDiff(_, old, next string, _ *schema.ResourceData) bool {
+	return jsonStringsEqual(old, next)
 }
 
 // dashboardJSONStringIsEmpty reports whether a trimmed JSON string represents
