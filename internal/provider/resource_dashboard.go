@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -399,8 +400,11 @@ func resourceDashboard() *schema.Resource {
 				Type:       schema.TypeSet,
 				Set:        dashboardSetHash,
 				ConfigMode: schema.SchemaConfigModeBlock,
-				Required:   true,
-				MinItems:   1,
+				// Optional+Computed so CustomizeDiff can plan omitted
+				// computed fields; requireDashboardPanels keeps it required.
+				Optional: true,
+				Computed: true,
+				MinItems: 1,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"key": {
@@ -650,7 +654,157 @@ func validateDashboard(ctx context.Context, d *schema.ResourceDiff, m interface{
 	if err := clearEmptyDashboardMetadataDiff(d); err != nil {
 		return err
 	}
+	if err := requireDashboardPanels(d); err != nil {
+		return err
+	}
+	if err := restoreOmittedDashboardPanelFields(d); err != nil {
+		return err
+	}
 	return validateDashboardData(d)
+}
+
+// requireDashboardPanels enforces at least one panel block. panel is
+// Optional+Computed only so CustomizeDiff may plan it, and the SDK skips
+// MinItems when an optional block is absent.
+func requireDashboardPanels(d *schema.ResourceDiff) error {
+	raw := d.GetRawConfig()
+	if raw.IsNull() || !raw.IsKnown() {
+		return nil
+	}
+	panels := raw.GetAttr("panel")
+	if panels.IsKnown() && (panels.IsNull() || panels.LengthInt() == 0) {
+		return fmt.Errorf("at least one panel block is required")
+	}
+	return nil
+}
+
+// restoreOmittedDashboardPanelFields plans the prior value of every computed
+// panel attribute (server ids, imported native JSON, layout extras) that the
+// config omits, matching panels by key and queries by name. Terraform cannot
+// correlate set elements across the SDK's defaults, so it proposes omitted
+// Optional+Computed fields as blank, and the panel hash then differs from
+// state: without this every plan after import would erase them.
+func restoreOmittedDashboardPanelFields(d *schema.ResourceDiff) error {
+	if d.Id() == "" || !d.NewValueKnown("panel") {
+		return nil
+	}
+	rawPanels := dashboardRawPanels(d.GetRawConfig())
+	oldPanels, newPanels := d.GetChange("panel")
+	oldByKey := indexDashboardPanelsByKey(dashboardPanelValues(oldPanels))
+	if len(rawPanels) == 0 || len(oldByKey) == 0 {
+		return nil
+	}
+	panelResource := resourceDashboard().Schema["panel"].Elem.(*schema.Resource)
+	newValues := dashboardPanelValues(newPanels)
+	planned := make([]interface{}, 0, len(newValues))
+	restored := false
+	for _, value := range newValues {
+		panel, ok := value.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		key, _ := dashboardPanelKey(panel)
+		prior, hasPrior := oldByKey[key]
+		raw, hasRaw := rawPanels[key]
+		if !hasPrior || !hasRaw {
+			planned = append(planned, panel)
+			continue
+		}
+		merged, changed := restoreOmittedComputedFields(panelResource, panel, prior, raw)
+		planned = append(planned, merged)
+		restored = restored || changed
+	}
+	if !restored {
+		return nil
+	}
+	return d.SetNew("panel", planned)
+}
+
+// restoreOmittedComputedFields returns a copy of planned where every computed
+// attribute absent from raw config takes its prior value. Nested blocks are
+// rebuilt as fresh lists so the SDK rehashes their set elements.
+func restoreOmittedComputedFields(resource *schema.Resource, planned, prior map[string]interface{}, raw cty.Value) (map[string]interface{}, bool) {
+	out := make(map[string]interface{}, len(planned))
+	for name, value := range planned {
+		out[name] = value
+	}
+	changed := false
+	for name, field := range resource.Schema {
+		if _, ok := field.Elem.(*schema.Resource); ok {
+			blocks, blockChanged := restoreOmittedComputedBlocks(name, field, planned[name], prior[name], raw)
+			out[name] = blocks
+			changed = changed || blockChanged
+			continue
+		}
+		if !field.Computed {
+			continue
+		}
+		if _, configured := dashboardRawValue(raw, name); configured {
+			continue
+		}
+		if old, ok := prior[name]; ok && !reflect.DeepEqual(old, planned[name]) {
+			out[name] = old
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+func restoreOmittedComputedBlocks(name string, field *schema.Schema, planned, prior interface{}, raw cty.Value) ([]interface{}, bool) {
+	resource := field.Elem.(*schema.Resource)
+	priorBlocks := dashboardPanelValues(prior)
+	rawBlocks, _ := dashboardRawValue(raw, name)
+	out := make([]interface{}, 0, len(dashboardPanelValues(planned)))
+	changed := false
+	for _, value := range dashboardPanelValues(planned) {
+		block, ok := value.(map[string]interface{})
+		if !ok {
+			out = append(out, value)
+			continue
+		}
+		priorBlock := matchDashboardBlock(field, block, priorBlocks)
+		rawBlock := matchDashboardRawBlock(field, block, rawBlocks)
+		if priorBlock == nil || rawBlock == cty.NilVal {
+			priorBlock, rawBlock = map[string]interface{}{}, cty.NilVal
+		}
+		merged, blockChanged := restoreOmittedComputedFields(resource, block, priorBlock, rawBlock)
+		out = append(out, merged)
+		changed = changed || blockChanged
+	}
+	return out, changed
+}
+
+// matchDashboardBlock pairs a planned nested block with its prior value: the
+// only block of a MaxItems=1 block, otherwise the block with the same name.
+func matchDashboardBlock(field *schema.Schema, block map[string]interface{}, candidates []interface{}) map[string]interface{} {
+	name, named := block["name"].(string)
+	for _, candidate := range candidates {
+		prior, ok := candidate.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if field.MaxItems == 1 || (named && prior["name"] == name) {
+			return prior
+		}
+	}
+	return nil
+}
+
+func matchDashboardRawBlock(field *schema.Schema, block map[string]interface{}, raw cty.Value) cty.Value {
+	if raw == cty.NilVal || !raw.CanIterateElements() {
+		return cty.NilVal
+	}
+	name, named := block["name"].(string)
+	for iterator := raw.ElementIterator(); iterator.Next(); {
+		_, candidate := iterator.Element()
+		if field.MaxItems == 1 {
+			return candidate
+		}
+		if rawName, ok := dashboardRawString(candidate, "name"); named && ok && rawName == name {
+			return candidate
+		}
+	}
+	return cty.NilVal
 }
 
 func clearEmptyDashboardMetadataDiff(d *schema.ResourceDiff) error {
@@ -715,7 +869,7 @@ func dashboardRawString(raw cty.Value, field string) (string, bool) {
 }
 
 func dashboardRawValue(raw cty.Value, field string) (cty.Value, bool) {
-	if raw == cty.NilVal || raw.IsNull() || !raw.IsKnown() {
+	if raw == cty.NilVal || raw.IsNull() || !raw.IsKnown() || !raw.Type().IsObjectType() || !raw.Type().HasAttribute(field) {
 		return cty.NilVal, false
 	}
 	value := raw.GetAttr(field)

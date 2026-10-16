@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -112,6 +113,33 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 		"ts.layout.minH":      "",
 		"logs.logs_config":    nativeLifecycleLogsConfig,
 		"logs.field_override": "",
+	})
+}
+
+// panel is Optional+Computed so CustomizeDiff can plan it; config must still
+// declare at least one panel.
+func TestDashboardRequiresPanelBlock(t *testing.T) {
+	factory := func() (*schema.Provider, error) {
+		p := New()
+		p.ConfigureContextFunc = func(context.Context, *schema.ResourceData) (any, diag.Diagnostics) { return nil, nil }
+		return p, nil
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProviderFactories: map[string]func() (*schema.Provider, error){"last9": factory},
+		Steps: []resource.TestStep{{
+			Config: `provider "last9" {
+  org = "synthetic"
+  api_base_url = "http://localhost"
+}
+
+resource "last9_dashboard" "test" {
+  region = "us-east-1"
+  name = "No panels"
+}
+`,
+			PlanOnly:    true,
+			ExpectError: regexp.MustCompile("at least one panel block is required"),
+		}},
 	})
 }
 
