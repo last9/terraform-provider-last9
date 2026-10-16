@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,12 +67,16 @@ func suppressDashboardJSONDiff(_, old, next string, _ *schema.ResourceData) bool
 	return jsonStringsEqual(old, next)
 }
 
-// dashboardJSONStringIsEmpty reports whether a trimmed JSON string represents
-// an absent value. The API returns nothing for an empty array/object, so
-// state stores "" where config may hold "[]"/"{}"/"null"; without this they
-// never compare equal and every plan re-proposes the explicit clear.
+// dashboardJSONStringIsEmpty reports whether a JSON string represents an
+// absent value. The API returns nothing for an empty array/object, so state
+// stores "" where config may hold "[]"/"{}"/"null" in any formatting; without
+// this they never compare equal and every plan re-proposes the explicit clear.
 func dashboardJSONStringIsEmpty(s string) bool {
-	switch s {
+	var compact bytes.Buffer
+	if json.Compact(&compact, []byte(s)) == nil {
+		s = compact.String()
+	}
+	switch strings.TrimSpace(s) {
 	case "", "[]", "{}", "null":
 		return true
 	default:
