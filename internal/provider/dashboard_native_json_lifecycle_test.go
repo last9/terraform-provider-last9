@@ -31,36 +31,7 @@ const (
 // Each edit must reach the API and leave an empty plan, even though the API
 // returns nothing for empty values.
 func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
-	stored := nativeLifecycleSeed()
-	var puts []*client.Dashboard
-	api := reviewClient(t, func(w http.ResponseWriter, req *http.Request) {
-		switch {
-		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/dashboards/dash-1"):
-		case req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/dashboards/dash-1"):
-			var payload client.DashboardRequest
-			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-				t.Error(err)
-			}
-			puts = append(puts, payload.Dashboard)
-			stored = nativeLifecycleStore(t, payload.Dashboard)
-		case req.Method == http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-			return
-		default:
-			t.Errorf("unexpected dashboard request %s %s", req.Method, req.URL.Path)
-			http.NotFound(w, req)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: stored}); err != nil {
-			t.Error(err)
-		}
-	})
-	factory := func() (*schema.Provider, error) {
-		p := New()
-		p.ConfigureContextFunc = func(context.Context, *schema.ResourceData) (any, diag.Diagnostics) { return api, nil }
-		return p, nil
-	}
+	factory, puts := nativeLifecycleProvider(t)
 
 	clears := map[string]string{
 		"ts":        `links_json = "[]"` + "\n    data_links_json = \"[]\"\n    transformations_json = \"[]\"\n    field_overrides_json = \"[]\"",
@@ -92,10 +63,10 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 		},
 	})
 
-	if len(puts) != 3 {
-		t.Fatalf("expected rename, mapping edit, and clear updates, got %d", len(puts))
+	if len(*puts) != 3 {
+		t.Fatalf("expected rename, mapping edit, and clear updates, got %d", len(*puts))
 	}
-	renamed, edited, cleared := puts[0], puts[1], puts[2]
+	renamed, edited, cleared := (*puts)[0], (*puts)[1], (*puts)[2]
 	if renamed.Name != "Renamed" {
 		t.Errorf("rename update sent name %q", renamed.Name)
 	}
@@ -123,6 +94,58 @@ func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 		"ts.layout.minH":      "",
 		"logs.logs_config":    nativeLifecycleLogsConfig,
 		"logs.field_override": "",
+	})
+}
+
+// TestDashboardNativeJSONUnknownEditLifecycle edits imported native fields to
+// values another resource only knows after apply. Planning must keep those
+// configured unknowns instead of restoring the prior values as if omitted, so
+// the edit reaches the API in the same apply and the plan then settles.
+// Validation of those values waits until apply, where invalid ones still fail.
+func TestDashboardNativeJSONUnknownEditLifecycle(t *testing.T) {
+	factory, puts := nativeLifecycleProvider(t)
+
+	editedMappings := `[{"type":"value","value":"0.0","text":"DOWN"}]`
+	editedLinks := `[{"title":"Wiki","url":"https://example.test/wiki"}]`
+	deferred := func(links, mappings string) string {
+		return nativeLifecycleHCL("Imported", map[string]string{
+			"ts":       "links_json = terraform_data.native.output.links",
+			"mappings": "value_mappings_json = terraform_data.native.output.mappings",
+		}) + fmt.Sprintf(`
+resource "terraform_data" "native" {
+  input = {
+    links    = %q
+    mappings = %q
+  }
+}
+`, links, mappings)
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProviderFactories: map[string]func() (*schema.Provider, error){"last9": factory},
+		Steps: []resource.TestStep{
+			{
+				Config:             nativeLifecycleHCL("Imported", nil),
+				ResourceName:       "last9_dashboard.test",
+				ImportState:        true,
+				ImportStateId:      "us-east-1:dash-1",
+				ImportStatePersist: true,
+			},
+			{Config: deferred(editedLinks, editedMappings)},
+			{
+				Config:      deferred(editedLinks, `[{"type":"value","value":0,"text":"DOWN"}]`),
+				ExpectError: regexp.MustCompile(`value_mappings_json\[0\]\.value must be a JSON string`),
+			},
+		},
+	})
+
+	if len(*puts) != 1 {
+		t.Fatalf("expected one update applying the deferred edits, got %d", len(*puts))
+	}
+	assertNativeLifecycleFields(t, "deferred edit", (*puts)[0], map[string]string{
+		"ts.links":          editedLinks,
+		"ts.value_mappings": editedMappings,
+		"ts.data_links":     nativeLifecycleDataLinks,
+		"dashboard.links":   nativeLifecycleLinks,
 	})
 }
 
@@ -183,6 +206,43 @@ func assertNativeLifecycleFields(t *testing.T, label string, sent *client.Dashbo
 			t.Errorf("%s update sent %s = %q, want %q", label, field, got[field], value)
 		}
 	}
+}
+
+// nativeLifecycleProvider serves nativeLifecycleSeed through a fake API that
+// stores every update like the real one; it returns the updates it received.
+func nativeLifecycleProvider(t *testing.T) (func() (*schema.Provider, error), *[]*client.Dashboard) {
+	t.Helper()
+	stored := nativeLifecycleSeed()
+	puts := &[]*client.Dashboard{}
+	api := reviewClient(t, func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/dashboards/dash-1"):
+		case req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/dashboards/dash-1"):
+			var payload client.DashboardRequest
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Error(err)
+			}
+			*puts = append(*puts, payload.Dashboard)
+			stored = nativeLifecycleStore(t, payload.Dashboard)
+		case req.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		default:
+			t.Errorf("unexpected dashboard request %s %s", req.Method, req.URL.Path)
+			http.NotFound(w, req)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: stored}); err != nil {
+			t.Error(err)
+		}
+	})
+	factory := func() (*schema.Provider, error) {
+		p := New()
+		p.ConfigureContextFunc = func(context.Context, *schema.ResourceData) (any, diag.Diagnostics) { return api, nil }
+		return p, nil
+	}
+	return factory, puts
 }
 
 func nativeLifecycleSeed() *client.Dashboard {
