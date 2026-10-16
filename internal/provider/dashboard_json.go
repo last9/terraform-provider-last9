@@ -14,10 +14,8 @@ import (
 func dashboardJSONSchema(kind, description string) *schema.Schema {
 	return &schema.Schema{
 		Type: schema.TypeString, Optional: true, Computed: true,
-		Description: description + " Use jsonencode(); read/import preserves the native JSON.",
-		DiffSuppressFunc: func(_ string, old, next string, _ *schema.ResourceData) bool {
-			return jsonStringsEqual(old, next)
-		},
+		Description:      description + " Use jsonencode(); read/import preserves the native JSON.",
+		DiffSuppressFunc: suppressDashboardJSONDiff,
 		ValidateDiagFunc: func(value interface{}, path cty.Path) diag.Diagnostics {
 			if diagnostics := validateOptionalJSONString(value, path); diagnostics.HasError() {
 				return diagnostics

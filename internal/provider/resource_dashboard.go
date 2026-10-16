@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -56,6 +57,45 @@ func jsonStringsEqual(a, b string) bool {
 		return false
 	}
 	return jsonValuesEqual(av, bv)
+}
+
+func suppressDashboardJSONDiff(key, old, next string, d *schema.ResourceData) bool {
+	if jsonStringsEqual(old, next) {
+		return true
+	}
+	if old == "" || next != "" {
+		return false
+	}
+	return dashboardJSONFieldOmitted(d.GetRawConfig(), key, d)
+}
+
+func dashboardJSONFieldOmitted(raw cty.Value, path string, d *schema.ResourceData) bool {
+	parts := strings.Split(path, ".")
+	if len(parts) == 1 {
+		return !dashboardRawStringConfigured(raw, parts[0])
+	}
+	if len(parts) < 3 || parts[0] != "panel" {
+		return false
+	}
+	hash, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	for _, value := range dashboardPanelValues(d.Get("panel")) {
+		panel, ok := value.(map[string]interface{})
+		if !ok || dashboardSetHash(panel) != hash {
+			continue
+		}
+		key, _ := dashboardPanelKey(panel)
+		rawPanel := dashboardRawPanels(raw)[key]
+		if len(parts) == 3 {
+			return !dashboardRawStringConfigured(rawPanel, parts[2])
+		}
+		if len(parts) == 5 && (parts[2] == "visualization" || parts[2] == "layout") {
+			return !dashboardRawStringConfigured(dashboardRawBlock(rawPanel, parts[2]), parts[4])
+		}
+	}
+	return false
 }
 
 // dashboardJSONStringIsEmpty reports whether a trimmed JSON string represents
@@ -415,13 +455,11 @@ func resourceDashboard() *schema.Resource {
 									"w": {Type: schema.TypeInt, Required: true},
 									"h": {Type: schema.TypeInt, Required: true},
 									"extra_json": {
-										Type:        schema.TypeString,
-										Optional:    true,
-										Computed:    true,
-										Description: "Reserved for layout fields the API may add (e.g. minH, static, i). Round-tripped verbatim. Use jsonencode() if you need to set keys beyond x/y/w/h.",
-										DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
-											return jsonStringsEqual(old, new)
-										},
+										Type:             schema.TypeString,
+										Optional:         true,
+										Computed:         true,
+										Description:      "Reserved for layout fields the API may add (e.g. minH, static, i). Round-tripped verbatim. Use jsonencode() if you need to set keys beyond x/y/w/h.",
+										DiffSuppressFunc: suppressDashboardJSONDiff,
 										ValidateDiagFunc: validateOptionalJSONString,
 									},
 								},
@@ -624,6 +662,101 @@ func clearEmptyDashboardMetadataDiff(d *schema.ResourceDiff) error {
 		return nil
 	}
 	return d.Clear("metadata")
+}
+
+func dashboardRawPanels(raw cty.Value) map[string]cty.Value {
+	panels := dashboardRawCollection(raw, "panel")
+	if panels == cty.NilVal {
+		return nil
+	}
+	byKey := make(map[string]cty.Value)
+	iterator := panels.ElementIterator()
+	for iterator.Next() {
+		_, panel := iterator.Element()
+		if key, ok := dashboardRawString(panel, "key"); ok {
+			byKey[key] = panel
+		}
+	}
+	return byKey
+}
+
+func dashboardRawBlock(raw cty.Value, field string) cty.Value {
+	value := dashboardRawCollection(raw, field)
+	if value == cty.NilVal {
+		return cty.NilVal
+	}
+	iterator := value.ElementIterator()
+	if !iterator.Next() {
+		return cty.NilVal
+	}
+	_, block := iterator.Element()
+	return block
+}
+
+func dashboardRawCollection(raw cty.Value, field string) cty.Value {
+	value, ok := dashboardRawValue(raw, field)
+	if !ok || value.LengthInt() == 0 {
+		return cty.NilVal
+	}
+	return value
+}
+
+func dashboardRawStringConfigured(raw cty.Value, field string) bool {
+	_, ok := dashboardRawString(raw, field)
+	return ok
+}
+
+func dashboardRawString(raw cty.Value, field string) (string, bool) {
+	value, ok := dashboardRawValue(raw, field)
+	if !ok || value.Type() != cty.String {
+		return "", false
+	}
+	return value.AsString(), true
+}
+
+func dashboardRawValue(raw cty.Value, field string) (cty.Value, bool) {
+	if raw == cty.NilVal || raw.IsNull() || !raw.IsKnown() {
+		return cty.NilVal, false
+	}
+	value := raw.GetAttr(field)
+	return value, value.IsKnown() && !value.IsNull()
+}
+
+func applyConfiguredDashboardNativeFields(panels []*client.DashboardPanel, values []interface{}, rawPanels map[string]cty.Value) {
+	for i, raw := range orderByDashboardPosition(values) {
+		if i >= len(panels) || panels[i] == nil {
+			continue
+		}
+		panel, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := dashboardPanelKey(panel)
+		rawPanel := rawPanels[key]
+		for _, field := range []struct {
+			name string
+			to   *json.RawMessage
+		}{
+			{"field_overrides_json", &panels[i].FieldOverrides},
+			{"transformations_json", &panels[i].Transformations},
+			{"links_json", &panels[i].Links},
+			{"data_links_json", &panels[i].DataLinks},
+		} {
+			if value, configured := dashboardRawString(rawPanel, field.name); configured {
+				*field.to = json.RawMessage(value)
+			}
+		}
+		if panels[i].Visualization == nil {
+			continue
+		}
+		rawViz := dashboardRawBlock(rawPanel, "visualization")
+		if value, configured := dashboardRawString(rawViz, "logs_config_json"); configured {
+			panels[i].Visualization.LogsConfig = json.RawMessage(value)
+		}
+		if value, configured := dashboardRawString(rawViz, "value_mappings_json"); configured {
+			panels[i].Visualization.ValueMappings = json.RawMessage(value)
+		}
+	}
 }
 
 func validateDashboardData(d dashboardGetter) error {
@@ -891,8 +1024,21 @@ func resourceDashboardUpdate(ctx context.Context, d *schema.ResourceData, m inte
 		oldPanels, _ := d.GetChange("panel")
 		newValues := dashboardPanelValues(d.Get("panel"))
 		oldValues := dashboardPanelValues(oldPanels)
+		rawPanels := dashboardRawPanels(d.GetRawConfig())
+		applyConfiguredDashboardNativeFields(req.Dashboard.Panels, newValues, rawPanels)
 		preservePanelIDsByKey(req.Dashboard.Panels, newValues, oldValues)
-		preserveOmittedPanelFieldsByKey(req.Dashboard.Panels, newValues, oldValues)
+		preserveOmittedPanelFieldsByKey(req.Dashboard.Panels, newValues, oldValues, rawPanels)
+		if links, configured := dashboardRawString(d.GetRawConfig(), "links_json"); configured && strings.TrimSpace(links) != "" {
+			req.Dashboard.Links = json.RawMessage(links)
+		} else if d.HasChange("links_json") {
+			current, err := apiClient.GetDashboard(d.Id(), d.Get("region").(string))
+			if err != nil {
+				return diag.FromErr(fmt.Errorf("read dashboard before update: %w", err))
+			}
+			if current.Dashboard != nil {
+				req.Dashboard.Links = current.Dashboard.Links
+			}
+		}
 	}
 
 	if _, err := apiClient.UpdateDashboard(d.Id(), req); err != nil {
@@ -1087,7 +1233,7 @@ func preservePanelIDsByKey(panels []*client.DashboardPanel, newValues, oldValues
 // only restored when the new config omitted it entirely (produced an empty
 // value); explicit clears ("[]"/"{}") and explicit content edits already
 // produce a non-empty value and are left untouched.
-func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues, oldValues []interface{}) {
+func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues, oldValues []interface{}, rawPanels map[string]cty.Value) {
 	oldByKey := make(map[string]map[string]interface{}, len(oldValues))
 	for _, raw := range oldValues {
 		panel, ok := raw.(map[string]interface{})
@@ -1116,14 +1262,15 @@ func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues,
 		if !ok {
 			continue
 		}
+		rawPanel := rawPanels[key]
 
-		preserveOmittedJSONField(&panels[i].FieldOverrides, oldPanel["field_overrides_json"])
-		preserveOmittedJSONField(&panels[i].Transformations, oldPanel["transformations_json"])
-		preserveOmittedJSONField(&panels[i].Links, oldPanel["links_json"])
-		preserveOmittedJSONField(&panels[i].DataLinks, oldPanel["data_links_json"])
+		preserveOmittedJSONField(&panels[i].FieldOverrides, oldPanel["field_overrides_json"], dashboardRawStringConfigured(rawPanel, "field_overrides_json"))
+		preserveOmittedJSONField(&panels[i].Transformations, oldPanel["transformations_json"], dashboardRawStringConfigured(rawPanel, "transformations_json"))
+		preserveOmittedJSONField(&panels[i].Links, oldPanel["links_json"], dashboardRawStringConfigured(rawPanel, "links_json"))
+		preserveOmittedJSONField(&panels[i].DataLinks, oldPanel["data_links_json"], dashboardRawStringConfigured(rawPanel, "data_links_json"))
 		preserveOmittedStringField(&panels[i].DatasourceID, newPanel["datasource_id"], oldPanel["datasource_id"])
 		preserveOmittedStringField(&panels[i].Telemetry, newPanel["telemetry"], oldPanel["telemetry"])
-		preserveOmittedLayoutExtras(panels[i], firstDashboardMap(newPanel["layout"]), firstDashboardMap(oldPanel["layout"]))
+		preserveOmittedLayoutExtras(panels[i], firstDashboardMap(newPanel["layout"]), firstDashboardMap(oldPanel["layout"]), dashboardRawBlock(rawPanel, "layout"))
 
 		if panels[i].Visualization == nil {
 			continue
@@ -1133,8 +1280,9 @@ func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues,
 		if newViz == nil || oldViz == nil {
 			continue
 		}
-		preserveOmittedJSONField(&panels[i].Visualization.ValueMappings, oldViz["value_mappings_json"])
-		preserveOmittedJSONField(&panels[i].Visualization.LogsConfig, oldViz["logs_config_json"])
+		rawViz := dashboardRawBlock(rawPanel, "visualization")
+		preserveOmittedJSONField(&panels[i].Visualization.ValueMappings, oldViz["value_mappings_json"], dashboardRawStringConfigured(rawViz, "value_mappings_json"))
+		preserveOmittedJSONField(&panels[i].Visualization.LogsConfig, oldViz["logs_config_json"], dashboardRawStringConfigured(rawViz, "logs_config_json"))
 		if newTable, _ := newViz["table_config_json"].(string); strings.TrimSpace(newTable) == "" {
 			if old, _ := oldViz["table_config_json"].(string); strings.TrimSpace(old) != "" {
 				var blob interface{}
@@ -1149,8 +1297,8 @@ func preserveOmittedPanelFieldsByKey(panels []*client.DashboardPanel, newValues,
 // preserveOmittedJSONField restores oldRaw into *field when the new config
 // produced no value (empty field means the new config omitted this
 // optional/computed JSON attribute entirely).
-func preserveOmittedJSONField(field *json.RawMessage, oldRaw interface{}) {
-	if len(*field) > 0 {
+func preserveOmittedJSONField(field *json.RawMessage, oldRaw interface{}, configured bool) {
+	if configured || len(*field) > 0 {
 		return
 	}
 	if value := dashboardJSONValue(oldRaw); len(value) > 0 {
@@ -1171,11 +1319,11 @@ func preserveOmittedStringField(field *string, newRaw, oldRaw interface{}) {
 // static) that the API returned but the new config's layout block omitted,
 // without touching the configured x/y/w/h geometry or an explicit extra_json
 // edit/clear.
-func preserveOmittedLayoutExtras(panel *client.DashboardPanel, newLayout, oldLayout map[string]interface{}) {
+func preserveOmittedLayoutExtras(panel *client.DashboardPanel, newLayout, oldLayout map[string]interface{}, rawLayout cty.Value) {
 	if panel == nil || newLayout == nil || oldLayout == nil {
 		return
 	}
-	if extra, _ := newLayout["extra_json"].(string); strings.TrimSpace(extra) != "" {
+	if extra, _ := newLayout["extra_json"].(string); strings.TrimSpace(extra) != "" || dashboardRawStringConfigured(rawLayout, "extra_json") {
 		return
 	}
 	oldExtra, _ := oldLayout["extra_json"].(string)

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -10,6 +11,95 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/last9/terraform-provider-last9/internal/client"
 )
+
+func TestReviewDashboardNativeJSONOmissionAndClear(t *testing.T) {
+	const links = `[{"title":"Docs","url":"https://example.test"}]`
+	const overrides = `[{"matcher":{"type":"regex","value":"status.*"},"properties":{"hidden":true}}]`
+
+	config := func(native string) map[string]interface{} {
+		panel := map[string]interface{}{
+			"key": "alpha", "position": 0, "name": "Alpha",
+			"visualization": []interface{}{map[string]interface{}{"type": "section"}},
+		}
+		if native != "" {
+			panel["links_json"] = native
+			panel["field_overrides_json"] = native
+		}
+		return map[string]interface{}{
+			"region": "us-east-1", "name": "Before", "links_json": native,
+			"panel": []interface{}{panel},
+		}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "omitted", configured: "", want: links},
+		{name: "clear", configured: "[]", want: "[]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := resourceDashboard()
+			before := config(links)
+			before["panel"].([]interface{})[0].(map[string]interface{})["field_overrides_json"] = overrides
+			d := schema.TestResourceDataRaw(t, r.Schema, before)
+			d.SetId("synthetic")
+
+			after := config(tc.configured)
+			after["name"] = "After"
+			resourceConfig := terraform.NewResourceConfigRaw(after)
+			rawConfig, err := schema.JSONMapToStateValue(after, r.CoreConfigSchema())
+			if err != nil {
+				t.Fatal(err)
+			}
+			panel := dashboardPanelValues(d.Get("panel"))[0].(map[string]interface{})
+			omitted := dashboardJSONFieldOmitted(rawConfig, fmt.Sprintf("panel.%d.links_json", dashboardSetHash(panel)), d)
+			if omitted != (tc.name == "omitted") {
+				t.Fatalf("links omission detection = %t, want %t", omitted, tc.name == "omitted")
+			}
+			resourceConfig.CtyValue = rawConfig
+			diff, err := r.Diff(context.Background(), d.State(), resourceConfig, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			diff.RawConfig = resourceConfig.CtyValue
+
+			var sent *client.Dashboard
+			stored := &client.Dashboard{ID: "synthetic", Links: json.RawMessage(links)}
+			api := reviewClient(t, func(w http.ResponseWriter, req *http.Request) {
+				switch req.Method {
+				case http.MethodGet:
+					if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: stored}); err != nil {
+						t.Fatal(err)
+					}
+					return
+				case http.MethodPut:
+					var payload client.DashboardRequest
+					if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+						t.Fatal(err)
+					}
+					sent = payload.Dashboard
+					stored = sent
+				default:
+					t.Fatalf("unexpected %s", req.Method)
+				}
+				if err := json.NewEncoder(w).Encode(client.DashboardResponse{Dashboard: stored}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if _, diags := r.Apply(context.Background(), d.State(), diff, api); diags.HasError() {
+				t.Fatal(diags)
+			}
+			if got := string(sent.Links); got != tc.want {
+				t.Fatalf("dashboard links sent %q, want %q", got, tc.want)
+			}
+			if got := string(sent.Panels[0].Links); got != tc.want {
+				t.Fatalf("panel links sent %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestReviewNestedOmission(t *testing.T) {
 	for _, field := range []string{"logs_config_json", "extra_json"} {
