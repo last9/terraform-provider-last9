@@ -919,6 +919,11 @@ func TestDashboard_JSONStringsEqual(t *testing.T) {
 		{"", "{}", true},
 		{"", "null", true},
 		{"[]", "{}", true},
+		{"", "[ ]", true},
+		{"", "[\n  ]", true},
+		{"", "{ }", true},
+		{"", "\tnull\n", true},
+		{"", `[ "" ]`, false},
 		{`{"a":1}`, `not json`, false},
 	}
 	for _, c := range cases {

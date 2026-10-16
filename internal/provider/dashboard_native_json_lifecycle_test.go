@@ -33,11 +33,12 @@ const (
 func TestDashboardNativeJSONImportLifecycle(t *testing.T) {
 	factory, puts := nativeLifecycleProvider(t)
 
+	// Formatted empties (mappings, dashboard) must converge like compact ones.
 	clears := map[string]string{
 		"ts":        `links_json = "[]"` + "\n    data_links_json = \"[]\"\n    transformations_json = \"[]\"\n    field_overrides_json = \"[]\"",
 		"layout":    `extra_json = "{}"`,
-		"mappings":  `value_mappings_json = "[]"`,
-		"dashboard": `links_json = "[]"`,
+		"mappings":  `value_mappings_json = "[\n  ]"`,
+		"dashboard": `links_json = "[ ]"`,
 	}
 	editedMappings := `[{"type":"value","value":"0.0","text":"DOWN"}]`
 	resource.UnitTest(t, resource.TestCase{
