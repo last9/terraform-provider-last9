@@ -41,9 +41,10 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Must be built with a Go release >= go.mod's go directive.
+          version: v2.15.0
 
   unit-tests:
     name: Unit Tests (Go ${{ matrix.go-version }})
