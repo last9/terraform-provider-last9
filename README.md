@@ -261,7 +261,7 @@ cd terraform-provider-last9
 go build -o terraform-provider-last9
 ```
 
-Requires Go 1.21+.
+Requires Go 1.27.3+ (the first 1.27 release that blocks the compromised eMudhra intermediate CAs).
 
 ## Running Tests
 

@@ -1,29 +1,42 @@
+version: "2"
+
 run:
   timeout: 3m
-
-linters-settings:
-  errcheck:
-    exclude-functions:
-      - (*github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema.ResourceData).Set
-      - crypto/rand.Read
 
 linters:
   enable:
     - errcheck
     - staticcheck
     - unused
-
-issues:
-  exclude-rules:
-    - linters:
-        - errcheck
-      text: "DeleteKPI|AttachNotificationChannel"
-    - linters:
-        - staticcheck
-      text: "SA1019.*plugin.Debug"
-    - linters:
-        - staticcheck
-      text: "SA9003"
-    - linters:
-        - unused
-      path: resource_notification_channel_attachment.go
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema.ResourceData).Set
+        - crypto/rand.Read
+    staticcheck:
+      # v2 folds stylecheck and quickfix into staticcheck; keep the v1 check
+      # set (staticcheck + gosimple) so the upgrade adds no new findings.
+      checks:
+        - all
+        - -ST*
+        - -QF*
+  exclusions:
+    # v1 applied these default exclusions implicitly.
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        text: "DeleteKPI|AttachNotificationChannel"
+      - linters:
+          - staticcheck
+        text: "SA1019.*plugin.Debug"
+      - linters:
+          - staticcheck
+        text: "SA9003"
+      - linters:
+          - unused
+        path: resource_notification_channel_attachment.go
