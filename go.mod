@@ -1,6 +1,6 @@
 module github.com/last9/terraform-provider-last9
 
-go 1.24.0
+go 1.27.3
 
 require github.com/hashicorp/terraform-plugin-sdk/v2 v2.31.0
 
