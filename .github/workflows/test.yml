@@ -41,13 +41,10 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
-          verify: false
-
-      - name: Verify golangci-lint config
-        run: golangci-lint config verify --schema .github/golangci.v1.64.jsonschema.json
+          # Must be built with a Go release >= go.mod's go directive.
+          version: v2.15.0
 
   unit-tests:
     name: Unit Tests (Go ${{ matrix.go-version }})
@@ -55,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.22', '1.23', '1.24']
+        go-version: ['1.27.3']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -87,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.23', '1.24']
+        go-version: ['1.27.3']
     steps:
       - name: Checkout
         uses: actions/checkout@v4

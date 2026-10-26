@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   }
   ```
 
+### Security
+
+- Build with Go 1.27.3, which rejects TLS chains through the compromised eMudhra intermediate CAs regardless of the host's CA bundle.
+
 ## [0.6.0] - 2026-10-06
 
 ### Added
