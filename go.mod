@@ -1,8 +1,11 @@
 module github.com/last9/terraform-provider-last9
 
-go 1.24.0
+go 1.27.3
 
-require github.com/hashicorp/terraform-plugin-sdk/v2 v2.31.0
+require (
+	github.com/hashicorp/terraform-plugin-sdk/v2 v2.31.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/ProtonMail/go-crypto v0.0.0-20230828082145-3c4c8a2d2371 // indirect
