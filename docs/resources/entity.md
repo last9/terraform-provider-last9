@@ -72,6 +72,8 @@ resource "last9_entity" "api_alerts" {
 
 ~> **Note** A `notification_channels` block only reconciles the severity it names, and declaring one makes this resource **fully authoritative** for that severity's bindings — like any other Terraform-managed list. It will attach every channel you list, and detach anything else bound at that severity (added via the UI, `last9_alert.notification_channels`, or any other means) on the next apply. If a severity's channels are managed elsewhere, simply omit that severity's block here entirely — this resource never touches, reports on, or reconciles a severity it has no block for. To manage a severity but intentionally keep it empty, add a block with `channels = []`. `terraform import` seeds a block for every severity that currently has a live binding, so an imported entity starts out managing everything already bound to it.
 
+~> **Note** Removing a channel from a `notification_channels` block (or removing the block entirely) detaches it, which requires `delete_refresh_token` / `delete_token` to be configured on the provider — the same requirement as `terraform destroy`, even though attaching only needs the regular write token. Without it, `apply` fails with a 403 on the detach call, and because the state has already been updated to match the new config, a subsequent `plan` shows no changes even though the channel is still bound live. If this happens, add the delete token and re-apply (or use the Last9 UI) to clear the stale binding.
+
 ### Notify-Once (Suppress Repeat Notifications)
 
 ```terraform

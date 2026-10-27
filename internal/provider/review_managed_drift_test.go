@@ -40,7 +40,7 @@ func TestReviewManagedSeverityDrift(t *testing.T) {
 				fake.handler().ServeHTTP(w, r)
 			}))
 			defer server.Close()
-			c, err := client.NewClient(&client.Config{APIToken: "synthetic", Org: "test-org", BaseURL: server.URL})
+			c, err := client.NewClient(&client.Config{APIToken: "synthetic", DeleteToken: "synthetic", Org: "test-org", BaseURL: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

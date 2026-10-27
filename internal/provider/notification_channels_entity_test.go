@@ -51,7 +51,7 @@ func TestReconcileEntityNotificationChannels_FullyReconciles(t *testing.T) {
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+	c, err := client.NewClient(&client.Config{APIToken: "t", DeleteToken: "t", Org: "test-org", BaseURL: server.URL})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -88,7 +88,7 @@ func TestReconcileEntityNotificationChannels_SeverityRemovedEntirely(t *testing.
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+	c, err := client.NewClient(&client.Config{APIToken: "t", DeleteToken: "t", Org: "test-org", BaseURL: server.URL})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSetEntityNotificationChannels_PreservesConfiguredSpellingAndSurfacesDri
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+	c, err := client.NewClient(&client.Config{APIToken: "t", DeleteToken: "t", Org: "test-org", BaseURL: server.URL})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestReviewAttachedEntityLookupFailureDoesNotRewriteID(t *testing.T) {
 			}))
 			defer server.Close()
 
-			c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+			c, err := client.NewClient(&client.Config{APIToken: "t", DeleteToken: "t", Org: "test-org", BaseURL: server.URL})
 			if err != nil {
 				t.Fatalf("NewClient() error = %v", err)
 			}
@@ -303,7 +303,7 @@ func TestResourceEntityImportState_AdoptsLiveBindings(t *testing.T) {
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	c, err := client.NewClient(&client.Config{APIToken: "t", Org: "test-org", BaseURL: server.URL})
+	c, err := client.NewClient(&client.Config{APIToken: "t", DeleteToken: "t", Org: "test-org", BaseURL: server.URL})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
