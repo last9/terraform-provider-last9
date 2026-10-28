@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
+### Security
+
+- Build with Go 1.27.3, which rejects TLS chains through the compromised eMudhra intermediate CAs regardless of the host's CA bundle.
+
 ### Added
 
+- **last9_logs_to_metrics** / **last9_traces_to_metrics** — derive metrics from logs and traces.
 - **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.
+- **last9_alert** — `recurring_mute_schedule` block for weekly mute windows.
+- **last9_notification_channel** — `service_owner_handle` to mention Slack handles or emails on `slack` and `email` channels.
+- **last9_notification_channel** — `webhook_ca_certificate` to verify TLS for a `generic_webhook` against a custom CA.
+- **last9_cold_storage_bucket** — `storage_provider = "gcs"` for GCS buckets; `s3` stays the default.
 
 ### Changed
 
@@ -49,9 +60,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   }
   ```
 
-### Security
+### Fixed
 
-- Build with Go 1.27.3, which rejects TLS chains through the compromised eMudhra intermediate CAs regardless of the host's CA bundle.
+- **last9_dashboard** — JSON attributes keep integer precision and no longer show diffs for equivalent numeric spellings.
+
+### Upgrade notes
+
+- Pin `version = "~> 0.7"` so `terraform init` cannot select a provider built before Go 1.27.3; 0.7.0 is the first release that rejects the compromised eMudhra intermediates on any host.
 
 ## [0.6.0] - 2026-10-06
 
