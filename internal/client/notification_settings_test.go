@@ -168,12 +168,12 @@ func TestAttachNotificationSettings(t *testing.T) {
 // TestDetachNotificationSettings verifies the detach call: DELETE against
 // /notification_settings/{binding_row_id}/attach — the row's own id (as
 // returned by attach or listed via ListNotificationDestinations), NOT the
-// channel's master ID used to attach. Also asserts it uses the regular
-// write token, not the delete-scoped token: unlike DeleteEntity/DeleteAlert,
-// this endpoint sits behind normal write auth server-side (see
-// ValidateDeleteNotificationSetting in last9/last9, which checks entity
-// ownership, not token scope), so requiring a delete_refresh_token here
-// would be an unnecessary blast-radius increase.
+// channel's master ID used to attach. Also asserts it uses the delete-scoped
+// token, not the write token: the route is gated server-side on
+// authorization.RequirePermission(ResourceNotificationSetting, Delete)
+// (last9/last9 api/routes_v4.go), and the write scope's permission table has
+// no Delete entry for that resource, so a write-scoped token 403s here
+// regardless of entity ownership.
 func TestDetachNotificationSettings(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
@@ -183,11 +183,11 @@ func TestDetachNotificationSettings(t *testing.T) {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		// Configured with a distinct write token and delete token below;
-		// asserting on the write token here is what proves this call does
-		// NOT use the delete-scoped path (c.Delete would send "Bearer
-		// delete-token" instead).
-		if got := r.Header.Get("X-LAST9-API-TOKEN"); got != "Bearer write-token" {
-			t.Fatalf("expected write token (Bearer write-token), got: %s", got)
+		// asserting on the delete token here is what proves this call uses
+		// the delete-scoped path (c.DeleteWithWriteToken would send "Bearer
+		// write-token" instead).
+		if got := r.Header.Get("X-LAST9-API-TOKEN"); got != "Bearer delete-token" {
+			t.Fatalf("expected delete token (Bearer delete-token), got: %s", got)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
