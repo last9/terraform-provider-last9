@@ -108,17 +108,37 @@ resource "last9_entity" "api_alerts" {
 }
 ```
 
+### Adhoc Filter
+
+```terraform
+resource "last9_entity" "api_alerts" {
+  name         = "api-service"
+  type         = "service"
+  entity_class = "alert-manager"
+  external_ref = "api-service-prod"
+
+  # Common PromQL label filters applied across every indicator in this group.
+  adhoc_filter {
+    data_source = "prod-cluster"
+    labels = {
+      cluster = "production"
+      job     = "api-server"
+    }
+  }
+}
+```
+
 ## Schema
 
 ### Required
 
 - `name` (String) Alert group name.
 - `type` (String) Type (e.g., `service`, `component`).
-- `entity_class` (String) Entity classification. Must be set to `"alert-manager"` for alert groups to ensure visibility in Alert Studio UI.
-- `external_ref` (String) Unique identifier slug for this alert group.
+- `external_ref` (String) Unique identifier slug for this alert group. Changing it forces a new resource.
 
 ### Optional
 
+- `entity_class` (String) Entity classification. Set to `"alert-manager"` for alert groups to ensure visibility in Alert Studio UI.
 - `description` (String) Description of the alert group.
 - `data_source` (String) Metrics data source name.
 - `data_source_id` (String) Metrics data source ID.
@@ -126,7 +146,18 @@ resource "last9_entity" "api_alerts" {
 - `team` (String) Owning team.
 - `tier` (String) Tier (e.g., `critical`, `high`, `medium`, `low`).
 - `workspace` (String) Workspace.
-- `labels` (Map of String) Key-value labels for grouping and filtering.
+- `labels` (Map of String) Key-value labels for grouping and filtering, inherited across indicators.
+- `tags` (List of String) Tags for the alert group.
+- `adhoc_filter` (Block List, Max: 1) Common rule filters applied across all indicators. See [Adhoc Filter](#adhoc-filter) above. The block:
+  - `data_source` (String, Required) Data source for the adhoc filter.
+  - `labels` (Map of String, Required) PromQL label filter conditions.
+- `indicators` (Block List) Indicators (metrics) of the alert group. Sent only when the alert group is created; later changes are not applied. Each block:
+  - `name` (String, Required) Indicator name.
+  - `query` (String, Required) PromQL query.
+  - `unit` (String, Optional) Measurement unit.
+- `links` (Block List) Related links, such as runbooks. Each block:
+  - `name` (String, Required) Link name or title.
+  - `url` (String, Required) Link URL.
 - `notification_channels` (Block List) Notification channel bindings for this alert group, one block per severity. See [Notification Channels](#notification-channels) above. Each block:
   - `severity` (String, Required) `breach` or `threat`.
   - `channels` (List of String, Required) Notification channel IDs or names to bind at this severity.
