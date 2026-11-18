@@ -89,12 +89,14 @@ func TestResourceAlertOnNoDataLifecycle(t *testing.T) {
 			payload, err := json.Marshal(map[string]any{
 				"id": currentID, "rule_name": "CPU", "primary_indicator": "CPU-abc",
 				"expression_args": map[string]any{"CPU-abc": map[string]string{"id": "kpi-1"}},
-				"severity": "breach", "on_no_data": readValue,
+				"severity":        "breach", "on_no_data": readValue,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, _ = w.Write(payload)
+		case req.Method == http.MethodDelete && strings.HasSuffix(req.URL.Path, "/kpis/kpi-1"):
+			fmt.Fprint(w, `{}`)
 		default:
 			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 			http.NotFound(w, req)

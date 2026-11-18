@@ -100,8 +100,14 @@ resource "last9_alert" "service_down" {
   total_minutes = 5
 
   severity = "breach"
+
+  on_no_data = "alert"
 }
 ```
+
+With `on_no_data = "alert"`, Last9 raises a distinct **No data** alert after the query has returned no samples for twice the evaluation window (`total_minutes`). This also applies to a metric that has never reported: the timer starts when the rule is enabled. After samples return, the No data alert resolves through the normal cool-off, typically in about 11 minutes.
+
+Do not enable this for event-style metrics where no samples are normal. A query containing `or vector(0)` never appears absent, so No data detection cannot fire for it.
 
 ## Schema
 
@@ -125,6 +131,7 @@ resource "last9_alert" "service_down" {
 - `total_minutes` (Number) Evaluation window in minutes.
 - `is_disabled` (Boolean) Disable the alert. Default: `false`.
 - `group_timeseries_notifications` (Boolean) Group notifications for multiple time series. Default: `true`.
+- `on_no_data` (String) Set to `alert` to raise a distinct No data alert after twice `total_minutes` without samples. Omit to disable it.
 - `recurring_mute_schedule` (Block) Weekly mute windows for this alert. Omit the block to preserve an existing schedule. To clear a schedule, use `recurring_mute_schedule = []`; Terraform nested blocks cannot distinguish `null` from omission. See [Recurring Mute Schedule](#recurring-mute-schedule).
 - `notification_channels` (List of String, **Deprecated**) No longer does anything — kept only for backward compatibility with existing configurations. It makes no API calls: setting it does not attach a channel, and its value is never read back from the API. The Last9 API binds channels to an `(entity, severity)` pair with no per-alert-rule ownership, and two Terraform resources managing the same entity/severity cannot coexist safely (one's drift detection can't distinguish a channel the other legitimately attached from an unmanaged one). Manage notification channels on `last9_entity.notification_channels` instead.
 - `properties` (Block) Additional alert properties. See [Properties](#properties).

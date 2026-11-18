@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **last9_alert** - Optional `on_no_data = "alert"` support for metric rules.
 - **last9_alert** - `greater_than_eq` and `less_than_eq` threshold fields for inclusive comparison operators.
 
 ### Changed

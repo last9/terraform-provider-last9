@@ -215,6 +215,12 @@ func resourceAlert() *schema.Resource {
 				Default:     true,
 				Description: "Group timeseries notifications",
 			},
+			"on_no_data": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				Description:  "Raise a no-data alert when the query has no samples",
+				ValidateFunc: validation.StringInSlice([]string{"alert"}, false),
+			},
 			"recurring_mute_schedule": {
 				Type:        schema.TypeList,
 				Optional:    true,
@@ -326,6 +332,10 @@ func resourceAlertCreate(ctx context.Context, d *schema.ResourceData, m interfac
 	}
 	if schedule := expandRecurringMuteSchedule(d.Get("recurring_mute_schedule")); schedule != nil {
 		req.RecurringMuteSchedule = &client.RecurringMuteSchedulePatch{Schedule: schedule}
+	}
+	if value, ok := d.GetOk("on_no_data"); ok {
+		onNoData := value.(string)
+		req.OnNoData = &onNoData
 	}
 
 	// notification_channels is deprecated and a no-op (see schema
@@ -439,6 +449,11 @@ func resourceAlertRead(ctx context.Context, d *schema.ResourceData, m interface{
 	// Note: mute and is_disabled fields are intentionally not read from API
 	// The API may return different values than what was sent, causing drift
 	d.Set("group_timeseries_notifications", alert.GroupTimeseriesNotifications)
+	if alert.OnNoData == nil {
+		d.Set("on_no_data", "")
+	} else {
+		d.Set("on_no_data", *alert.OnNoData)
+	}
 	if alert.RecurringMuteSchedule == nil {
 		d.Set("recurring_mute_schedule", nil)
 	} else {
@@ -551,6 +566,10 @@ func resourceAlertUpdate(ctx context.Context, d *schema.ResourceData, m interfac
 
 	group := d.Get("group_timeseries_notifications").(bool)
 	req.GroupTimeseriesNotifications = &group
+	if value, ok := d.GetOk("on_no_data"); ok {
+		onNoData := value.(string)
+		req.OnNoData = &onNoData
+	}
 	// Always include notification_channels (PUT requires all fields)
 	channelsList := d.Get("notification_channels").([]interface{})
 	channels := make([]string, len(channelsList))

@@ -29,6 +29,8 @@ resource "last9_alert" "high_throughput" {
 
   severity = "breach"
 
+  on_no_data = "alert"
+
   properties {
     runbook_url = "https://wiki.example.com/runbooks/high-throughput"
     annotations = {
@@ -85,4 +87,3 @@ variable "entity_id" {
   type        = string
   description = "Entity ID to attach alerts to"
 }
-
