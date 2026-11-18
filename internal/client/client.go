@@ -596,6 +596,7 @@ type Alert struct {
 	IsDisabled                   bool                   `json:"is_disabled"`
 	Properties                   AlertProperties        `json:"properties"`
 	GroupTimeseriesNotifications bool                   `json:"group_timeseries_notifications"`
+	OnNoData                     *string                `json:"on_no_data"`
 	NotificationChannels         []string               `json:"notification_channels,omitempty"`
 	RecurringMuteSchedule        *RecurringMuteSchedule `json:"recurring_mute_schedule,omitempty"`
 
@@ -647,6 +648,7 @@ type AlertCreateRequest struct {
 	IsDisabled                   bool                        `json:"is_disabled"`
 	Properties                   AlertProperties             `json:"properties"`
 	GroupTimeseriesNotifications bool                        `json:"group_timeseries_notifications"`
+	OnNoData                     *string                     `json:"on_no_data,omitempty"`
 	MuteUntil                    int                         `json:"mute_until"`
 	ExpressionArgs               map[string]interface{}      `json:"expression_args"`
 	NotificationChannels         []string                    `json:"notification_channels,omitempty"`
@@ -664,6 +666,7 @@ type AlertUpdateRequest struct {
 	IsDisabled                   *bool                       `json:"is_disabled,omitempty"`
 	Properties                   *AlertProperties            `json:"properties,omitempty"`
 	GroupTimeseriesNotifications *bool                       `json:"group_timeseries_notifications,omitempty"`
+	OnNoData                     *string                     `json:"on_no_data,omitempty"`
 	MuteUntil                    *int                        `json:"mute_until,omitempty"`
 	ExpressionArgs               map[string]interface{}      `json:"expression_args,omitempty"`
 	NotificationChannels         []string                    `json:"notification_channels,omitempty"`
